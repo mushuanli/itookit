@@ -21,7 +21,7 @@ const TAURI_SHIM = `<script>
   let nextCallback = 0;
   const invoke = async (cmd, args) => {
     const input = args ?? {};
-    if (cmd === 'fs_read_file' && typeof input.path === 'string' && fileCache.has(input.path)) return fileCache.get(input.path);
+    if (cmd === 'fs_read_file' && typeof input.path === 'string' && fileCache.has(input.path)) return new Uint8Array(fileCache.get(input.path)).buffer;
     const response = await fetch('/__tauri/invoke', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ cmd, args: input }),
@@ -34,6 +34,7 @@ const TAURI_SHIM = `<script>
       return result.entries;
     }
     if (/^(fs_write_file|fs_append_file|fs_remove|fs_rename|fs_mkdir|directory_io)$/.test(cmd)) fileCache.clear();
+    if (cmd === 'fs_read_file' || cmd === 'directory_read_file') return result == null ? null : new Uint8Array(result).buffer;
     return result;
   };
   window.__TAURI_INTERNALS__ = {
@@ -220,6 +221,9 @@ export class HttpUiServer {
             case 'directory_open': return this.directoryOpen(String(args.path));
             case 'directory_close': this.scopes.delete(String(args.id)); return null;
             case 'directory_io': return this.directoryIo(args);
+            case 'directory_read_file':
+                try { return await this.directoryIo({ ...args, operation: 'read' }); }
+                catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
             case 'plugin:dialog|open':
             case 'plugin:dialog|save': return null;
             case 'plugin:dialog|ask':

@@ -19,3 +19,12 @@ it('preserves the native link type for an individual stat', async () => {
         is_directory: false, is_symbolic_link: true, is_file: false }) } });
     expect(await new TauriFsOps().stat('/root/link')).toMatchObject({ isSymbolicLink: true, isFile: false });
 });
+
+it('keeps the original binary IPC buffer and missing-file behavior', async () => {
+    const bytes = new Uint8Array([0, 128, 255]).buffer;
+    const invoke = vi.fn(async () => bytes);
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: { invoke } });
+    expect(await new TauriFsOps().readFile('/file')).toBe(bytes);
+    invoke.mockRejectedValueOnce(new Error('missing'));
+    expect(await new TauriFsOps().readFile('/missing')).toBeNull();
+});

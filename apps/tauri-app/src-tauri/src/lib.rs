@@ -13,6 +13,7 @@ mod profile_config;
 mod sidecar;
 mod directory_boundary;
 mod scoped_fs;
+mod fs_commands;
 mod scoped_directory;
 pub mod diagnostics;
 
@@ -42,6 +43,7 @@ fn read_settings(config_dir: &PathBuf) -> MindosSettings {
 
 // ── Path resolution ────────────────────────────────────────────────────────────
 
+#[derive(Clone)]
 pub(crate) struct AppPaths {
     /// Config dir: $XDG_CONFIG_HOME/mindos or ~/.config/mindos. mindos.json lives here.
     /// Deliberately separate from the data root — ~/.mindos may hold unrelated
@@ -200,29 +202,6 @@ fn resolve_home_from_cli() -> Option<PathBuf> {
     None
 }
 
-// ── FS commands — bypass plugin-fs scope (dotfiles, NFS, symlinks) ────────────
-//
-// Tauri's plugin-fs uses glob crate with require_literal_leading_dot=true,
-// so `path/**` never matches `path/.hidden`. We expose our own FS commands
-// and enforce path security ourselves: every operation must be under
-// mindos_dir or home_dir (resolved without following symlinks via normalize_path).
-
-#[derive(serde::Serialize)]
-struct FsStatResult {
-    size:         u64,
-    mtime_ms:     i64,
-    birthtime_ms: i64,
-    is_directory: bool,
-    is_symbolic_link: bool,
-    is_file: bool,
-}
-
-#[derive(serde::Serialize)]
-struct FsDirEntry {
-    name:         String,
-    is_directory: bool,
-}
-
 /// Normalize a path (resolve `..` and `.`) without requiring it to exist.
 /// Prevents directory traversal: `/allowed/dir/../../../etc/passwd` → `/etc/passwd`.
 fn normalize_path(path: &Path) -> PathBuf {
@@ -240,118 +219,6 @@ fn normalize_path(path: &Path) -> PathBuf {
 pub(crate) fn is_allowed(path: &Path, paths: &AppPaths) -> bool {
     let norm = normalize_path(path);
     norm.starts_with(&paths.root_dir) || norm.starts_with(&paths.home_dir)
-}
-
-#[tauri::command]
-fn fs_stat(path: String, state: State<AppPaths>) -> Option<FsStatResult> {
-    stat_one(Path::new(&path), &state)
-}
-
-/// One IPC for many stats. The VFS capability check walks every path prefix and issues the segment
-/// checks concurrently; without this each segment would be its own `fs_stat` round trip.
-#[tauri::command]
-fn fs_stat_many(paths: Vec<String>, state: State<AppPaths>) -> Vec<Option<FsStatResult>> {
-    paths.iter().map(|path| stat_one(Path::new(path), &state)).collect()
-}
-
-fn stat_one(p: &Path, paths: &AppPaths) -> Option<FsStatResult> {
-    if !is_allowed(p, paths) { return None; }
-    let m = std::fs::symlink_metadata(p).ok()?;
-    let ms = |t: std::time::SystemTime| {
-        t.duration_since(std::time::UNIX_EPOCH).ok()
-            .map(|d| d.as_millis() as i64).unwrap_or(0)
-    };
-    Some(FsStatResult {
-        size:         m.len(),
-        mtime_ms:     m.modified().ok().map(ms).unwrap_or(0),
-        birthtime_ms: m.created().ok().map(ms).unwrap_or(0),
-        is_directory: m.is_dir(),
-        is_symbolic_link: m.file_type().is_symlink(),
-        is_file: m.is_file(),
-    })
-}
-
-#[tauri::command]
-fn fs_mkdir(path: String, state: State<AppPaths>) -> Result<(), String> {
-    let p = PathBuf::from(&path);
-    if !is_allowed(&p, &state) { return Err(format!("path not allowed: {path}")); }
-    std::fs::create_dir_all(&p).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn fs_read_file(path: String, state: State<AppPaths>) -> Result<Vec<u8>, String> {
-    let p = PathBuf::from(&path);
-    if !is_allowed(&p, &state) { return Err(format!("path not allowed: {path}")); }
-    std::fs::read(&p).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn fs_write_file(path: String, data: Vec<u8>, state: State<AppPaths>) -> Result<(), String> {
-    let p = PathBuf::from(&path);
-    if !is_allowed(&p, &state) { return Err(format!("path not allowed: {path}")); }
-    if let Some(parent) = p.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    atomic_file::write(&p, &data).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn fs_append_file(path: String, data: Vec<u8>, state: State<AppPaths>) -> Result<(), String> {
-    let p = PathBuf::from(&path);
-    if !is_allowed(&p, &state) { return Err(format!("path not allowed: {path}")); }
-    if let Some(parent) = p.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    use std::io::Write;
-    let mut f = std::fs::OpenOptions::new().append(true).create(true).open(&p)
-        .map_err(|e| e.to_string())?;
-    f.write_all(&data).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn fs_read_dir(path: String, state: State<AppPaths>) -> Result<Vec<FsDirEntry>, String> {
-    let p = PathBuf::from(&path);
-    if !is_allowed(&p, &state) { return Err(format!("path not allowed: {path}")); }
-    let iter = std::fs::read_dir(&p).map_err(|e| e.to_string())?;
-    let mut out = Vec::new();
-    for entry in iter.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let is_directory = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        out.push(FsDirEntry { name, is_directory });
-    }
-    Ok(out)
-}
-
-#[tauri::command]
-fn fs_rename(from: String, to: String, state: State<AppPaths>) -> Result<(), String> {
-    let (fp, tp) = (PathBuf::from(&from), PathBuf::from(&to));
-    if !is_allowed(&fp, &state) || !is_allowed(&tp, &state) {
-        return Err("path not allowed".into());
-    }
-    std::fs::rename(&fp, &tp).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn fs_remove(path: String, recursive: bool, state: State<AppPaths>) -> Result<(), String> {
-    let p = PathBuf::from(&path);
-    if !is_allowed(&p, &state) { return Err(format!("path not allowed: {path}")); }
-    let meta = match std::fs::metadata(&p) {
-        Ok(m) => m,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e.to_string()),
-    };
-    if meta.is_dir() {
-        if recursive { std::fs::remove_dir_all(&p) } else { std::fs::remove_dir(&p) }
-    } else {
-        std::fs::remove_file(&p)
-    }
-    .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn fs_exists(path: String, state: State<AppPaths>) -> bool {
-    let p = PathBuf::from(&path);
-    is_allowed(&p, &state) && p.exists()
 }
 
 // ── Other commands ─────────────────────────────────────────────────────────────
@@ -701,6 +568,7 @@ pub fn run() {
             scoped_fs::directory_close,
             scoped_fs::directory_stat_many,
             scoped_fs::directory_read_range,
+            scoped_fs::directory_read_file,
             scoped_fs::directory_io,
             sidecar::sidecar_open_database,
             sidecar::sidecar_database_execute,
@@ -717,16 +585,16 @@ pub fn run() {
             get_current_dir,
             get_app_data_dir,
             get_app_config_dir,
-            fs_stat,
-            fs_stat_many,
-            fs_mkdir,
-            fs_read_file,
-            fs_write_file,
-            fs_append_file,
-            fs_read_dir,
-            fs_rename,
-            fs_remove,
-            fs_exists,
+            fs_commands::fs_stat,
+            fs_commands::fs_stat_many,
+            fs_commands::fs_mkdir,
+            fs_commands::fs_read_file,
+            fs_commands::fs_write_file,
+            fs_commands::fs_append_file,
+            fs_commands::fs_read_dir,
+            fs_commands::fs_rename,
+            fs_commands::fs_remove,
+            fs_commands::fs_exists,
             // Native search commands for INativeShell
             native_capabilities,
             search_ripgrep,
@@ -752,30 +620,4 @@ pub fn run() {
         tauri::RunEvent::Exit => { app.state::<mcp_process::MCPProcesses>().shutdown(); diagnostics::clean_exit(); },
         _ => {},
     });
-}
-
-#[cfg(all(test, unix))]
-mod stat_type_tests {
-    use super::*;
-
-    #[test]
-    fn reports_links_without_following_them() {
-        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("mindos-stat-{}-{stamp}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
-        let paths = AppPaths { config_dir: root.clone(), root_dir: root.clone(), home_dir: root.clone(), root_source: RootSource::Default, home_source: HomeSource::ProcessCwd };
-        let file = root.join("file");
-        std::fs::write(&file, b"content").unwrap();
-        for (name, target) in [("file-link", file.clone()), ("dir-link", root.clone()), ("dangling", root.join("missing"))] {
-            let link = root.join(name);
-            std::os::unix::fs::symlink(target, &link).unwrap();
-            let stat = stat_one(&link, &paths).unwrap();
-            assert!(stat.is_symbolic_link);
-            assert!(!stat.is_file && !stat.is_directory);
-        }
-        let regular = stat_one(&file, &paths).unwrap();
-        assert!(regular.is_file && !regular.is_symbolic_link);
-        assert!(stat_one(&root.join("missing"), &paths).is_none());
-        std::fs::remove_dir_all(root).unwrap();
-    }
 }

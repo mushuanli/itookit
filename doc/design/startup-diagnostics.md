@@ -144,3 +144,37 @@ durable-kernel 的 `taskEntries`（`listTasks`/`listTaskIds` 共用）改为：�
 确定性回归：Kernel Task 分页保序/固定上界/当前状态与损坏索引拒绝；Session 摘要不加载历史并观察后续修改；真实 BetterSqlite/Node SQLite 的 120 条记录取 3 条只返回 3 条正文，同时保留 total=120；Tauri 测试验证一条 transaction-scoped select。尚未重新执行桌面启动耗时验收，不宣称 IPC 或耗时下降百分比。
 
 后续阶段仍需独立设计和验证：Session 目录分页投影、历史窗口加载、可靠的恢复候选索引及稳定 ID 存储迁移。本轮没有将恢复推迟到用户点击，也没有减少 authority、租约或 journal 核对。
+
+### 2026-09-27 第六轮：项目文件正文优先与按需导航
+
+项目文件此前按 `ProjectNavigation.sync → 展开项目/文件根 → 文件类型与正文 → 编辑器 → selectPath` 串行等待。现在先通过项目文件视图校验类型、读取正文并创建编辑器，再后台同步导航与定位；`openResource` 的完成表示文件内容已就绪，不再保证侧栏定位已经结束。`ProjectSessions.navigation({ includeSessions: false })` 用于项目文件导航及其刷新，跳过会话摘要和家族计算；默认调用仍返回完整组织快照。文件类型检查使用可选 `getNodeType`，不支持的驱动回退 `getNode`，内容仍由原文件视图读取，保留授权及 SeqFile 表示语义。
+
+启动只恢复项目/会话分组及 Flow 库的展开，不恢复历史项目文件分支；恢复深层文件路由时，正文先打开，侧栏随后仅展开定位需要的祖先。后台导航串行执行，路由切换使旧查询/选择失效，销毁时等待在途任务后释放资源。`VFSUIShell.selectPath` 采用选择版本，慢目录返回后不能发出过期的选中事件。
+
+新增 `projectFile.source`、`projectFile.type`、`projectFile.read`、`projectFile.editor`、`projectFile.navigation` 分段诊断。回归位于 `packages/app-shell/tests/project-navigation-reads.test.ts`（历史文件展开不打开项目目录、导航被阻塞时正文先就绪、文件导航不读会话摘要），以及 `packages/vfs-ui/tests/06-browser-navigation.test.ts`（慢祖先枚举后丢弃过期选择）。真实项目 UI 与启动路由测试继续覆盖编辑、保存、重命名及旧链接恢复。
+
+边界：目录列举仍读取当前目录的全部直接子项，尚未实现分页；正文仍整文件读取与解码。此轮减少首屏前置工作，并把目录导航移出正文等待链，不代表单次目录列举或大文件渲染已经加速。桌面实际耗时需结合新增分段日志复测。
+
+### 2026-09-27 第七轮：导航取消与保存边界
+
+`WorkspaceController.setVisible?` 由 shell 在 nav 切换时通知缓存工作区；启动尚未完成的工作区也会在注册后检查当前可见目标。项目工作台隐藏时取消视图加载、暂停刷新计时器和侧栏读取，返回时恢复未完成的目标并刷新；通用文件工作台也暂停侧栏、丢弃过期正文并在返回时重新加载。`EngineAdapter` / `SourceAdapter` 在隐藏期间不启动事件触发的目录读取，过期读结果不覆盖恢复后的状态。该边界不停止 Kernel、LLM 执行或持久化任务。
+
+项目工作台每次 `openResource` 入队前立即取消上一代加载。队列里的中间选择直接跳过；`ViewLoad.read` 允许新目标不等待旧正文读取或编辑器工厂返回。已经发出的、不可中断的底层操作仍会完成，旧挂载/文件上下文等到在途读取与工厂收尾后才释放；应用销毁会等待这些清理。通用文件编辑器使用独立 DOM 挂载点，迟到的旧编辑器销毁不能清空新编辑器。
+
+`IEditor.flushPendingSave?` 是独立保存能力，隐藏工作区时调用。MDX 只保存 dirty 内容，并等待已有保存完成；保存失败时保留 dirty、DOM、事件和文件上下文，`destroy` 拒绝，用户可返回原编辑器重试。项目工作台只有在编辑器成功销毁后才清空活动状态和释放文件视图。取消信号不传给写入。当前保障为保留内存中的原编辑器，不是新增跨进程崩溃恢复草稿。
+
+回归：`session-workbench.test.ts` 覆盖旧工厂阻塞时打开最新 Session、跳过中间目标、隐藏/恢复及保存失败保留能力；`editor-visibility.test.ts` 覆盖通用文件隐藏读与迟到工厂隔离；`bootstrap-navigation-cleanup.test.ts` 覆盖 nav 可见性通知；`06-browser-navigation.test.ts` 覆盖隐藏期间零目录/节点读取；`editor-save-lifecycle.test.ts` 使用真实 MDX 验证失败保留与重试、未修改不写盘。
+
+限制：这是视图任务取消与分阶段停止，不是强制中止 SQLite 事务或原生文件系统调用。已进入的编辑器工厂也可能继续内部初始化，最终结果会被回收；目录首次加载仍未分页，大文件仍需整文件读取。
+
+### 2026-09-27 第八轮：源码分流与原始字节读取
+
+针对 WebKitGTK 录制中的 `pnpm-lock.yaml` 被默认 Markdown 预览解析，通用文件页、项目文件和 Session 文件现在统一传入 `contentFormat`。`fileContentFormat` 根据文件注册表保留 `.md/.markdown/.mdx` 及 `.prj/.mind/.anki/.email/.private` 等 Markdown 文档；其他扩展名和无扩展名文件走可编辑源码。专用编辑器选择仍由原 resolver 决定。默认 MDX 工厂不再覆盖显式的 edit 模式；源码模式只加载核心编辑、标题栏和自动保存，不启用 Markdown 语言、预览和任务等插件，禁用预览切换，打印通过文本节点生成，避免把源码当 HTML。只读能力仍取自文件视图。
+
+超过 256 KiB UTF-8、5000 行或单行 10000 UTF-16 单元的 Markdown 默认先打开源码，显示提示，用户仍可主动切换阅读模式。大文档源码首次打开不启用 CodeMirror Markdown 语法分析。此为集中定义的初始阈值，不是 300 ms 延迟保证；主动预览仍使用现有主线程解析，并未实现 Worker 或任意长任务的中途抢占。
+
+任务插件在整篇文档不存在 `[ ]/[x]/[X]` 候选时直接跳过额外 lexer；有候选时保留原 AST 定位，不采用容易误判代码块、表格和嵌套结构的逐行替换。行号查询改为一次扫描行首偏移，再二分查找。完整渲染耗时达到 50 ms 时输出 `[MDX render]`，分别记录 beforeParse、parse、afterRender、DOM 注入、插件后处理与总耗时；这里只记录字符数和时长，不记录正文。DOM 注入计时不等于最终布局与绘制耗时。
+
+桌面普通文件命令集中于 `apps/tauri-app/src-tauri/src/fs_commands.rs`，由 lib.rs 注册；`fs_stat/fs_stat_many/fs_read_file/fs_read_dir/fs_exists` 改为 async 命令并使用 `spawn_blocking`；`fs_read_file` 直接返回 Tauri 原始字节响应。新增 `directory_read_file` 在原 grant 与路径约束下读取，返回原始字节，缺失文件返回 null；`ScopedFsOps.readFile` 使用此命令。HTTP 宿主保持 JSON 传输，在注入的兼容桥里将完整文件响应和预取缓存转换成同样的 ArrayBuffer；新增目录读取命令复用原 grant 校验。旧 `directory_io` 其他操作、范围读取、写入以及跨进程 journal 检查保持原协议。没有引入权限前缀缓存或任意整文件大小上限。
+
+回归覆盖实际仓库 lockfile 的零 Markdown parse、源码编辑保存与只读状态、文档别名、阈值、任务分析跳过与表格偏移、字节完整性、空文件/缺失文件、越界/符号链接/撤销 grant，以及读取运行在线程池。涉及 Rust 与 TS IPC 的变更需要重启并重建桌面宿主，只有前端热更新不足以验证。

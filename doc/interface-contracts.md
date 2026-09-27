@@ -110,7 +110,7 @@
 |---|---|---|
 | `IChatInputPresenter` | `setLoading()/setConfig()/getConfig()/restoreInput()/focus()` | `ChatInput` |
 | `IHistoryPresenter` | `renderFull()/processEvent()/scrollToBottom()/getSessionElement()` | `HistoryView` |
-| `IEditor`（抽象类） | `init()/destroy()/getText()/setText()/setTitle()/updateNodeId?()` | `MDxEditor`、`FlowsEditor`、`LLMWorkspaceEditor` |
+| `IEditor`（抽象类） | `init()/destroy()/getText()/setText()/setTitle()/updateNodeId?()/flushPendingSave?()` | `MDxEditor`、`FlowsEditor`、`LLMWorkspaceEditor` |
 | `IStreamingController` | `enterStreamingMode()/exitStreamingMode()` | `HistoryView`（经 `StreamController`） |
 | `ICollapseManager` | `toggleSessionCollapse()/setAllCollapsed()/toggleAllFold()` | `HistoryView`（经 `CollapseController`） |
 | `INavigationPresenter` | `toggle()/update()` | `FloatingNavPanel` |
@@ -125,3 +125,10 @@
 ## Tool / Skill / MCP 能力配置
 
 `ILLMManagementService` 的 `testMCPServer`、`readMCPResource`、`getMCPPrompt` 由 LLMDeviceDriver 实现，VFSAgentService 转发给设置 UI。`SessionCapabilityScope.resolveMCPToolIds` 经 app-core 注入 AgentResolver 与 Harness/Flow 提交层；最终授权固定在 Task 输入。`ToolExecutionContext.onProgress` 与 `INativeShell.exec` 的 `onOutput` 连接进度生产者和 History 投影。详细语义与验证见 [能力配置与执行](./design/tool-skill-mcp-capabilities.md)。
+
+
+### 文件编辑展示与读取
+
+`EditorOptions.contentFormat` 区分 `markdown` 与 `text`。AppShell 根据统一文件注册表声明文档别名；默认编辑器将其他文件视为源码，保留编辑与保存能力，禁止 Markdown 预览。大 Markdown 默认源码模式，但仍允许用户显式预览。源码策略不改变 `readOnly` 或文件视图授权。
+
+桌面 `fs_read_file` 和 `directory_read_file` 使用 Tauri 原始 `ArrayBuffer` 响应；后者缺失文件返回 `null`，越界、符号链接或已关闭 grant 仍拒绝访问。旧的完整文件 JSON 数字数组不再是这两个客户端入口的协议。

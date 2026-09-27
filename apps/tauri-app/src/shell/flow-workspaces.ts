@@ -116,8 +116,8 @@ export class TauriFlowWorkspaces implements FlowWorkspaceManager {
             if (value) claimed.add(parseSaved(value).id);
         }
         for (const entry of candidates) {
-            const bytes = await invoke<number[]>('fs_read_file', { path: `${this.parent}/.intents/${entry.name}` });
-            const saved = parseSaved(JSON.parse(new TextDecoder().decode(new Uint8Array(bytes))));
+            const bytes = await invoke<ArrayBuffer>('fs_read_file', { path: `${this.parent}/.intents/${entry.name}` });
+            const saved = parseSaved(JSON.parse(new TextDecoder().decode(bytes)));
             if (saved.grant.sessionId !== sessionId || this.preparing.has(saved.id) || claimed.has(saved.id)) continue;
             if (entry.name !== `${saved.id}.json`) throw new Error('Workspace intent identity does not match its filename');
             await this.validate(sessionId, { ...saved, grant: { ...saved.grant } }).catch(error => {

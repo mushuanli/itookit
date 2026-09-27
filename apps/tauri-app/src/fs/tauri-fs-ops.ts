@@ -67,8 +67,7 @@ export class TauriFsOps implements IFsOps {
 
     async readFile(p: string): Promise<ArrayBuffer | null> {
         try {
-            const bytes = await invoke<number[]>('fs_read_file', { path: p });
-            return new Uint8Array(bytes).buffer as ArrayBuffer;
+            return await invoke<ArrayBuffer>('fs_read_file', { path: p });
         } catch {
             return null;
         }

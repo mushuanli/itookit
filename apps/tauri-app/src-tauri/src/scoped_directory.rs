@@ -59,6 +59,17 @@ fn stat_value(path: &std::path::Path) -> Result<Value, String> {
     Ok(json!({"size": m.len(), "isDirectory": m.is_dir(), "isFile": m.is_file(),
         "mtimeMs": ms(m.modified()), "birthtimeMs": ms(m.created())}))
 }
+pub fn directory_read_file(id: String, path: String, state: &DirectoryScopes) -> Result<Option<Vec<u8>>, String> {
+    let scopes = state.0.lock().map_err(|e| e.to_string())?;
+    let root = scopes.get(&id).ok_or("directory grant has been closed")?;
+    let path = crate::directory_boundary::resolve(root, &path)?;
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 pub fn directory_io(id: String, operation: String, path: String, to: Option<String>, data: Option<Vec<u8>>, state: &DirectoryScopes) -> Result<Value, String> {
     let scopes = state.0.lock().map_err(|e| e.to_string())?;
     let root = scopes.get(&id).ok_or("directory grant has been closed")?;
@@ -108,6 +119,26 @@ pub fn directory_io(id: String, operation: String, path: String, to: Option<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn binary_reads_preserve_bytes_missing_files_and_grant_boundaries() {
+        let root = std::env::temp_dir().join(format!("session-binary-read-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("bytes"), [0, 128, 255, 10]).unwrap();
+        std::fs::write(root.join("empty"), []).unwrap();
+        let state = DirectoryScopes::default();
+        let id = directory_open(root.to_string_lossy().into(), &state).unwrap()["id"].as_str().unwrap().to_string();
+        assert_eq!(directory_read_file(id.clone(), "bytes".into(), &state).unwrap(), Some(vec![0, 128, 255, 10]));
+        assert_eq!(directory_read_file(id.clone(), "empty".into(), &state).unwrap(), Some(vec![]));
+        assert_eq!(directory_read_file(id.clone(), "missing".into(), &state).unwrap(), None);
+        assert!(directory_read_file(id.clone(), "../outside".into(), &state).is_err());
+        #[cfg(unix)] {
+            std::os::unix::fs::symlink(root.join("bytes"), root.join("link")).unwrap();
+            assert!(directory_read_file(id.clone(), "link".into(), &state).is_err());
+        }
+        directory_close(id.clone(), &state).unwrap();
+        assert!(directory_read_file(id, "bytes".into(), &state).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn range_reads_bound_large_files_and_preserve_grants() {
         let root = std::env::temp_dir().join(format!("session-range-{}", std::process::id()));

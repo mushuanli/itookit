@@ -26,7 +26,7 @@ async function invoke(command: string, params: any): Promise<unknown> {
             await writeFile(`${params.path}.tmp`, Buffer.from(params.data));
             await rename(`${params.path}.tmp`, params.path);
             await pauseAt('intent'); return;
-        case 'fs_read_file': return [...await readFile(params.path)];
+        case 'fs_read_file': return new Uint8Array(await readFile(params.path)).buffer;
         case 'fs_read_dir': return (await readdir(params.path, { withFileTypes: true })).map(item => ({ name: item.name, is_directory: item.isDirectory() }));
         case 'fs_remove': return rm(params.path, { force: true });
         case 'directory_open': {

@@ -12,7 +12,7 @@ beforeEach(() => {
     intents.clear();
     invoke.mockReset().mockImplementation(async (command, params) => {
         if (command === 'fs_write_file') intents.set(params.path, params.data);
-        if (command === 'fs_read_file') return intents.get(params.path);
+        if (command === 'fs_read_file') return new Uint8Array(intents.get(params.path) ?? []).buffer;
         if (command === 'fs_read_dir') return [...intents.keys()].map(path => ({ name: path.split('/').at(-1), is_directory: false }));
         if (command === 'fs_remove') intents.delete(params.path);
         if (command === 'directory_open') return { id: `grant:${params.path}`, root: params.path };

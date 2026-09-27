@@ -35,3 +35,15 @@ it('does not hide grant revocation or malformed batch results', async () => {
     invoke.mockResolvedValueOnce([]);
     await expect(fs.statMany(['/project/file'])).rejects.toThrow('Invalid directory stat response');
 });
+
+it('receives binary file responses without JSON conversion and preserves missing files', async () => {
+    const fs = new ScopedFsOps([{ id: 'project', root: '/project' }]);
+    const bytes = new Uint8Array([0, 128, 255, 10]).buffer;
+    invoke.mockResolvedValueOnce(bytes);
+    expect(await fs.readFile('/project/file')).toBe(bytes);
+    expect(invoke).toHaveBeenCalledWith('directory_read_file', { id: 'project', path: 'file' }, undefined);
+    invoke.mockResolvedValueOnce(null);
+    expect(await fs.readFile('/project/missing')).toBeNull();
+    invoke.mockRejectedValueOnce(new Error('closed'));
+    await expect(fs.readFile('/project/file')).rejects.toThrow('closed');
+});

@@ -37,7 +37,7 @@ export class ScopedFsOps implements IFsOps {
     exists(path: string) { return this.io<boolean>('exists', path); }
     mkdir(path: string) { return this.io<void>('mkdir', path); }
     readDir(path: string) { return this.io<DirEntry[]>('list', path); }
-    async readFile(path: string): Promise<ArrayBuffer | null> { const bytes = await this.io<number[] | null>('read', path); return bytes ? new Uint8Array(bytes).buffer : null; }
+    readFile(path: string): Promise<ArrayBuffer | null> { return invoke('directory_read_file', this.target(path)); }
     async readFileRange(path: string, offset: number, length: number): Promise<ArrayBuffer | null> {
         const bytes = await invoke<number[] | null>('directory_read_range', { ...this.target(path), offset, length });
         return bytes ? new Uint8Array(bytes).buffer : null;

@@ -12,6 +12,15 @@ async fn run_directory<T: Send + 'static>(
 }
 
 #[tauri::command]
+pub async fn directory_read_file(id: String, path: String, state: State<'_, DirectoryScopes>) -> Result<tauri::ipc::Response, String> {
+    let bytes = run_directory(state.inner().clone(), move |state| crate::scoped_directory::directory_read_file(id, path, state)).await?;
+    Ok(match bytes {
+        Some(bytes) => tauri::ipc::Response::new(bytes),
+        None => tauri::ipc::Response::new(tauri::ipc::InvokeResponseBody::Json("null".into())),
+    })
+}
+
+#[tauri::command]
 pub async fn directory_read_range(id: String, path: String, offset: u64, length: u64, state: State<'_, DirectoryScopes>) -> Result<Value, String> {
     run_directory(state.inner().clone(), move |state| crate::scoped_directory::directory_read_range(id, path, offset, length, state)).await
 }

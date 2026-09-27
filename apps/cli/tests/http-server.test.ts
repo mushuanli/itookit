@@ -123,3 +123,38 @@ it.each([false, true])('initializes HTTP-created Sessions with cwd or the explic
         expect(runtime.directoryMounts.describe(record.mounts[0])).toBe(override ? directory : process.cwd());
     } finally { await runtime.dispose(); await rm(root, { recursive: true, force: true }); }
 });
+
+it('adapts HTTP byte arrays and prefetched files to the binary desktop read contract', async () => {
+    const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const path = await import('node:path');
+    const { runInNewContext } = await import('node:vm');
+    const root = await mkdtemp(path.join(tmpdir(), 'mindos-http-binary-'));
+    const server = new HttpUiServer({ rootDir: root, homeDir: root, configDir: root, staticDir: root });
+    const command = (cmd: string, args: Record<string, unknown>) => (server as any).command(cmd, args);
+    const directory = path.join(root, 'etc', 'files');
+    try {
+        await mkdir(directory, { recursive: true });
+        await writeFile(path.join(root, 'index.html'), '<html><head></head></html>');
+        await writeFile(path.join(directory, 'file.md'), Buffer.from([0, 128, 255, 10]));
+        let html = '';
+        await (server as any).staticFile('/', { writeHead() {}, end(body: string) { html = body; } });
+        const window: any = {};
+        const fetch = vi.fn(async (_url: string, init: { body: string }) => {
+            const { cmd, args } = JSON.parse(init.body);
+            return { ok: true, json: async () => ({ result: await command(cmd, args) }) };
+        });
+        for (const script of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) runInNewContext(script[1], { window, fetch, Uint8Array });
+        const invoke = window.__TAURI_INTERNALS__.invoke;
+        const file = path.join(directory, 'file.md');
+        expect([...new Uint8Array(await invoke('fs_read_file', { path: file }))]).toEqual([0, 128, 255, 10]);
+        await invoke('fs_read_dir', { path: directory }); fetch.mockClear();
+        expect([...new Uint8Array(await invoke('fs_read_file', { path: file }))]).toEqual([0, 128, 255, 10]);
+        expect(fetch).not.toHaveBeenCalled();
+        const scope = await invoke('directory_open', { path: directory });
+        expect([...new Uint8Array(await invoke('directory_read_file', { id: scope.id, path: 'file.md' }))]).toEqual([0, 128, 255, 10]);
+        expect(await invoke('directory_read_file', { id: scope.id, path: 'missing' })).toBeNull();
+        await invoke('directory_close', { id: scope.id });
+        await expect(invoke('directory_read_file', { id: scope.id, path: 'file.md' })).rejects.toThrow('not open');
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
