@@ -1,32 +1,20 @@
 import { defineConfig, searchForWorkspaceRoot } from 'vite';
 import path from 'path';
+import { workspaceAliases, workspaceExcludes } from '../../scripts/workspace-sources.mjs';
 
 export default defineConfig({
     // ✅ 关键 1: 相对路径，确保在非根目录或通过简单 server 启动时能找到 assets
     base: './',
 
     resolve: {
-        alias: {
-            '@': path.resolve(__dirname, './src'),
+        alias: [
+            { find: '@', replacement: path.resolve(__dirname, './src') },
 
-            // ✅ 映射所有 workspace 包到源码
-            '@itookit/vfs-ui/style.css': path.resolve(__dirname, '../../packages/vfs-ui/src/styles/index.css'),
-            '@itookit/mdxeditor/style.css': path.resolve(__dirname, '../../packages/mdx/src/styles/index.css'),
-            '@itookit/llm-ui/style.css': path.resolve(__dirname, '../../packages/llm-ui/src/styles/index.css'),
-            '@itookit/app-settings/style.css': path.resolve(__dirname, '../../packages/app-settings/src/styles/styles.css'),
-
-            '@itookit/common': path.resolve(__dirname, '../../packages/common/src/index.ts'),
-            '@itookit/vfs-core': path.resolve(__dirname, '../../packages/vfs-core/src/index.ts'),
-            '@itookit/mdxeditor': path.resolve(__dirname, '../../packages/mdx/src/index.ts'),
-            '@itookit/vfs-ui': path.resolve(__dirname, '../../packages/vfs-ui/src/index.ts'),
-            '@itookit/device-llm': path.resolve(__dirname, '../../packages/device-llm/src/index.ts'),
-            '@itookit/llm-session': path.resolve(__dirname, '../../packages/llm-session/src/index.ts'),
-            '@itookit/llm-ui': path.resolve(__dirname, '../../packages/llm-ui/src/index.ts'),
-            '@itookit/app-settings': path.resolve(__dirname, '../../packages/app-settings/src/index.ts'),
-            '@itookit/app-shell/navigation.css': path.resolve(__dirname, '../../packages/app-shell/src/styles/navigation.css'),
-            '@itookit/app-shell': path.resolve(__dirname, '../../packages/app-shell/src/index.ts'),
-            '@itookit/vfsdriver-indexeddb': path.resolve(__dirname, '../../packages/vfsdriver-indexeddb/src/index.ts'),
-        },
+            // ✅ 映射所有 workspace 包到源码：dev 图里每包只有一份副本，HMR 生效。
+            // 列表与 CSS 子路径入口由 scripts/workspace-sources.mjs 统一提供，
+            // 避免桌面端与 Web 端再次各自漂移。
+            ...workspaceAliases(__dirname),
+        ],
         // ✅ 建议: 防止 React/Vue 等库在 Monorepo 中被打包两次 (双重实例问题)
         dedupe: ['react', 'react-dom', 'dexie', 'mermaid', '@codemirror/state', '@codemirror/view']
     },
@@ -59,15 +47,12 @@ export default defineConfig({
 
     // 关于 optimizeDeps 的说明见下方解释
     optimizeDeps: {
+        // Workspace 包一律按源码处理（已在 resolve.alias 中映射），不进入预打包。
+        exclude: workspaceExcludes(),
         include: [
-            // 如果这些包已经编译成了 JS (dist)，加在这里没问题。
-            // 如果这些包 main 指向的是 .ts 源码，建议从这里移除，
-            // 让 Vite 直接把它们当源码处理，这样热更新 (HMR) 会更快。
-            // '@itookit/common',
-            // '@itookit/vfs',
-            // ...
-
-            // 建议保留第三方纯 JS 库的预构建
+            // Workspace 包不要放这里：它们的 main 指向 .ts 源码，已由上面的 exclude 与
+            // scripts/workspace-sources.mjs 统一处理（见 doc/dev-patterns.md）。
+            // 这里只保留第三方纯 JS 库的预构建。
             'mermaid',
             'dexie',
             'marked'

@@ -73,6 +73,14 @@
 - **tsup**：`common`/`llm-common`/`durable-kernel`/`llm-tasks`/`llm-flow`/`llm-session`/`kernel-adapters`/`device-llm`/`device-tty`/`tools`/`vfs-core`/`vfsdriver-indexeddb`/`vfsdriver-localfs`，以及 UI 包中的 `llm-settings-ui`/`ui-common`。
 - **vite build**：`llm-ui`/`vfs-ui`/`mdx`/`app-settings`/`demo`。
 
+### dev server 的 workspace 别名（唯一来源）
+
+`apps/tauri-app` 与 `apps/web-app` 的 `resolve.alias` 都从 `scripts/workspace-sources.mjs` 取：`workspaceAliases()` 给出「每个 workspace 包 → `src/index.ts` + 包内 CSS 子路径」的数组形式别名，`workspaceExcludes()` 供 `optimizeDeps.exclude` 使用。目的：dev 图里每个包只有一份源码副本（HMR 生效，且不会出现新旧转译结果混用导致的 `x is not a function`）。
+
+- 包根用 `^包名$` 正则精确匹配，因此包内其它 `exports` 子路径（如 `@itookit/durable-kernel/core`）仍按 package.json 解析；CSS 等子路径入口由字符串别名处理，排在包根之前。
+- **新增/删除 package、或新增包内子路径入口时，必须同步 `scripts/workspace-sources.mjs`**，不要在两份 `vite.config.ts` 里各自加别名。
+- 改了 `packages/*` 源码后请**重启 dev server** 再验证，不要只刷新页面：长驻 server 可能保留了部分文件的旧转译结果。
+
 ## 代码约定
 
 - **Ports/Adapters**: Shell 只通过 port 接口与视图通信，内部 DOM 完全封装

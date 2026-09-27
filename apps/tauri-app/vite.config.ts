@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import path from 'path';
+import { workspaceAliases, workspaceExcludes } from '../../scripts/workspace-sources.mjs';
 
 const MERMAID_RUNTIME_PACKAGES = [
     '/mermaid/', '/@mermaid-js/', '/cytoscape', '/cose-base/', '/layout-base/',
@@ -36,23 +37,13 @@ export default defineConfig({
     }],
 
     resolve: {
-        alias: {
-            '@tauri-apps/api/core': path.resolve(__dirname, 'src/log/traced-core.ts'),
-            // CSS virtual modules
-            '@itookit/vfs-ui/style.css':         path.resolve(__dirname, '../../packages/vfs-ui/src/styles/index.css'),
-            '@itookit/mdxeditor/style.css':      path.resolve(__dirname, '../../packages/mdx/src/styles/index.css'),
-            '@itookit/llm-ui/style.css':         path.resolve(__dirname, '../../packages/llm-ui/src/styles/index.css'),
-            '@itookit/app-settings/style.css':   path.resolve(__dirname, '../../packages/app-settings/src/styles/styles.css'),
-            // Package source aliases (dev-mode hot reload)
-            '@itookit/common':         path.resolve(__dirname, '../../packages/common/src/index.ts'),
-            '@itookit/mdxeditor':      path.resolve(__dirname, '../../packages/mdx/src/index.ts'),
-            '@itookit/vfs-ui':         path.resolve(__dirname, '../../packages/vfs-ui/src/index.ts'),
-            '@itookit/device-llm':     path.resolve(__dirname, '../../packages/device-llm/src/index.ts'),
-            '@itookit/llm-session': path.resolve(__dirname, '../../packages/llm-session/src/index.ts'),
-            '@itookit/llm-ui':         path.resolve(__dirname, '../../packages/llm-ui/src/index.ts'),
-            '@itookit/app-settings':   path.resolve(__dirname, '../../packages/app-settings/src/index.ts'),
-            '@itookit/vfs-core':          path.resolve(__dirname, '../../packages/vfs-core/src/index.ts'),
-        },
+        alias: [
+            { find: '@tauri-apps/api/core', replacement: path.resolve(__dirname, 'src/log/traced-core.ts') },
+            // Workspace packages resolve to source: one copy in the dev graph, HMR-friendly.
+            // The list (and the CSS subpath entries) is shared with the web app so the two dev
+            // graphs cannot drift apart again — see scripts/workspace-sources.mjs.
+            ...workspaceAliases(__dirname),
+        ],
     },
 
     server: {
@@ -84,6 +75,6 @@ export default defineConfig({
     },
 
     optimizeDeps: {
-        exclude: ['better-sqlite3'],
+        exclude: ['better-sqlite3', ...workspaceExcludes()],
     },
 });
