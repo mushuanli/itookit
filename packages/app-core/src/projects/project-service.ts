@@ -1,6 +1,7 @@
+import type { ProjectRemoteMountService } from './remote-mounts';
 import { ProjectSessions } from './project-sessions';
 import { randomUUID, t, translatedValues } from '@itookit/common';
-import { FSError, normalizeVirtualPath, type IFileSystem } from '@itookit/vfs-core';
+import { FSError, normalizeVirtualPath, type IFileSystem, type OperationOptions } from '@itookit/vfs-core';
 import type { ISessionRepository, SessionFolder } from '@itookit/llm-session';
 import type { DirectoryMountService } from '../vfs/directory-mounts';
 import type { SessionFilesService } from '../vfs/session-files';
@@ -9,8 +10,10 @@ export type ProjectFolder = SessionFolder & { project: NonNullable<SessionFolder
 
 /** Project identity and file roots survive navigation-folder renames and moves. */
 export class ProjectService {
+    remoteMounts?: ProjectRemoteMountService;
     private startupId?: string;
     private personalPending?: Promise<ProjectFolder>;
+    private remoteCreation: Promise<unknown> = Promise.resolve();
     readonly sessions: ProjectSessions;
     constructor(private readonly root: IFileSystem, private readonly repository: ISessionRepository,
         private readonly directories: DirectoryMountService, private readonly files: SessionFilesService) { this.sessions = new ProjectSessions(repository); }
@@ -55,6 +58,31 @@ export class ProjectService {
             if (failures.length > 1) throw new AggregateError(failures, 'Project creation and cleanup failed');
             throw error;
         }
+    }
+
+    createRemote(name: string, parent: string | null, connectionId: string, path: string,
+        access: 'ro' | 'rw' = 'ro', options?: OperationOptions): Promise<ProjectFolder> {
+        const work = this.remoteCreation.catch(() => {}).then(async () => {
+            const remote = this.remoteMounts;
+            if (!remote) throw new FSError('ECAPABILITY', 'Remote file systems unavailable');
+            const existing = remote.findRemoteProject(connectionId, path);
+            if (existing) {
+                const project = (await this.list()).find(item => item.project.id === existing);
+                if (project) return project;
+                await remote.forgetProject(existing);
+            }
+            const project = await this.create(name, parent);
+            try { await remote.bindProject(project.project.id, connectionId, path, access, options); return project; }
+            catch (error) {
+                // A published grant must remain recoverable if view invalidation fails.
+                if (!remote.list(project.project.id).length) {
+                    await this.repository.deleteFolder(project.path, true);
+                    await this.discardImportedProject(project);
+                }
+                throw error;
+            }
+        });
+        this.remoteCreation = work; return work;
     }
 
     /** Rollback hook for a fresh managed project whose navigation records were removed. */
@@ -144,7 +172,8 @@ export class ProjectService {
     async openFiles(folder: string) {
         const project = (await this.list()).find(item => item.path === folder);
         if (!project) throw new FSError('ENOENT', 'Project not found');
-        return this.directories.openDirectory(project.project.directory);
+        const owner = await this.directories.openDirectory(project.project.directory);
+        return this.remoteMounts ? this.remoteMounts.compose(project.project.id, owner) : owner;
     }
     async assertMove(from: string | null, to: string | null, projectRoot = false): Promise<void> {
         const [source, target] = await Promise.all([this.forFolder(from), this.forFolder(to)]);

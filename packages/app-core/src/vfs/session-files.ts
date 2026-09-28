@@ -1,3 +1,4 @@
+import type { FileSystemSourceOwner } from '@itookit/vfs-core';
 import { createUnavailableDirectory } from './unavailable-directory';
 import { createFileSystemView, normalizeVirtualPath, FSError, type FileSystemContextOwner, type FileSystemMount, type FileSystemView, type IFileSystem } from '@itookit/vfs-core';
 import { createVFSToolContext } from './tool-context';
@@ -18,6 +19,10 @@ export interface FilesRecord {
 
 /** Host-owned namespace configurations. Unconfigured sessions have no file grants. */
 export class SessionFilesService {
+    workspaceComposer?: (id: string, mount: FileSystemMount) => Promise<FileSystemSourceOwner | undefined>;
+    invalidate(id: string): Promise<void> {
+        return this.serial(id, async () => { await this.revokeSessionViews(id); this.notify(); });
+    }
     private readonly sources = new Map<string, IFileSystem>();
     private readonly unavailable = new Map<string, ReturnType<typeof createUnavailableDirectory>>();
     private readonly missingViews = new WeakMap<FileSystemView, Set<string>>();
@@ -219,7 +224,18 @@ export class SessionFilesService {
             }
         }));
         if (new Set(mounts.map(m => m.at)).size !== mounts.length) throw new FSError('EINVAL', 'Duplicate mount point');
+        const owners: FileSystemSourceOwner[] = [];
+        try {
+            for (let index = 0; index < mounts.length; index++) {
+                if (mounts[index].at !== '/workspace' || !this.workspaceComposer) continue;
+                const owner = await this.workspaceComposer(id, mounts[index]);
+                if (owner) { owners.push(owner); mounts[index] = { ...mounts[index], fs: owner.fs, root: '/' }; }
+            }
+        } catch (error) { await Promise.all(owners.map(owner => owner.dispose())); throw error; }
         const view = createFileSystemView({ viewId: `session:${id}`, revision: record.revision, mounts: [...system, ...mounts] });
+        const dispose = view.dispose.bind(view);
+        let closing: Promise<void> | undefined;
+        view.dispose = () => closing ??= (async () => { await dispose(); await Promise.all(owners.map(owner => owner.dispose())); })();
         this.missingViews.set(view, missing);
         try {
             if (record.cwd !== '/' && !await this.isDirectory(view, record.cwd)) throw new FSError('ENOTDIR', 'Working directory must be mounted');

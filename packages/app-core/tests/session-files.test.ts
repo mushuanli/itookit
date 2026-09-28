@@ -223,7 +223,7 @@ it.each(['configure', 'disable', 'dispose'] as const)('revokes the ordinary view
     const reading = vi.spyOn(home.driver, 'readContent').mockImplementation(async (...args: any[]) => { began(); await held; return read(...args as [string]); });
     const dispose = workspace.context.fs.dispose.bind(workspace.context.fs);
     const closing = vi.spyOn(workspace.context.fs, 'dispose').mockImplementation(() => { revoking(); return dispose(); });
-    const pendingRead = workspace.context.fs.driver.readContent('/workspace/same.md');
+    const pendingRead = expect(workspace.context.fs.driver.readContent('/workspace/same.md')).rejects.toMatchObject({ code: 'ECANCELLED' });
     await started;
     const changing = action === 'configure' ? service.configure('a', { mounts: mount('/a', 'ro'), cwd: '/workspace' }, record.revision)
         : action === 'disable' ? service.disable('a', record.revision) : service.dispose();

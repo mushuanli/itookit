@@ -1,3 +1,5 @@
+import { ProjectRemoteMountService, type RemoteFileSourceProvider } from '../projects/remote-mounts';
+import { createFileSystemView } from '@itookit/vfs-core';
 import { ModelConfigurationCommands } from '../configuration/model-commands';
 import { resumeSessionDeletions } from './resume-session-deletions';
 import type { IStorageBackend, MountOptions } from '@itookit/vfs-core';
@@ -70,6 +72,7 @@ export interface ApplicationRuntimeOptions {
     backend: IStorageBackend;
     additionalMounts?: Array<{ path: string; backend: IStorageBackend; options?: MountOptions }>;
     directorySourceProvider?: DirectorySourceProvider;
+    remoteSourceProvider?: RemoteFileSourceProvider;
     /** Host startup cwd, mounted into newly created Sessions only. */
     defaultSessionDirectory?: string;
     configureSessionFiles?(files: SessionFilesService): void | Promise<void>;
@@ -136,6 +139,28 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         cleanupFns.push(() => directoryMounts.dispose());
         await traceBoot('directoryMounts.init', () => directoryMounts.init());
         const projects = new ProjectService(systemFS, sessionRepository, directoryMounts, sessionFiles);
+        let remoteGuard = async (id: string) => mountGuard(id);
+        if (options.remoteSourceProvider) {
+            const affected = async (projectId: string) => {
+                const result: string[] = [];
+                for (const session of await sessionRepository.list()) {
+                    if ((await projects.forFolder(session.folder))?.project.id === projectId) result.push(session.id);
+                }
+                return result;
+            };
+            const remote = new ProjectRemoteMountService(systemFS, options.remoteSourceProvider,
+                async projectId => { for (const id of await affected(projectId)) await remoteGuard(id); },
+                async projectId => { for (const id of await affected(projectId)) { await sessionFiles.invalidate(id); await mountChanged(id); } });
+            await remote.init(); projects.remoteMounts = remote;
+            sourceCleanupFns.push(() => remote.dispose());
+            sessionFiles.workspaceComposer = async (id, mount) => {
+                const project = await projects.forFolder((await sessionRepository.getManifest(id)).folder);
+                if (!project || !remote.list(project.project.id).length) return undefined;
+                const fs = createFileSystemView({ viewId: `project-base:${id}`, mounts: [{ ...mount, at: '/' }] });
+                return remote.compose(project.project.id, { fs, dispose: () => fs.dispose() });
+            };
+        }
+
         if (options.ownerKind === 'web' || options.defaultSessionDirectory) {
             await traceBoot('projects.init', () => projects.ensureStartup(options.defaultSessionDirectory));
         }
@@ -146,11 +171,20 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
             llmDriver,
             storageResolver: new SessionDirectoryStorageResolver(systemFS),
             maxConcurrent: 20,
-            fileContextForSession: id => acquireSessionProcessContext(sessionFiles, id, options.kernelPlatform?.createSessionProcesses,
-                () => directoryMounts.processMounts(id)),
+            fileContextForSession: async id => {
+                const project = await projects.forFolder((await sessionRepository.getManifest(id)).folder);
+                const remote = project && projects.remoteMounts?.list(project.project.id).length;
+                return acquireSessionProcessContext(sessionFiles, id, remote ? undefined : options.kernelPlatform?.createSessionProcesses,
+                    () => directoryMounts.processMounts(id));
+            },
             configureSession: options.kernelPlatform?.configureSession,
             scopeForEffect: options.kernelPlatform?.scopeForEffect,
-            fileContextForScope: options.kernelPlatform?.fileContextForScope,
+            fileContextForScope: options.kernelPlatform?.fileContextForScope ? async (id, scopeId) => {
+                const context = await options.kernelPlatform!.fileContextForScope!(id, scopeId);
+                const project = await projects.forFolder((await sessionRepository.getManifest(id)).folder);
+                return project && projects.remoteMounts?.list(project.project.id).length
+                    ? { ...context, nativeShell: undefined, ttyDriver: undefined } : context;
+            } : undefined,
             skillSource: options.kernelPlatform?.skillSource,
             skillSourceForSession: options.kernelPlatform?.skillSourceForSession,
             skillToolHandlerFactory: options.kernelPlatform?.skillToolHandlerFactory,
@@ -197,6 +231,10 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         sessionRepository.setStructuralWriteGuard(async ids => {
             for (const id of ids) if (!await recovery.acquireMetadataLease(id)) throw new Error(`Session is owned by another host: ${id}`);
         });
+        remoteGuard = async id => {
+            if (!await recovery.acquireMetadataLease(id)) throw new Error(`Session is owned by another host: ${id}`);
+            await mountGuard(id);
+        };
         mayCollectContext = id => (recovery.leases.get(id)?.leaseUntil ?? 0) > Date.now();
         cleanupFns.push(() => recovery.release());
         cleanupFns.push(() => kernel.dispose());

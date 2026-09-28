@@ -165,7 +165,8 @@ class BrowserBackend implements IStorageBackend {
     }
     private async mapped(fs: import('@itookit/vfs-core').IFileSystem, node: FSNode, prefix: string): Promise<FSNode> {
         const readOnly = node.metadata?._readOnly === true || (await fs.capabilitiesAt(node.path)).readonly;
-        return { ...node, ...(node.type === 'file' && node.assetDirPath ? { assetDirPath: prefix + node.assetDirPath } : {}), path: prefix + (node.path === '/' ? '' : node.path), parentPath: node.path === '/' ? prefix : prefix + (node.parentPath === '/' ? '' : node.parentPath ?? ''), metadata: { ...node.metadata, _showAll: true, _fileDetails: true, _readOnly: readOnly } };
+        return { ...node, ...(node.type === 'file' && node.assetDirPath ? { assetDirPath: prefix + node.assetDirPath } : {}), path: prefix + (node.path === '/' ? '' : node.path), parentPath: node.path === '/' ? prefix : prefix + (node.parentPath === '/' ? '' : node.parentPath ?? ''), metadata: { ...node.metadata, _showAll: true, _fileDetails: true, _readOnly: readOnly,
+            ...(node.metadata?.unavailable ? { _disabled: true, navigationDescription: t('remote.state.offline') } : {}) } };
     }
     private sessionBrowserPath(id: string, folder: string | null | undefined): string {
         return `${folderBrowserPath(folder)}/${id}`;
@@ -188,8 +189,11 @@ class BrowserBackend implements IStorageBackend {
     private folderNode(folder: SessionFolder): FSNode {
         const title = folder.name === '@sessions' ? t('project.sessions') : folder.name;
         const node = this.node(folderBrowserPath(folder.path), title, true, folder.updatedAt);
-        return { ...node, ...(folder.project ? { icon: ENTITY_ICONS.project } : {}),
-            metadata: { ...node.metadata, ...(folder.project ? { projectId: folder.project.id, directory: folder.project.directory } : {}) } };
+        const mounts = folder.project ? this.deps.projects?.remoteMounts?.list(folder.project.id) ?? [] : [];
+        const offline = mounts.some(mount => this.deps.projects!.remoteMounts!.status(mount.mountId) === 'offline');
+        return { ...node, ...(folder.project ? { icon: mounts.length ? ENTITY_ICONS.remoteProject : ENTITY_ICONS.project } : {}),
+            metadata: { ...node.metadata, ...(folder.project ? { projectId: folder.project.id, directory: folder.project.directory, remoteProject: mounts.length > 0,
+                remoteOffline: offline, _disabled: offline, _readOnly: offline, navigationDescription: mounts.length ? t(offline ? 'remote.projectOffline' : 'remote.projectRemote') : '' } : {}) } };
     }
     private isFolderContainer(path: string): boolean {
         if (path === '/') return true;
@@ -269,11 +273,34 @@ class BrowserBackend implements IStorageBackend {
         if (target.kind === 'files') return this.listFiles(path, target);
         throw new FSError('ENOTDIR', 'Task is a history entry');
     }
-    private listFiles(path: string, target: FileTarget): Promise<FSNode[]> {
+    private async listFiles(path: string, target: FileTarget): Promise<FSNode[]> {
         const prefix = filesBrowserPrefix(path);
-        return this.withFiles(target, async fs => Promise.all((await fs.driver.getChildren(target.path)).map(n => this.mapped(fs, n, prefix))));
+        const nodes = await this.withFiles(target, async fs => Promise.all((await fs.driver.getChildren(target.path)).map(n => this.mapped(fs, n, prefix))));
+        const project = this.deps.projects && await this.deps.projects.forFolder(target.kind === 'project-files'
+            ? target.folder : (await this.deps.repository.getManifest(target.sessionId)).folder);
+        const remote = this.deps.projects?.remoteMounts;
+        const mounts = project && remote ? remote.list(project.project.id) : [];
+        const offline = !!project && !!remote?.projectOffline(project.project.id);
+        return nodes.map(node => {
+            const relative = node.path.slice(prefix.length).replace(target.kind === 'files' ? /^\/workspace(?=\/|$)/ : /^$/, '');
+            const mount = mounts.find(item => relative === item.at || relative.startsWith(item.at + '/'));
+            if (!mount) return offline ? { ...node, metadata: { ...node.metadata, _disabled: true, _readOnly: true } } : node;
+            const status = remote!.status(mount.mountId);
+            return { ...node, ...(relative === mount.at ? { icon: ENTITY_ICONS.remoteProject } : {}),
+                metadata: { ...node.metadata, remoteMountId: mount.mountId, _disabled: offline || status === 'offline', _readOnly: offline || node.metadata._readOnly,
+                    navigationDescription: relative === mount.at ? t(`remote.state.${status}`) : node.metadata.navigationDescription } };
+        });
+    }
+    private async assertAvailable(path: string): Promise<void> {
+        if (!this.deps.projects?.remoteMounts) return;
+        const target = resolveBrowserTarget(path);
+        const folder = target.kind === 'project-files' ? target.folder : target.kind === 'folder'
+            ? folderPathFromBrowserPath(path) : (await this.deps.repository.getManifest(target.sessionId)).folder;
+        const project = await this.deps.projects.forFolder(folder);
+        if (project && this.deps.projects.remoteMounts.projectOffline(project.project.id)) throw new FSError('EACCES', 'Remote project unavailable');
     }
     async read(path: string): Promise<Uint8Array> {
+        await this.assertAvailable(path);
         const target = resolveBrowserTarget(path);
         if (target.kind === 'folder') throw new FSError('EISDIR', 'Open this folder using its browser target');
         if (target.kind === 'session') return this.sessionBundle(target.sessionId);
@@ -286,6 +313,7 @@ class BrowserBackend implements IStorageBackend {
         throw new FSError('EISDIR', 'Open this entry using its browser target');
     }
     async mkdir(path: string): Promise<FSNode> {
+        await this.assertAvailable(parentBrowserPath(path));
         const parent = parentBrowserPath(path);
         if (this.isFolderContainer(parent)) {
             const folderPath = `${folderPathFromBrowserPath(parent) ?? ''}/${browserName(path)}`;
@@ -303,6 +331,7 @@ class BrowserBackend implements IStorageBackend {
         throw new FSError('EROFS', 'Use the Session file context for this path');
     }
     async write(path: string, content: Uint8Array): Promise<FSNode> {
+        await this.assertAvailable(path);
         const parent = parentBrowserPath(path);
         if (this.isFolderContainer(parent)) {
             const text = new TextDecoder().decode(content);
@@ -333,12 +362,15 @@ class BrowserBackend implements IStorageBackend {
         throw new FSError('EROFS', 'Only Session folders and Session files are writable');
     }
     async delete(path: string): Promise<void> {
+        await this.assertAvailable(path);
         const target = resolveBrowserTarget(path);
         if (target.kind === 'folder') {
             const folderPath = folderPathFromBrowserPath(path);
             if (!folderPath) throw new FSError('EINVAL', 'Cannot delete the Session browser root');
             if (folderPath.endsWith('/@sessions')) throw new FSError('EACCES', 'Cannot delete the Sessions section');
+            const projects = (await this.deps.projects?.list() ?? []).filter(project => project.path === folderPath || project.path.startsWith(folderPath + '/'));
             await this.lifecycle.deleteFolder(folderPath, true);
+            for (const project of projects) await this.deps.projects?.remoteMounts?.forgetProject(project.project.id);
             return;
         }
         if (target.kind === 'session') {
@@ -353,6 +385,7 @@ class BrowserBackend implements IStorageBackend {
         throw new FSError('EROFS', 'Tasks are read-only');
     }
     async rename(from: string, to: string): Promise<void> {
+        await this.assertAvailable(from); await this.assertAvailable(parentBrowserPath(to));
         const targetPath = to.startsWith('/') ? to : `${parentBrowserPath(from)}/${to}`;
         const source = resolveBrowserTarget(from);
         if (source.kind === 'session') {
