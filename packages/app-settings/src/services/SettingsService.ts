@@ -7,7 +7,6 @@ import type { IVFSManager, IFileSystem } from '@itookit/vfs-core';
 import { FSNotFoundError } from '@itookit/vfs-core';
 import { LabelStore, TAG_STORE_PATH } from './LabelStore';
 import { traceBoot } from '@itookit/common';
-import type { SyncMode } from '../types/sync';
 import { SettingsState, Contact, Tag } from '../types/types';
 import { SnapshotService } from './SnapshotService';
 
@@ -17,39 +16,14 @@ import { SnapshotService } from './SnapshotService';
 const FILES = {
     tags: TAG_STORE_PATH,
     contacts: '/contacts.json',
-    sync: '/sync_config.json',
 };
 
 // ============================================
 // 类型定义
 // ============================================
 
-// [新增] 同步配置接口 (Fix Error 1)
-export interface SyncConfig {
-    serverUrl: string;
-    username: string;
-    token?: string;
-    strategy: 'manual' | 'bidirectional' | 'push' | 'pull';
-    autoSync: boolean;
-}
-
-// [新增] 同步状态接口 (Fix Error 2)
-export interface SyncStatus {
-    state: 'idle' | 'syncing' | 'error' | 'success';
-    lastSyncTime: number | null;
-    errorMessage?: string;
-}
-
 // Re-export so existing callers don't need to change imports
 export type { LocalSnapshot } from './SnapshotService';
-
-// Helper types for Sync Protocol
-interface FileMeta {
-    path: string;
-    hash: string;
-    mtime: number;
-    is_deleted: boolean;
-}
 
 type ChangeListener = () => void;
 
@@ -74,18 +48,8 @@ export class SettingsService {
         contacts: [],
     };
 
-    private syncConfig: SyncConfig = {
-        serverUrl: '',
-        username: '',
-        strategy: 'manual',
-        autoSync: false
-    };
-    private syncStatus: SyncStatus = { state: 'idle', lastSyncTime: null };
-
     private listeners: Set<ChangeListener> = new Set();
     private initialized = false;
-    private syncTimer: ReturnType<typeof setTimeout> | null = null;
-    private eventUnsubscribers: Array<() => void> = [];
     private tagRefresh?: Promise<void>;
     private tagStore!: LabelStore;
 
@@ -111,11 +75,7 @@ export class SettingsService {
         await Promise.all([
             traceBoot('settings.contacts', () => this.loadEntity('contacts')),
             traceBoot('settings.tagDefinitions', async () => { this.state.tags = await this.tagStore.list(); }),
-            traceBoot('settings.syncConfig', () => this.loadSyncConfig()),
         ]);
-
-        // 2. 启动 VFS 事件监听
-        this.bindVFSEvents();
 
         this.initialized = true;
         this.notify();
@@ -130,28 +90,6 @@ export class SettingsService {
             e?.code === 'ENOENT' ||
             e?.code === 'NOT_FOUND' ||
             String(e?.message).toLowerCase().includes('not found')
-        );
-    }
-
-    /**
-     * 监听文件变更以触发已启用的自动同步；不自动统计标签
-     */
-    private bindVFSEvents(): void {
-        const debounce = () => {
-            if (this.syncTimer) clearTimeout(this.syncTimer);
-            this.syncTimer = setTimeout(() => {
-                if (this.syncConfig.autoSync &&
-                    this.syncStatus.state !== 'syncing' &&
-                    this.syncConfig.serverUrl) {
-                    console.log('[AutoSync] Triggered');
-                    this.triggerSync().catch(e => console.error('AutoSync failed', e));
-                }
-            }, 2000);
-        };
-
-        for (const source of this.workspaces) this.eventUnsubscribers.push(
-            source.fs.on('node:created', debounce), source.fs.on('node:updated', debounce),
-            source.fs.on('node:deleted', debounce), source.fs.on('node:renamed', debounce),
         );
     }
 
@@ -293,247 +231,6 @@ export class SettingsService {
     }
 
     // =========================================================
-    // 同步功能
-    // =========================================================
-
-    async getSyncConfig(): Promise<SyncConfig> {
-        return { ...this.syncConfig };
-    }
-
-    async getSyncStatus(): Promise<SyncStatus> {
-        return { ...this.syncStatus };
-    }
-
-    async loadSyncConfig(): Promise<void> {
-        try {
-            const content = await this.configFiles.driver.readContent(FILES.sync);
-            const jsonStr = typeof content === 'string' 
-                ? content 
-                : new TextDecoder().decode(content as ArrayBuffer);
-            const loaded = JSON.parse(jsonStr);
-            this.syncConfig = { ...this.syncConfig, ...loaded };
-        } catch (e) {
-            // ignore
-        }
-    }
-
-    async saveSyncConfig(config: SyncConfig): Promise<void> {
-        this.syncConfig = config;
-        await writeWorkspaceFile(this.configFiles, FILES.sync, JSON.stringify(config, null, 2));
-    }
-
-    async testConnection(url: string, _user: string, token: string): Promise<boolean> {
-        try {
-            const res = await fetch(`${url}/api/sync/check`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify([])
-            });
-            return res.ok;
-        } catch (e) {
-            console.error(e);
-            return false;
-        }
-    }
-
-  /**
-   * 触发同步
-   * @param mode 同步模式：
-   *  - 'standard': 双向智能对比 (默认)
-   *  - 'force_push': 强制用本地文件覆盖服务器 (Client -> Server)
-   *  - 'force_pull': 强制用服务器文件覆盖本地 (Server -> Client)
-   */
-    async triggerSync(mode: SyncMode = 'standard'): Promise<void> {
-        if (!this.syncConfig.serverUrl) throw new Error('No server URL');
-        const token = this.syncConfig.token;
-        if (!token) throw new Error('No Access Token configured');
-    
-    try {
-        this.syncStatus = { state: 'syncing', lastSyncTime: this.syncStatus.lastSyncTime };
-            this.notify();
-
-            // 1. 索引本地文件
-            const localFiles = await this.indexAllLocalFiles();
-
-            let uploadList: string[] = [];
-            let downloadList: FileMeta[] = [];
-
-            if (mode === 'force_push') {
-                console.log('[Sync] Force Push Mode: Uploading all local files...');
-                uploadList = localFiles.map(f => f.path);
-                downloadList = [];
-            }
-            else if (mode === 'force_pull') {
-                console.log('[Sync] Force Pull Mode: Downloading all server files...');
-                const checkRes = await this.checkDiff([], token);
-                uploadList = [];
-                downloadList = checkRes.files_to_download;
-            }
-            else {
-                console.log('[Sync] Standard Mode: Checking diff...');
-                const checkRes = await this.checkDiff(localFiles, token);
-
-                if (this.syncConfig.strategy !== 'pull') {
-                    uploadList = checkRes.files_to_upload;
-                }
-                if (this.syncConfig.strategy !== 'push') {
-                    downloadList = checkRes.files_to_download;
-                }
-            }
-
-            console.log(`[Sync] Plan: Upload ${uploadList.length}, Download ${downloadList.length}`);
-
-            // 2. 执行上传
-            for (const path of uploadList) {
-                await this.uploadFile(path, token);
-            }
-
-            // 3. 执行下载
-            for (const meta of downloadList) {
-                await this.downloadFile(meta, token);
-            }
-
-            this.syncStatus = { state: 'success', lastSyncTime: Date.now() };
-        } catch (e: any) {
-            console.error('Sync Error', e);
-            this.syncStatus = { 
-                state: 'error', 
-                lastSyncTime: this.syncStatus.lastSyncTime, 
-                errorMessage: e.message 
-            };
-            throw e;
-        } finally {
-            this.notify();
-        }
-    }
-
-    private async checkDiff(clientFiles: FileMeta[], token: string): Promise<{
-        files_to_upload: string[];
-        files_to_download: FileMeta[];
-    }> {
-        const checkRes = await fetch(`${this.syncConfig.serverUrl}/api/sync/check`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify(clientFiles)
-        });
-
-        if (!checkRes.ok) throw new Error('Sync check failed (Invalid Token or Server Error)');
-        return await checkRes.json();
-    }
-
-    private async indexAllLocalFiles(): Promise<FileMeta[]> {
-        const files: FileMeta[] = [];
-        const modules = this.workspaces.filter(source => source.syncEnabled);
-
-        for (const mod of modules) {
-            try {
-                await this.traverseModuleFiles(mod.name, files);
-            } catch (e) {
-                console.warn(`[SettingsService] Failed to index module ${mod.name}`, e);
-            }
-        }
-        return files;
-    }
-
-    private async traverseModuleFiles(moduleName: string, list: FileMeta[]): Promise<void> {
-        const engine = workspaceFiles(this.workspaces, moduleName);
-
-        await engine.driver.walkTree?.(async (node) => {
-            if (node.type !== 'file') return;
-            try {
-                const raw = await engine.driver.readContent(node.path);
-                const buffer = this.toArrayBuffer(raw);
-                const hash = await this.computeSHA256(buffer);
-                list.push({
-                    path: `/${moduleName}${node.path}`,
-                    hash,
-                    mtime: node.modifiedAt,
-                    is_deleted: false,
-                });
-            } catch { /* skip */ }
-        }, { includeHidden: true, includeAssetDirs: true, includeInternalDirs: true });
-    }
-
-    private async uploadFile(systemPath: string, token: string): Promise<void> {
-        try {
-            const parts = systemPath.split('/').filter(Boolean);
-            const moduleName = parts[0];
-            const innerPath = '/' + parts.slice(1).join('/');
-
-            const content = await workspaceFiles(this.workspaces, moduleName).driver.readContent(innerPath);
-            const blob = new Blob([this.toArrayBuffer(content)]);
-
-            const formData = new FormData();
-            formData.append(systemPath, blob);
-
-            await fetch(`${this.syncConfig.serverUrl}/api/sync/upload`, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` },
-                body: formData
-            });
-        } catch (e) {
-            console.warn(`Failed to upload ${systemPath}`, e);
-        }
-    }
-
-    private async downloadFile(meta: FileMeta, token: string): Promise<void> {
-        try {
-            const res = await fetch(`${this.syncConfig.serverUrl}/api/sync/download`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ path: meta.path })
-            });
-
-            if (!res.ok) throw new Error('Download failed');
-            const arrayBuffer = await res.arrayBuffer();
-
-            const parts = meta.path.split('/').filter(Boolean);
-            const moduleName = parts[0];
-            const innerParts = parts.slice(1);
-
-            if (!this.workspaces.some(source => source.name === moduleName && source.syncEnabled)) throw new Error('Sync source unavailable');
-
-            // Asset file: second-to-last segment is an assetdir (starts with '_')
-            if (innerParts.length >= 2 && innerParts[innerParts.length - 2].startsWith('_')) {
-                const assetName = innerParts[innerParts.length - 1];
-                const ownerName = innerParts[innerParts.length - 2].slice(1); // strip '_'
-                const ownerPath = '/' + [...innerParts.slice(0, -2), ownerName].join('/');
-                const engine = workspaceFiles(this.workspaces, moduleName);
-                await engine.meta.assets?.putAsset(ownerPath, assetName, arrayBuffer);
-            } else {
-                const userPath = '/' + innerParts.join('/');
-                await writeWorkspaceFile(workspaceFiles(this.workspaces, moduleName), userPath, arrayBuffer);
-            }
-        } catch (e) {
-            console.error(`Failed to download ${meta.path}`, e);
-        }
-    }
-
-    // Note: same logic as toBuffer() in @itookit/vfs-core — duplicated here due to package boundary
-    private toArrayBuffer(data: string | ArrayBuffer | Uint8Array): ArrayBuffer {
-        if (typeof data === 'string') return new TextEncoder().encode(data).buffer as ArrayBuffer;
-        if (data instanceof Uint8Array) {
-            return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
-        }
-        return data;
-    }
-
-    private async computeSHA256(buffer: ArrayBuffer): Promise<string> {
-        const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-
-    // =========================================================
     // Export/Import Logic
     // =========================================================
 
@@ -626,13 +323,6 @@ export class SettingsService {
 
         // 重置状态
         this.state = { tags: [], contacts: [] };
-        this.syncConfig = {
-            serverUrl: '',
-            username: '',
-            strategy: 'manual',
-            autoSync: false
-        };
-        this.syncStatus = { state: 'idle', lastSyncTime: null };
         this.initialized = false;
     }
 
@@ -677,16 +367,6 @@ export class SettingsService {
      * 清理资源
      */
     async dispose(): Promise<void> {
-        // 取消事件订阅
-        this.eventUnsubscribers.forEach(fn => fn());
-        this.eventUnsubscribers = [];
-
-        // 清理定时器
-        if (this.syncTimer) {
-            clearTimeout(this.syncTimer);
-            this.syncTimer = null;
-        }
-
         // 清理监听器
         this.listeners.clear();
 

@@ -1,82 +1,52 @@
-// @file: app-settings/editors/StorageSettingsEditor.ts
-
-import { BaseSettingsEditor } from '@itookit/ui-common';
+import { BaseSettingsEditor, type EditorFactory, type EditorOptions, type IEditor } from '@itookit/ui-common';
+import { escapeHTML, t } from '@itookit/common';
 import { SettingsService } from '../services/SettingsService';
 import { StorageOverviewSection } from './storage/StorageOverviewSection';
-import { SyncSection } from './storage/SyncSection';
 import { SnapshotSection } from './storage/SnapshotSection';
 import { MigrationSection } from './storage/MigrationSection';
 import { DangerZoneSection } from './storage/DangerZoneSection';
-import { syncService } from '../services/SyncService';
 
+interface StorageSection { init(): void | Promise<void>; destroy?(): void | Promise<void>; }
+
+/** The host injects remote connection management without an upward app-core dependency. */
 export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
-  private sections: any[] = [];
-  private isStructureInitialized = false;
-
-  async init(container: HTMLElement): Promise<void> {
-    await super.init(container);
-  }
-
-  // [修复 2] 实现抽象方法 render
-  async render(): Promise<void> {
-    // 防止重复初始化：
-    // BaseSettingsEditor 在 Service 变更时可能会重复调用 render
-    // 我们只需要在第一次渲染时构建骨架和初始化子组件
-    if (this.isStructureInitialized) {
-      // 可选：如果子组件支持 update/refresh，可以在这里调用
-      // 例如：this.sections.forEach(s => s.render && s.render());
-      // 目前子组件大多通过内部订阅更新，所以这里可以直接返回
-      return;
+    private sections: StorageSection[] = [];
+    private remoteEditor?: IEditor;
+    private initialization?: Promise<void>;
+    private closed = false;
+    constructor(container: HTMLElement, service: SettingsService, options: EditorOptions, private readonly remoteFiles?: EditorFactory) {
+        super(container, service, options);
     }
-
-    // 1. 渲染主骨架
-    this.container.innerHTML = `
-      <div class="settings-page">
-        <div class="settings-page__header">
-          <div>
-            <h2 class="settings-page__title">存储与同步</h2>
-            <p class="settings-page__description">管理本地存储、远程同步和数据备份</p>
-          </div>
-        </div>
-
-        <div id="section-overview"></div>
-        <div id="section-sync"></div>
-        <div id="section-snapshot"></div>
-        <div id="section-migration"></div>
-        <div id="section-danger"></div>
-      </div>
-    `;
-
-    // 2. 实例化各个子组件
-    const overviewEl = this.container.querySelector('#section-overview') as HTMLElement;
-    const syncEl = this.container.querySelector('#section-sync') as HTMLElement;
-    const snapshotEl = this.container.querySelector('#section-snapshot') as HTMLElement;
-    const migrationEl = this.container.querySelector('#section-migration') as HTMLElement;
-    const dangerEl = this.container.querySelector('#section-danger') as HTMLElement;
-
-    // Wire VFS into syncService singleton so httpSync can read/write files
-    await syncService.init(this.service.vfs, this.service.workspaces);
-
-    const overviewSection = new StorageOverviewSection(overviewEl);
-    const syncSection = new SyncSection(syncEl);
-    const snapshotSection = new SnapshotSection(snapshotEl, this.service);
-    const migrationSection = new MigrationSection(migrationEl, this.service);
-    const dangerSection = new DangerZoneSection(dangerEl, this.service);
-
-    this.sections = [overviewSection, syncSection, snapshotSection, migrationSection, dangerSection];
-
-    // 3. 并行初始化
-    await Promise.all(this.sections.map(section => section.init()));
-
-    this.isStructureInitialized = true;
-  }
-
-  async destroy(): Promise<void> {
-    this.sections.forEach(section => section.destroy && section.destroy());
-    this.sections = [];
-    this.isStructureInitialized = false;
-    await super.destroy();
-  }
+    async render(): Promise<void> {
+        if (this.closed) return;
+        return this.initialization ??= this.initializeSections();
+    }
+    private async initializeSections(): Promise<void> {
+        this.container.innerHTML = `<div class="settings-page">
+            <div class="settings-page__header"><div>
+                <h2 class="settings-page__title">${escapeHTML(t('storage.title'))}</h2>
+                <p class="settings-page__description">${escapeHTML(t('storage.description'))}</p>
+            </div></div>
+            <div data-storage-section="overview"></div>
+            <div data-storage-section="remote"></div>
+            <div data-storage-section="snapshot"></div>
+            <div data-storage-section="migration"></div>
+            <div data-storage-section="danger"></div>
+        </div>`;
+        const section = (name: string) => this.container.querySelector<HTMLElement>(`[data-storage-section="${name}"]`)!;
+        this.sections = [new StorageOverviewSection(section('overview')), new SnapshotSection(section('snapshot'), this.service),
+            new MigrationSection(section('migration'), this.service), new DangerZoneSection(section('danger'), this.service)];
+        await Promise.all(this.sections.map(item => item.init()));
+        if (this.closed || !this.remoteFiles) return;
+        const editor = await this.remoteFiles(section('remote'), this.options);
+        if (this.closed) await editor.destroy(); else this.remoteEditor = editor;
+    }
+    async destroy(): Promise<void> {
+        this.closed = true;
+        await this.initialization?.catch(() => {});
+        await this.remoteEditor?.destroy(); this.remoteEditor = undefined;
+        await Promise.all(this.sections.map(section => section.destroy?.())); this.sections = [];
+        await super.destroy();
+    }
 }
-
 export default StorageSettingsEditor;

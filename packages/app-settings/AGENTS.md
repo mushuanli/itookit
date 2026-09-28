@@ -15,7 +15,7 @@ src/
 │   └── Appearance     ← 浅色/深色/跟随系统 主题切换，写入 /ui/theme.json
 ├── engine/            ← SettingsEngine + SkillsEngine (均为 IFileSystem 实现)
 ├── factories/         ← createSettingsFactory (nodeId → editor 路由)
-├── services/          ← SettingsService / SnapshotService / SyncService / LabelStore
+├── services/          ← SettingsService / SnapshotService / LabelStore
 └── styles/            ← settings CSS (_appearance.css, _cost.css 等)
 ```
 
@@ -32,3 +32,5 @@ src/
 [架构设计](./Architecture.md)
 
 系统恢复页通过 createSettingsFactory 的可选 restoreFlows 回调提供「恢复内置工作流」：只恢复缺失模板，保留已有内容。回调由 app-shell 注入 llm-ui.restoreFlowLibrary，设置包不依赖 Flow 运行器或 llm-ui。此操作与原有 Provider/Connection/Agent 强制重置分开。
+
+远程文件设置通过 `createSettingsFactory({ remoteFiles })` 注入 app-shell 编辑器，设置包不依赖 app-core。远程文件系统作为 StorageSettingsEditor 的子区域，支持多条命名连接；无远程 provider 时省略该区域，不单设 remote-files 页面。旧远程同步服务、同步配置加载与自动同步监听已经移除。

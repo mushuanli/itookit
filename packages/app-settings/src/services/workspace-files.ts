@@ -1,11 +1,10 @@
 import type { IFileSystem } from '@itookit/vfs-core';
 
-/** Host-selected sources for settings export and sync; names are UI labels, not filesystem roots. */
+/** Host-selected sources for settings export and tag management; names are UI labels, not filesystem roots. */
 export interface WorkspaceFileSource {
     readonly name: string;
     readonly description?: string;
     readonly fs: IFileSystem;
-    readonly syncEnabled: boolean;
     /**
      * Explicit override for callers that cannot mark the filesystem as external.
      * False excludes the source from tag recording/counting; defaults to true.

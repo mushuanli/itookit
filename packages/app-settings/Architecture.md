@@ -6,7 +6,6 @@ src/
 ├── services/
 │   ├── SettingsService.ts  ← 设置 CRUD (VFS 文件持久化 + 标签/快照/同步)
 │   ├── SnapshotService.ts  ← 配置快照 (备份/恢复)
-│   ├── SyncService.ts      ← 配置同步
 │   ├── LabelStore.ts       ← 全局标签存储 (/tags.seq)
 │   └── workspace-files.ts  ← WorkspaceFileSource / writeWorkspaceFile
 ├── engine/
@@ -22,13 +21,12 @@ src/
 │   ├── TagSettingsEditor.ts         ← 全局标签管理
 │   ├── SystemFSExploreEditor.ts     ← 跨模块只读 VFS 浏览 (system-fs/ 组装视图)
 │   ├── log/                         ← LogLevelConfigSection / LogOverviewSection / LogViewerSection
-│   ├── storage/                     ← StorageOverview / Migration / Snapshot / Sync / DangerZone Section
+│   ├── storage/                     ← StorageOverview / Migration / Snapshot / DangerZone Section
 │   └── system-fs/                   ← system-file-inspector.ts
 ├── factories/
 │   └── settingsFactory.ts  ← createSettingsFactory()
 ├── types/
 │   ├── types.ts            ← SettingsState, Contact, Tag...
-│   └── sync.ts             ← SyncMode
 └── styles/
 ```
 
@@ -85,8 +83,10 @@ const factory = createSettingsFactory(
 
 ## Conventions
 
-- 设置数据持久化在 VFS `/etc` 视图（`SettingsService.init()` 中 `vfs.openFileSystem('/etc')`）：标签 `/tags.seq`、联系人 `/contacts.json`、同步配置 `/sync_config.json`
+- 设置数据持久化在 VFS `/etc` 视图（`SettingsService.init()` 中 `vfs.openFileSystem('/etc')`）：标签 `/tags.seq`、联系人 `/contacts.json`
 - 编辑器继承 `BaseSettingsEditor`（`@itookit/ui-common`），实现 `IEditor`
-- `StorageSettingsEditor` 的子 section 各自独立：`StorageOverviewSection`, `MigrationSection`, `SnapshotSection`, `SyncSection`, `DangerZoneSection`
+- `StorageSettingsEditor` 的子 section 各自独立：`StorageOverviewSection`, `MigrationSection`, `SnapshotSection`, `DangerZoneSection`
 - `AppearanceSettingsEditor` 写 `/ui/theme.json`，通过 `app:theme-change` 事件广播
 - `SystemFSExploreEditor` 经 `createSystemFileInspector()` 组装只读视图：`/dev` 挂载设备描述，`/workspaces/<name>` 挂载各工作区文件系统
+
+Storage 的远程文件系统区域由 `createSettingsFactory({ remoteFiles })` 注入，支持多个命名连接，子编辑器随 Storage 销毁。已删除旧同步 UI、服务、HTTP 同步协议及自动同步定时器；旧同步配置不再读取。

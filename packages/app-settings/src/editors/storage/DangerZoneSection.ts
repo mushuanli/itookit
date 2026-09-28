@@ -2,7 +2,6 @@
 
 import { Toast, Modal } from '@itookit/ui-common';
 import { SettingsService } from '../../services/SettingsService';
-import { syncService } from '../../services/SyncService';
 
 export class DangerZoneSection {
   constructor(private container: HTMLElement, private service: SettingsService) {}
@@ -30,16 +29,6 @@ export class DangerZoneSection {
               </button>
             </div>
             
-            <div class="settings-action-card">
-              <div class="settings-action-card__icon">🔄</div>
-              <div class="settings-action-card__content">
-                <h3>清除同步缓存</h3>
-                <p>清除同步日志和临时数据，不影响实际文件</p>
-              </div>
-              <button id="btn-clear-sync-cache" class="settings-btn settings-btn--secondary">
-                <i class="fas fa-broom"></i> 清除缓存
-              </button>
-            </div>
           </div>
         </details>
       </div>
@@ -49,7 +38,6 @@ export class DangerZoneSection {
 
   private bindEvents(): void {
     this.container.querySelector('#btn-reset')?.addEventListener('click', () => this.confirmFactoryReset());
-    this.container.querySelector('#btn-clear-sync-cache')?.addEventListener('click', () => this.clearSyncCache());
   }
 
   private confirmFactoryReset(): void {
@@ -82,23 +70,4 @@ export class DangerZoneSection {
   }
 
 
-  /**
-   * 清除同步缓存
-   */
-  private clearSyncCache(): void {
-    Modal.confirm(
-      '清除同步缓存',
-      '这将清除同步日志、临时分片和队列数据，不会影响实际文件。确定继续？',
-      async () => {
-        try {
-          syncService.clearLogs();
-          //this.syncLogs = [];
-          Toast.success('同步缓存已清除');
-          //this.render();
-        } catch (e: any) {
-          Toast.error('清除失败: ' + e.message);
-        }
-      }
-    );
-  }
 }

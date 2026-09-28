@@ -46,11 +46,12 @@ export interface SettingsFactoryOptions {
     connectionService: IConnectionService;
     llmUiEditors: LLMUIEditors;
     connectBrowser: FileBrowserConnector;
+    remoteFiles?: EditorFactory;
     restoreFlows?: () => Promise<number>;
     requestDelete?: import('@itookit/ui-common').EditorHostContext['requestDelete'];
 }
 export const createSettingsFactory = ({ settingsService, agentService, connectionService, llmUiEditors,
-    connectBrowser, restoreFlows, requestDelete }: SettingsFactoryOptions): EditorFactory => {
+    connectBrowser, restoreFlows, requestDelete, remoteFiles }: SettingsFactoryOptions): EditorFactory => {
     return async (container: HTMLElement, options: EditorOptions) => {
         if (requestDelete) options = { ...options, hostContext: { toggleSidebar: () => {}, navigate: async () => {}, ...options.hostContext, requestDelete } };
         const nodeId = resolveSettingsSlug(editorResourceId(options) || '');
@@ -59,7 +60,7 @@ export const createSettingsFactory = ({ settingsService, agentService, connectio
         let editor: IEditor | null = null;
 
         switch (nodeId) {
-            case 'storage':     editor = new StorageSettingsEditor(container, settingsService, options); break;
+            case 'storage':     editor = new StorageSettingsEditor(container, settingsService, options, remoteFiles); break;
             case 'tags':        editor = new TagSettingsEditor(container, settingsService, options); break;
             case 'contacts':    editor = new ContactSettingsEditor(container, settingsService, options); break;
             case 'providers':   editor = new llmUiEditors.ProviderSettingsEditor(container, connectionService, options); break;

@@ -1,7 +1,5 @@
 // @file: app-settings/editors/storage/StorageOverviewSection.ts
 
-import { StorageUtils } from './StorageUtils';
-import { syncService } from '../../services/SyncService'; // 用于获取上次同步时间
 
 export class StorageOverviewSection {
   private storageInfo: StorageEstimate | null = null;
@@ -26,8 +24,6 @@ export class StorageOverviewSection {
     const usageMB = (usage / 1024 / 1024).toFixed(2);
     const quotaGB = (quota / 1024 / 1024 / 1024).toFixed(1);
     
-    // 获取上次同步时间
-    const lastSyncTime = syncService.getStatus().lastSyncTime;
 
     this.container.innerHTML = `
       <div class="settings-storage-overview">
@@ -49,12 +45,6 @@ export class StorageOverviewSection {
               <span class="settings-stat-item__label">浏览器配额</span>
               <span class="settings-stat-item__value">${quotaGB} GB</span>
             </div>
-            ${lastSyncTime ? `
-              <div class="settings-stat-item">
-                <span class="settings-stat-item__label">上次同步</span>
-                <span class="settings-stat-item__value">${StorageUtils.formatTime(lastSyncTime)}</span>
-              </div>
-            ` : ''}
           </div>
         </div>
       </div>
