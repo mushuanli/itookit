@@ -159,7 +159,8 @@ export class FileSystemView implements IFileSystem {
         if (!this.visible(path)) throw new FSError('EACCES', 'Path is outside the system projection');
         const m = this.find(path);
         if (!m) throw new FSError(write ? 'EROFS' : 'ENOENT', 'No source mounted at this path', undefined, path);
-        if (structural && this.mounts.some(n => P.isUnder(n.at.toLowerCase(), path.toLowerCase()))) throw new FSError('EBUSY', 'Cannot replace a mount or its ancestor', undefined, path);
+        // Mount names match case-sensitively, like every other virtual route in this view.
+        if (structural && this.mounts.some(n => P.isUnder(n.at, path))) throw new FSError('EBUSY', 'Cannot replace a mount or its ancestor', undefined, path);
         if (write && m.access === 'ro') throw new FSError('EROFS', 'Read-only mount', undefined, path);
         return m;
     }
@@ -363,15 +364,15 @@ export class FileSystemView implements IFileSystem {
             if (this.mounts.some(n => n !== m && P.isUnder(n.at, scopePath))) throw new FSError('EXMOUNT', 'Transaction scope contains other mounts');
             if (!m.fs.capabilities.atomicFileTransactions) throw new FSCapabilityError('transactions');
             return m.fs.driver.transaction(tx => fn(new Proxy({}, { get: (_, key: string) => (...args: any[]) => {
-                if (key === 'getNode') return this.statInTransaction(m, tx, args[0]);
+                if (key === 'getNode') return this.statInTransaction(m, tx, args[0], args[1]);
                 return this.driverCall(key, args, tx, m);
             } })));
         });
     }
-    private async statInTransaction(m: Binding, tx: object, path: string) {
+    private async statInTransaction(m: Binding, tx: object, path: string, options?: OperationOptions) {
         if (this.binding(path) !== m) throw new FSError('EXMOUNT', 'Transaction crossed a mount');
-        await this.noLinks(m, path);
-        const node = await this.invoke(m, tx, 'getNode', [this.sourcePath(m, path)]);
+        await this.noLinks(m, path, options);
+        const node = await this.invoke(m, tx, 'getNode', [this.sourcePath(m, path), options]);
         return node ? this.node(m, node) : null;
     }
 

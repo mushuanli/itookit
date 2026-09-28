@@ -271,7 +271,7 @@ export class DirectoryDriver implements IFSDriver {
     }
 
     async rename(path: string, newName: string, options?: OperationOptions): Promise<void> {
-        return this.runOperation('rename', path, this.resolveTarget(path), { newName }, async (args, node) => {
+        return this.runOperation('rename', path, this.resolveTarget(path, options), { newName }, async (args, node) => {
             const a = args as { newName: string };
             const realPath = this.ctx.toRealPath(path);
 

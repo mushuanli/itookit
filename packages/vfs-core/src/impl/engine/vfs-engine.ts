@@ -245,9 +245,9 @@ export class VFSEngine {
 
         checkOperation(options);
         if (backend.replace) {
-            if (!options?.ifRevision) throw new FSError('ECONFLICT', 'Read the file before conditional replacement');
-            if (options.mode === 'append' || options.offset !== undefined || options.expectedVersion !== undefined || options.metadata)
+            if (options?.mode === 'append' || options?.offset !== undefined || options?.expectedVersion !== undefined || options?.metadata)
                 throw new FSCapabilityError('conditional whole-file replacement only');
+            if (!options?.ifRevision) throw new FSError('ECONFLICT', 'Read the file before conditional replacement');
             const result = await backend.replace(localPath, new Uint8Array(toBuffer(content)), { kind: 'match', revision: options.ifRevision }, options);
             options.onRevision?.(result.revision); return;
         }
@@ -360,7 +360,7 @@ export class VFSEngine {
             if (options?.force) return;
             throw new FSError('ENOENT', 'not found', 'delete', path);
         }
-        await this.assertMutableLayout(path);
+        await this.assertMutableLayout(path, options);
         this._inc('delete'); await backend.delete(localPath, options);
 
         // Cascade: delete companion asset dir
@@ -374,9 +374,9 @@ export class VFSEngine {
     }
 
     /** A persisted pin protects a storage root, its ancestors and its contents. */
-    private async assertMutableLayout(path: string): Promise<void> {
+    private async assertMutableLayout(path: string, options?: OperationOptions): Promise<void> {
         const stat = async (current: string) => {
-            try { return await this.stat(current); }
+            try { return await this.stat(current, options); }
             catch (error) { if (error instanceof FSError && error.code === 'ENOENT') return null; throw error; }
         };
         for (let parent = P.normalize(path); ; parent = P.dirname(parent)) {
@@ -384,10 +384,10 @@ export class VFSEngine {
             if (node?.metadata.vfsFixedLayout) throw new FSError('EBUSY', 'Fixed storage layout; unpin before offline migration or deletion', 'structure', path);
             if (parent === '/') break;
         }
-        await this.assertMutableSubtree(path, stat);
+        await this.assertMutableSubtree(path, stat, options);
     }
 
-    private async assertMutableSubtree(path: string, stat: (path: string) => Promise<FSNode | null>): Promise<void> {
+    private async assertMutableSubtree(path: string, stat: (path: string) => Promise<FSNode | null>, options?: OperationOptions): Promise<void> {
         const { backend, localPath } = this.resolveStore(path);
         const prefix = P.normalize(path).replace(/\/$/, '') + '/';
         const nestedMount = this._mountRouter?.listMounts().some(mount => mount.mountPath.startsWith(prefix));
@@ -396,7 +396,7 @@ export class VFSEngine {
         const visit = async (current: string): Promise<void> => {
             const node = await stat(current);
             if (node?.metadata.vfsFixedLayout) throw new FSError('EBUSY', 'Contains a fixed storage layout', 'structure', path);
-            if (node?.type === 'directory') for (const child of await this.listChildren(current)) await visit(child.path);
+            if (node?.type === 'directory') for (const child of await this.listChildren(current, options)) await visit(child.path);
         };
         await visit(path);
     }
@@ -404,13 +404,13 @@ export class VFSEngine {
     // ── Rename / Move ──
 
     async rename(path: string, newName: string, options?: OperationOptions): Promise<void> {
-        await this.assertMutableLayout(path);
+        await this.assertMutableLayout(path, options);
         validateFilename(newName, this.filenamePattern);
         const { backend, localPath } = this.resolveStore(path);
         const dir = P.dirname(localPath);
         const newPath = dir === '/' ? `/${newName}` : `${dir}/${newName}`;
 
-        this._inc('stat'); const existing = await backend.stat(newPath);
+        this._inc('stat'); const existing = await backend.stat(newPath, options);
         if (existing) throw new FSAlreadyExistsError(newName, dir);
 
         this._inc('rename'); await backend.rename(localPath, newPath, options);
@@ -425,8 +425,8 @@ export class VFSEngine {
     }
 
     async move(sourcePath: string, targetParentPath: string, options?: OperationOptions): Promise<void> {
-        await this.assertMutableLayout(sourcePath);
-        await this.assertMutableLayout(P.join(targetParentPath, P.basename(sourcePath)));
+        await this.assertMutableLayout(sourcePath, options);
+        await this.assertMutableLayout(P.join(targetParentPath, P.basename(sourcePath)), options);
         const { backend: srcBackend, localPath: srcLocal } = this.resolveStore(sourcePath);
         const { backend: dstBackend, localPath: dstLocal } = this.resolveStore(targetParentPath);
 

@@ -91,7 +91,7 @@ export interface IStorageBackend {
 
     // ── 生命周期 ──
 
-    init(): Promise<void>;
+    init(options?: OperationOptions): Promise<void>;
     close(): Promise<void>;
 }
 

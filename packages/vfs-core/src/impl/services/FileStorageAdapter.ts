@@ -7,7 +7,7 @@ import { normalizeVirtualPath } from './FileSystemView';
 export class FileStorageAdapter implements IStorageBackend {
     constructor(readonly fileStorage: FileStorageBackend) {}
     get name() { return this.fileStorage.name; }
-    init() { return this.fileStorage.init(); }
+    init(options?: OperationOptions) { return this.fileStorage.init(options); }
     close() { return this.fileStorage.close(); }
     async stat(path: string, options?: OperationOptions): Promise<FSNode | null> {
         const stat = await this.fileStorage.files.stat(this.path(path), options);
