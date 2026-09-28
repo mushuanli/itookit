@@ -189,11 +189,16 @@ class BrowserBackend implements IStorageBackend {
     private folderNode(folder: SessionFolder): FSNode {
         const title = folder.name === '@sessions' ? t('project.sessions') : folder.name;
         const node = this.node(folderBrowserPath(folder.path), title, true, folder.updatedAt);
-        const mounts = folder.project ? this.deps.projects?.remoteMounts?.list(folder.project.id) ?? [] : [];
-        const offline = mounts.some(mount => this.deps.projects!.remoteMounts!.status(mount.mountId) === 'offline');
+        const remote = this.deps.projects?.remoteMounts;
+        const mounts = folder.project && remote ? remote.list(folder.project.id) : [];
+        const offline = !!folder.project && !!remote && mounts.some(mount => remote.status(mount.mountId) === 'offline');
+        // A shadowed or unavailable source is reported on the drawer instead of only inside the
+        // mount dialog, so the workbench shows why a project is degraded.
+        const degraded = !!folder.project && !!remote && remote.degraded(folder.project.id);
         return { ...node, ...(folder.project ? { icon: mounts.length ? ENTITY_ICONS.remoteProject : ENTITY_ICONS.project } : {}),
             metadata: { ...node.metadata, ...(folder.project ? { projectId: folder.project.id, directory: folder.project.directory, remoteProject: mounts.length > 0,
-                remoteOffline: offline, _disabled: offline, _readOnly: offline, navigationDescription: mounts.length ? t(offline ? 'remote.projectOffline' : 'remote.projectRemote') : '' } : {}) } };
+                remoteOffline: offline, _disabled: offline, _readOnly: offline,
+                navigationDescription: mounts.length ? t(offline ? 'remote.projectOffline' : degraded ? 'remote.degraded' : 'remote.projectRemote') : '' } : {}) } };
     }
     private isFolderContainer(path: string): boolean {
         if (path === '/') return true;
@@ -369,6 +374,9 @@ class BrowserBackend implements IStorageBackend {
             if (!folderPath) throw new FSError('EINVAL', 'Cannot delete the Session browser root');
             if (folderPath.endsWith('/@sessions')) throw new FSError('EACCES', 'Cannot delete the Sessions section');
             const projects = (await this.deps.projects?.list() ?? []).filter(project => project.path === folderPath || project.path.startsWith(folderPath + '/'));
+            // Busy check before the destructive delete: once the Sessions are gone the lease and
+            // active-Task guard can no longer see them.
+            for (const project of projects) await this.deps.projects?.remoteMounts?.assertUnmountable(project.project.id);
             await this.lifecycle.deleteFolder(folderPath, true);
             for (const project of projects) await this.deps.projects?.remoteMounts?.forgetProject(project.project.id);
             return;

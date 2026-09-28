@@ -30,6 +30,7 @@ it('shares project remote grants with Sessions, retains remote routing during sh
         await root.driver.createDirectory({ parentPath: project.project.directory, name: 'reference' });
         const shadow = await runtime.projects.openFiles(project.path);
         expect(runtime.projects.remoteMounts!.diagnostics.get(project.project.id)).toContain('MOUNT_SHADOW_CONFLICT:/reference');
+        expect(runtime.projects.remoteMounts!.degraded(project.project.id)).toBe(true);
         expect(await shadow.fs.driver.readContent('/reference/guide.md', { encoding: 'utf-8' })).toBe('remote'); await shadow.dispose();
         const [mount] = runtime.projects.remoteMounts!.list(project.project.id);
         await runtime.projects.remoteMounts!.remove(project.project.id, mount.mountId);
@@ -144,5 +145,110 @@ it('shares named connections across distinct remote roots and reuses the same pr
             const recreated = await runtime.projects.createRemote('B again', null, connection, '/docs/b');
             expect(recreated.project.id).not.toBe(b.project.id);
         } finally { await browser.dispose(); }
+    } finally { await runtime.dispose(); }
+});
+
+/** Shared provider that exposes a writable-looking `/a` directory for one export alias. */
+function memoryProvider(hooks: { onOpen?: (connection: { credentialRef: string }) => void } = {}) {
+    return { setCredential() {}, async dispose() {}, async open(connection: { credentialRef: string }) {
+        hooks.onOpen?.(connection);
+        const backend = new MemoryBackend(); await backend.init(); await backend.mkdir('/a');
+        return createFileSystemSource({ backend, viewId: 'remote', access: 'ro' });
+    } };
+}
+
+it('keeps the same remote path under a different account as a separate grant', async () => {
+    const runtime = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'web', remoteSourceProvider: memoryProvider() });
+    try {
+        const remote = runtime.projects.remoteMounts!;
+        const alice = await remote.saveConnection({ name: 'Alice files', endpoint: 'files.test', username: 'alice' }, 'alice-secret');
+        const bob = await remote.saveConnection({ name: 'Bob files', endpoint: 'files.test', username: 'bob' }, 'bob-secret');
+        const a = await runtime.projects.createRemote('A', null, alice, '/docs/a');
+        const b = await runtime.projects.createRemote('B', null, bob, '/docs/a');
+        expect(b.project.id).not.toBe(a.project.id);
+        expect(remote.list(b.project.id)[0].username).toBe('bob');
+        expect(remote.list(a.project.id)[0].username).toBe('alice');
+    } finally { await runtime.dispose(); }
+});
+
+it('checks that a project is unmountable before destroying its Sessions', async () => {
+    const runtime = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'web', remoteSourceProvider: memoryProvider() });
+    const browser = await createSessionBrowser({ repository: runtime.sessionRepository, files: runtime.sessionFiles,
+        projects: runtime.projects, kernel: runtime.kernel.kernel });
+    try {
+        const remote = runtime.projects.remoteMounts!;
+        const connection = await remote.saveConnection({ name: 'Files', endpoint: 'files.test', username: 'alice' }, 'secret');
+        const project = await runtime.projects.createRemote('Remote', null, connection, '/docs/a');
+        remote.assertUnmountable = async () => { throw new FSError('EBUSY', 'busy'); };
+        await expect(browser.fs.driver.delete([folderBrowserPath(project.path)], { recursive: true })).rejects.toMatchObject({ code: 'EBUSY' });
+        expect((await runtime.projects.list()).some(item => item.project.id === project.project.id)).toBe(true);
+        expect(remote.list(project.project.id)).toHaveLength(1);
+    } finally { await browser.dispose(); await runtime.dispose(); }
+});
+
+it('recovers the connection state after a transient handshake failure and keeps the previous state on cancel', async () => {
+    let handshake = true;
+    const runtime = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'web', remoteSourceProvider: {
+        ...memoryProvider(),
+        async check() { if (handshake) throw new FSError('EIO', 'transient'); },
+    } });
+    try {
+        const remote = runtime.projects.remoteMounts!;
+        const connection = await remote.saveConnection({ name: 'Files', endpoint: 'files.test', username: 'alice' }, 'secret');
+        await runtime.projects.createRemote('Remote', null, connection, '/docs/a');
+        // The handshake failed, but the mount probe succeeded: the connection is reachable.
+        await remote.checkConnection(connection, { timeoutMs: 1000 });
+        expect(remote.connectionStatus(connection)).toBe('online');
+        handshake = false;
+        const controller = new AbortController(); controller.abort();
+        await remote.checkConnection(connection, { signal: controller.signal });
+        expect(remote.connectionStatus(connection)).toBe('online');
+    } finally { await runtime.dispose(); }
+});
+
+it('skips damaged catalog records instead of blocking startup', async () => {
+    const runtime = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'web', remoteSourceProvider: memoryProvider() });
+    try {
+        const remote = runtime.projects.remoteMounts!;
+        const connection = await remote.saveConnection({ name: 'Files', endpoint: 'files.test', username: 'alice' }, 'secret');
+        const project = await runtime.projects.createRemote('Remote', null, connection, '/docs/a');
+        const root = await runtime.vfs.openFileSystem('/');
+        const path = '/etc/project-remote-mounts.seq';
+        const raw = (await root.meta.seq!.getEntry(path, 'catalog'))!;
+        const parsed = JSON.parse(raw);
+        parsed.projects[project.project.id].push({ mountId: 'damaged', at: 'relative', root: '/', access: 'ro' });
+        await root.meta.seq!.transaction(async tx => {
+            await tx.compareAndSet(path, 'catalog', { expected: raw, value: JSON.stringify(parsed) });
+        });
+        const { ProjectRemoteMountService } = await import('../src/projects/remote-mounts');
+        const reloaded = new ProjectRemoteMountService(root, memoryProvider(), async () => {}, async () => {});
+        await reloaded.init();
+        expect(reloaded.loadWarnings.some(warning => warning.startsWith('INVALID_MOUNT'))).toBe(true);
+        expect(reloaded.list(project.project.id)).toHaveLength(1);
+        await reloaded.dispose();
+    } finally { await runtime.dispose(); }
+});
+
+it('releases the replaced source even when view invalidation fails', async () => {
+    const disposed: string[] = [];
+    let failAfter = false;
+    const provider = { setCredential() {}, async dispose() {}, async open(connection: { credentialRef: string }) {
+        const backend = new MemoryBackend(); await backend.init(); await backend.mkdir('/a');
+        const owner = await createFileSystemSource({ backend, viewId: connection.credentialRef, access: 'ro' });
+        const dispose = owner.dispose.bind(owner);
+        owner.dispose = async () => { disposed.push(connection.credentialRef); await dispose(); };
+        return owner;
+    } };
+    const runtime = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'web' });
+    try {
+        const root = await runtime.vfs.openFileSystem('/');
+        const { ProjectRemoteMountService } = await import('../src/projects/remote-mounts');
+        const service = new ProjectRemoteMountService(root, provider, async () => {}, async () => { if (failAfter) throw new Error('after failed'); });
+        const connection = await service.saveConnection({ name: 'Files', endpoint: 'files.test', username: 'alice' }, 'secret');
+        await service.bindProject('granted', connection, '/docs/a', 'ro');
+        failAfter = true;
+        await expect(service.reconnect('granted', service.list('granted')[0].mountId, 'new-secret')).rejects.toThrow('after failed');
+        expect(disposed).toHaveLength(1);
+        await service.dispose();
     } finally { await runtime.dispose(); }
 });

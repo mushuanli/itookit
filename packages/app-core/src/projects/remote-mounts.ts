@@ -1,5 +1,5 @@
 import { randomUUID } from '@itookit/common';
-import { checkOperation, createFileSystemView, FSError, normalizeVirtualPath,
+import { checkOperation, createFileSystemView, FSError, normalizeVirtualPath, operationScope,
     type FileSystemSourceOwner, type FileSystemMount, type IFileSystem, type OperationOptions } from '@itookit/vfs-core';
 import { createUnavailableDirectory } from '../vfs/unavailable-directory';
 import { normalizeConnection, remoteProjectPath, type RemoteFileSystemConfig, type RemoteFileSystemInput } from './remote-connections';
@@ -28,9 +28,12 @@ export class ProjectRemoteMountService {
     private closed = false;
     private persisted: string | null = null;
     private readonly states = new Map<string, RemoteConnectionStatus>();
+    private readonly connectionStates = new Map<string, RemoteConnectionStatus>();
     private readonly listeners = new Set<() => void>();
     private readonly probes = new Map<string, Promise<void>>();
     readonly diagnostics = new Map<string, string[]>();
+    /** Entries dropped while loading the catalog, so a single bad record cannot block startup. */
+    readonly loadWarnings: string[] = [];
     constructor(private readonly store: IFileSystem, private readonly provider: RemoteFileSourceProvider,
         private readonly beforeChange: (projectId: string) => Promise<void>,
         private readonly afterChange: (projectId: string) => Promise<void>) {}
@@ -38,22 +41,34 @@ export class ProjectRemoteMountService {
         if (!await this.store.driver.exists(catalogPath)) return;
         const raw = await this.store.meta.seq!.getEntry(catalogPath, 'catalog');
         if (raw === null || raw === undefined) return;
-        const saved: Catalog = JSON.parse(raw);
+        let saved: Catalog;
+        try { saved = JSON.parse(raw) as Catalog; }
+        catch { throw new FSError('EINVAL', 'Invalid remote mount catalog'); }
         this.persisted = raw;
-        if (saved.version !== 1 || (!Number.isSafeInteger(saved.revision) || saved.revision < 0) || !saved.projects || typeof saved.projects !== 'object') throw new FSError('EINVAL', 'Invalid remote mount catalog');
-        for (const mounts of Object.values(saved.projects)) {
-            if (!Array.isArray(mounts)) throw new FSError('EINVAL', 'Invalid remote mounts');
-            mounts.forEach(validateMount);
+        if (!saved || saved.version !== 1 || (!Number.isSafeInteger(saved.revision) || saved.revision < 0) || !saved.projects || typeof saved.projects !== 'object') throw new FSError('EINVAL', 'Invalid remote mount catalog');
+        // Validate per record: a single damaged entry must not stop the whole application from
+        // starting, and the surviving grants stay usable.
+        const connections = (Array.isArray(saved.connections) ? saved.connections : []).filter(connection => {
+            try {
+                normalizeConnection(connection);
+                if (!connection.id || !connection.credentialRef) throw new FSError('EINVAL', 'Invalid connection reference');
+                return true;
+            } catch { this.loadWarnings.push(`INVALID_CONNECTION:${(connection as { id?: string })?.id ?? 'unknown'}`); return false; }
+        });
+        const known = new Set(connections.map(connection => connection.id));
+        const projects: Record<string, ProjectRemoteMount[]> = {};
+        for (const [projectId, mounts] of Object.entries(saved.projects)) {
+            if (!Array.isArray(mounts)) { this.loadWarnings.push(`INVALID_PROJECT:${projectId}`); continue; }
+            const valid = mounts.filter(mount => {
+                try {
+                    validateMount(mount);
+                    if (mount.connectionId && !known.has(mount.connectionId)) throw new FSError('EINVAL', 'Missing remote connection');
+                    return true;
+                } catch { this.loadWarnings.push(`INVALID_MOUNT:${projectId}`); return false; }
+            });
+            if (valid.length) projects[projectId] = valid;
         }
-        if (saved.connections !== undefined && !Array.isArray(saved.connections)) throw new FSError('EINVAL', 'Invalid remote connections');
-        for (const connection of saved.connections ?? []) {
-            normalizeConnection(connection);
-            if (!connection.id || !connection.credentialRef) throw new FSError('EINVAL', 'Invalid connection reference');
-        }
-        for (const mounts of Object.values(saved.projects)) for (const mount of mounts) {
-            if (mount.connectionId && !saved.connections?.some(item => item.id === mount.connectionId)) throw new FSError('EINVAL', 'Missing remote connection');
-        }
-        this.catalog = saved;
+        this.catalog = { ...saved, projects, connections };
     }
     list(projectId: string): ProjectRemoteMount[] {
         return structuredClone((this.catalog.projects[projectId] ?? []).map(mount => {
@@ -68,17 +83,20 @@ export class ProjectRemoteMountService {
         return connection;
     }
     async checkConnection(id: string, options?: OperationOptions): Promise<void> {
-        const connection = this.connection(id), projects = this.connectionProjects(id);
-        this.setStatus(id, 'checking');
+        const connection = this.connection(id), projects = this.connectionProjects(id), previous = this.connectionStatus(id);
+        this.setConnectionStatus(id, 'checking');
+        let handshakeFailed = false;
         try {
             if (this.provider.check) await this.provider.check(connection, options);
             else if (!projects.length) throw new FSError('ECAPABILITY', 'Connection checks unavailable');
-            await Promise.all(projects.map(projectId => this.checkConnections(projectId, options)));
-            this.setStatus(id, projects.some(projectId => this.projectOffline(projectId)) ? 'offline' : 'online');
-        } catch {
-            this.setStatus(id, 'offline');
-            if (!options?.signal?.aborted) await Promise.all(projects.map(projectId => this.checkConnections(projectId, options)));
-        }
+        } catch { handshakeFailed = !options?.signal?.aborted; }
+        if (options?.signal?.aborted) { this.setConnectionStatus(id, previous); return; }
+        // Probe the mounts either way: a failed handshake must not pin a reachable connection to
+        // offline, and the mounts' own probes are what the workbench availability state derives from.
+        if (projects.length) await Promise.all(projects.map(projectId => this.checkConnections(projectId, options)));
+        if (options?.signal?.aborted) { this.setConnectionStatus(id, previous); return; }
+        const offline = projects.some(projectId => this.projectOffline(projectId)) || (handshakeFailed && !projects.length);
+        this.setConnectionStatus(id, offline ? 'offline' : 'online');
     }
     saveConnection(input: RemoteFileSystemInput, password: string, id?: string): Promise<string> {
         return this.serial(async () => {
@@ -107,6 +125,7 @@ export class ProjectRemoteMountService {
         return this.serial(async () => {
             if (this.connectionProjects(id).length) throw new FSError('EBUSY', 'Remote file system is referenced by projects');
             await this.persist({ ...this.catalog, connections: this.connections().filter(item => item.id !== id) });
+            this.connectionStates.delete(id);
             for (const listener of this.listeners) listener();
         });
     }
@@ -118,6 +137,7 @@ export class ProjectRemoteMountService {
             const projects = { ...this.catalog.projects }; delete projects[projectId];
             await this.persist({ ...this.catalog, projects });
             await this.changed(projectId);
+            this.diagnostics.delete(projectId);
             for (const mount of mounts) await this.releaseSource(mount.mountId);
         });
     }
@@ -130,8 +150,11 @@ export class ProjectRemoteMountService {
     }
     findRemoteProject(connectionId: string, path: string): string | undefined {
         const connection = this.connection(connectionId), { alias, root } = remoteProjectPath(path);
+        // Identity is part of the key: the same path under a different account is a different grant,
+        // never a silent reuse of another user's project.
         return Object.keys(this.catalog.projects).find(id => this.list(id).some(mount => mount.at === '/'
-            && mount.endpoint === connection.endpoint && mount.alias === alias && mount.root === root));
+            && mount.endpoint === connection.endpoint && mount.username === connection.username
+            && mount.alias === alias && mount.root === root));
     }
     bindProject(projectId: string, connectionId: string, path: string, access: 'ro' | 'rw', options?: OperationOptions): Promise<void> {
         return this.serial(async () => {
@@ -151,7 +174,12 @@ export class ProjectRemoteMountService {
         });
     }
     projectOffline(projectId: string): boolean { return this.list(projectId).some(mount => this.status(mount.mountId) === 'offline'); }
+    /** A project whose mounts shadow each other or lost a source; it stays usable and reports why. */
+    degraded(projectId: string): boolean { return (this.diagnostics.get(projectId)?.length ?? 0) > 0; }
     status(mountId: string): RemoteConnectionStatus { return this.states.get(mountId) ?? 'unknown'; }
+    connectionStatus(id: string): RemoteConnectionStatus { return this.connectionStates.get(id) ?? 'unknown'; }
+    /** Read-only precheck for destructive callers: fails while any affected Session is busy. */
+    async assertUnmountable(projectId: string): Promise<void> { await this.beforeChange(projectId); }
     onChange(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
     async checkConnections(projectId: string, options?: OperationOptions): Promise<void> {
         if (this.closed) return;
@@ -162,14 +190,16 @@ export class ProjectRemoteMountService {
         const previous = this.status(mount.mountId);
         if (previous === 'unknown') this.setStatus(mount.mountId, 'checking');
         const work = (async () => {
+            // One budget for opening and probing: a 3s check must not spend 3s per step.
+            const scope = operationScope({ timeoutMs: 3000, ...options });
             try {
-                checkOperation(options);
-                const source = await this.resolve(mount, options);
-                if ((await source.fs.driver.getNode(mount.root, options))?.type !== 'directory') throw new FSError('ENOTDIR', 'Remote root unavailable');
+                checkOperation(scope.options);
+                const source = await this.resolve(mount, scope.options);
+                if ((await source.fs.driver.getNode(mount.root, scope.options))?.type !== 'directory') throw new FSError('ENOTDIR', 'Remote root unavailable');
                 this.setStatus(mount.mountId, 'online');
             } catch {
-                this.setStatus(mount.mountId, options?.signal?.aborted ? previous : 'offline');
-            } finally { this.probes.delete(mount.mountId); }
+                this.setStatus(mount.mountId, scope.options.signal?.aborted ? previous : 'offline');
+            } finally { scope.dispose(); this.probes.delete(mount.mountId); }
         })();
         this.probes.set(mount.mountId, work); return work;
     }
@@ -177,13 +207,17 @@ export class ProjectRemoteMountService {
         if (this.status(id) === status || this.closed) return;
         this.states.set(id, status); for (const listener of this.listeners) listener();
     }
+    private setConnectionStatus(id: string, status: RemoteConnectionStatus) {
+        if (this.connectionStatus(id) === status || this.closed) return;
+        this.connectionStates.set(id, status); for (const listener of this.listeners) listener();
+    }
     add(projectId: string, input: Omit<ProjectRemoteMount, 'mountId' | 'credentialRef' | 'access'> & { access?: 'ro' | 'rw' },
         secret: string, base: IFileSystem, options?: OperationOptions): Promise<void> {
         return this.serial(async () => {
             checkOperation(options); await this.beforeChange(projectId);
             const id = randomUUID(), mount: ProjectRemoteMount = { ...input, mountId: id, credentialRef: id, access: input.access ?? 'ro' };
             validateMount(mount);
-            if (this.list(projectId).some(item => item.at.toLowerCase() === mount.at.toLowerCase()) || await base.driver.exists(mount.at, options)) throw new FSError('EEXIST', 'MOUNT_POINT_CONFLICT');
+            if (this.list(projectId).some(item => item.at === mount.at) || await base.driver.exists(mount.at, options)) throw new FSError('EEXIST', 'MOUNT_POINT_CONFLICT');
             const restore = this.provider.setCredential(id, secret);
             let owner: FileSystemSourceOwner;
             try { owner = await this.provider.open(mount, options); }
@@ -225,7 +259,9 @@ export class ProjectRemoteMountService {
             } catch (error) { restore?.(); await next.dispose(); throw error; }
             this.sources.set(mountId, Promise.resolve(next));
             this.setStatus(mountId, 'online');
-            await this.changed(projectId); await (await old)?.dispose();
+            // The replaced source is released even when view invalidation fails, or repeated
+            // reconnects would leak a live remote connection each time.
+            try { await this.changed(projectId); } finally { await (await old)?.dispose(); }
         });
     }
     async compose(projectId: string, base: FileSystemSourceOwner): Promise<FileSystemSourceOwner> {
@@ -256,7 +292,7 @@ export class ProjectRemoteMountService {
         await Promise.allSettled(this.probes.values());
         await Promise.all([...this.views.values()].flatMap(views => [...views].map(owner => owner.dispose())));
         await Promise.all([...this.sources.values(), ...this.missing.values()].map(async value => (await value.catch(() => undefined))?.dispose()));
-        this.sources.clear(); this.missing.clear(); this.listeners.clear(); await this.provider.dispose();
+        this.sources.clear(); this.missing.clear(); this.listeners.clear(); this.states.clear(); this.connectionStates.clear(); await this.provider.dispose();
     }
     private async changed(projectId: string) {
         await Promise.all([...(this.views.get(projectId) ?? [])].map(owner => owner.dispose()));
