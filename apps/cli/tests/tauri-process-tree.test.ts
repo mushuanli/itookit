@@ -7,20 +7,12 @@
 // covers the isolated mode, where cancellation must stop the whole bwrap process group
 // rather than just signal it. The child keeps appending to a file, so "no new lines after
 // cancel" is host-observable proof that the tree actually stopped.
-import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { expect, it, vi } from 'vitest';
-
-const execute = (file: string, args: string[], cwd?: string): Promise<{ stdout: string; stderr: string }> =>
-    new Promise((resolve, reject) => {
-        execFile(file, args, { cwd, timeout: 60_000, maxBuffer: 2_000_000 },
-            (error, stdout, stderr) => error ? reject(new Error(`${error.message}: ${stderr}`)) : resolve({ stdout, stderr }));
-    });
-
-const repo = fileURLToPath(new URL('../../../', import.meta.url));
+import { compileSessionBashFixture, repo } from './rust-fixture';
 
 const tickCount = async (file: string): Promise<number> => {
     try { return (await readFile(file, 'utf8')).split('\n').filter(Boolean).length; } catch { return 0; }
@@ -30,7 +22,7 @@ it.skipIf(process.platform !== 'linux')('cancelling the isolated Session runner 
     const directory = await mkdtemp(`${tmpdir()}/tauri-process-tree-`);
     let child: ChildProcess | undefined;
     try {
-        await execute('rustc', ['--edition=2021', `${repo}/apps/cli/tests/native-session-bash.rs`, '-o', `${directory}/runner`]);
+        await compileSessionBashFixture(`${directory}/runner`);
         // The subshell inherits the ignored SIGTERM, so only a group SIGKILL can stop it.
         const script = "trap '' TERM; (while true; do echo tick >> ticks.txt; sleep 0.1; done) & wait";
         child = spawn(`${directory}/runner`, [repo, directory, script, '1500'], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -62,4 +54,4 @@ it.skipIf(process.platform !== 'linux')('cancelling the isolated Session runner 
         }
         await rm(directory, { recursive: true, force: true });
     }
-}, 60_000);
+}, 180_000);

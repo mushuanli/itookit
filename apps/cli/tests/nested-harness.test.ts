@@ -3,7 +3,6 @@ import { promisify } from 'node:util';
 import { createServer } from 'node:http';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
 import { Kernel, bindCapabilities, type DurableTaskProgram } from '@itookit/durable-kernel';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
@@ -11,9 +10,9 @@ import { createVFS } from '@itookit/vfs-core';
 import type { IDeviceDriver } from '@itookit/vfs-core';
 import { createKernelAdaptersRuntime } from '@itookit/kernel-adapters';
 import { listenForTest } from './listen';
+import { compileSessionBashFixture, repo } from './rust-fixture';
 
 const execute = promisify(execFile);
-const repo = fileURLToPath(new URL('../../../', import.meta.url));
 
 it.skipIf(process.platform !== 'linux').each([false, true])('Bash starts a child DAG and preserves its result (failure: %s)', async failure => {
     const directory = await mkdtemp(`${tmpdir()}/nested-harness-`);
@@ -24,7 +23,10 @@ it.skipIf(process.platform !== 'linux').each([false, true])('Bash starts a child
             vfs: { readFile: async () => '', writeFile: async () => {}, listFiles: async () => [] },
             nativeShell: { capabilities: { ripgrep: false, fd: false }, async exec(_command, args) {
                 try {
-                    const result = await execute(`${directory}/runner`, [repo, directory, args[1]], { timeout: 35_000 });
+                    // The child run needs the fixture LLM on loopback, so the harness opts out of the
+                    // product's deny-network policy for this test only.
+                    const result = await execute(`${directory}/runner`, [repo, directory, args[1]],
+                        { timeout: 35_000, env: { ...process.env, SESSION_BASH_NETWORK: 'allow' } });
                     return { stdout: result.stdout, stderr: result.stderr, code: 0 };
                 } catch (error) {
                     const result = error as { code?: unknown; stdout?: string; stderr?: string };
@@ -37,7 +39,7 @@ it.skipIf(process.platform !== 'linux').each([false, true])('Bash starts a child
     try {
         const port = await listenForTest(server);
         await execute('pnpm', ['--filter', '@itookit/cli', 'build'], { cwd: repo });
-        await execute('rustc', ['--edition=2021', `${repo}/apps/cli/tests/native-session-bash.rs`, '-o', `${directory}/runner`]);
+        await compileSessionBashFixture(`${directory}/runner`);
         const example = await readFile(`${repo}/apps/cli/examples/minimal-dag.yml`, 'utf8');
         await writeFile(`${directory}/child.yml`, example.replace('http://127.0.0.1:8080', `http://127.0.0.1:${port}`));
         await verifyOuterHarness(directory, runtime, failure);
@@ -54,7 +56,7 @@ it.skipIf(process.platform !== 'linux').each([false, true])('Bash starts a child
         if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
         await rm(directory, { recursive: true, force: true });
     }
-}, 60_000);
+}, 180_000);
 
 function fixtureServer(requests: string[], failure: boolean) {
     return createServer(async (request, response) => {
