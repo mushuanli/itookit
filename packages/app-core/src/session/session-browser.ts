@@ -197,7 +197,7 @@ class BrowserBackend implements IStorageBackend {
         const degraded = !!folder.project && !!remote && remote.degraded(folder.project.id);
         return { ...node, ...(folder.project ? { icon: mounts.length ? ENTITY_ICONS.remoteProject : ENTITY_ICONS.project } : {}),
             metadata: { ...node.metadata, ...(folder.project ? { projectId: folder.project.id, directory: folder.project.directory, remoteProject: mounts.length > 0,
-                remoteOffline: offline, _disabled: offline, _readOnly: offline,
+                remoteOffline: offline, _disabled: false, _readOnly: offline,
                 navigationDescription: mounts.length ? t(offline ? 'remote.projectOffline' : degraded ? 'remote.degraded' : 'remote.projectRemote') : '' } : {}) } };
     }
     private isFolderContainer(path: string): boolean {
@@ -258,7 +258,7 @@ class BrowserBackend implements IStorageBackend {
             return [
                 ...folders.filter(folder => folder.parentPath === folderPath).map(folder => this.folderNode(folder)),
                 ...(this.deps.projects && folders.find(folder => folder.path === folderPath)?.project
-                    ? [this.node(path + '/@files', t('project.files'), true)] : []),
+                    ? [await this.fileEntry(path + '/@files', folderPath)] : []),
                 ...this.sessionNodes(sessions, folderPath),
             ];
         }
@@ -296,6 +296,12 @@ class BrowserBackend implements IStorageBackend {
                     navigationDescription: relative === mount.at ? t(`remote.state.${status}`) : node.metadata.navigationDescription } };
         });
     }
+    private async fileEntry(path: string, folder: string | null): Promise<FSNode> {
+        const project = await this.deps.projects?.forFolder(folder);
+        const offline = !!project && !!this.deps.projects?.remoteMounts?.projectOffline(project.project.id);
+        return { ...this.node(path, t('project.files'), true), metadata: { _disabled: offline, _readOnly: offline,
+            ...(offline ? { navigationDescription: t('remote.projectOffline') } : {}) } };
+    }
     private async assertAvailable(path: string): Promise<void> {
         if (!this.deps.projects?.remoteMounts) return;
         const target = resolveBrowserTarget(path);
@@ -305,8 +311,8 @@ class BrowserBackend implements IStorageBackend {
         if (project && this.deps.projects.remoteMounts.projectOffline(project.project.id)) throw new FSError('EACCES', 'Remote project unavailable');
     }
     async read(path: string): Promise<Uint8Array> {
-        await this.assertAvailable(path);
         const target = resolveBrowserTarget(path);
+        if (isFileTarget(target)) await this.assertAvailable(path);
         if (target.kind === 'folder') throw new FSError('EISDIR', 'Open this folder using its browser target');
         if (target.kind === 'session') return this.sessionBundle(target.sessionId);
         if (isFileTarget(target)) return this.withFiles(target, async fs => new Uint8Array(await fs.driver.readContent(target.path, { encoding: 'binary' })));
