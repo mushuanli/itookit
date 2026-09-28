@@ -116,3 +116,38 @@ it('creates project Sessions from the selected project and edits its files in th
         document.body.replaceChildren(); vi.unstubAllGlobals();
     }
 });
+
+it('restores a bookmark inside an unreachable remote project without aborting bootstrap', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) });
+    vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => setTimeout(fn, 0));
+    vi.stubGlobal('cancelAnimationFrame', clearTimeout);
+    const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+    const root = await manager.openFileSystem('/');
+    const repository = new SessionRepository(root, async id => { await projects.initializeSession(id); }); await repository.init();
+    const files = new SessionFilesService(root); await files.initialize();
+    files.registerSource('admin-home', await manager.openFileSystem('/home/admin'));
+    const mounts = new DirectoryMountService(root, files); await mounts.init();
+    const projects = new ProjectService(root, repository, mounts, files); await projects.ensureStartup();
+    const remote = await projects.create('Remote');
+    // Only the affected project is offline; the rest of the workbench must keep working.
+    projects.remoteMounts = {
+        onChange: () => () => {}, async checkConnections() {}, projectOffline: () => true, degraded: () => true,
+        list: () => [], status: () => 'offline', connectionStatus: () => 'offline', connection: () => { throw new Error('none'); },
+        connections: () => [], assertUnmountable: async () => {}, forgetProject: async () => {}, dispose: async () => {},
+    } as never;
+    const sidebar = document.createElement('div'), main = document.createElement('div'); document.body.append(sidebar, main);
+    const workbench = new SessionWorkbench({ sidebar, container: main, repository, files, factory: (async () => ({ destroy: vi.fn() })) as never,
+        onSelect: () => {}, hostContext: { chatFromFile: async () => {}, toggleSidebar() {}, navigate: async () => {} }, kernel: { onChanged: () => () => {}, async *listSessions() {} } as never,
+        fileFactory: (async () => ({ destroy: vi.fn() })) as never, directoryMounts: mounts, sessionSkills: undefined, manageMemory: undefined, flows: undefined, projects });
+    try {
+        await workbench.start();
+        await expect(workbench.restoreResource(folderBrowserPath(remote.path))).resolves.toBeUndefined();
+        expect(main.classList.contains('project-workbench--offline')).toBe(true);
+        expect(main.inert).toBe(true);
+        expect(main.textContent).toContain('远程文件无法连接');
+    } finally {
+        await workbench.destroy(); await mounts.dispose(); await files.dispose(); await repository.dispose(); await manager.dispose();
+        document.body.replaceChildren(); vi.unstubAllGlobals();
+    }
+});

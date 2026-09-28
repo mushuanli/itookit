@@ -356,7 +356,22 @@ export class SessionWorkbench implements WorkspaceController {
             const folder = target.kind === 'project-files' ? target.folder : target.kind === 'folder'
                 ? folderPathFromBrowserPath(parseSessionRoute(resourceId).path) : (await this.repository.getManifest(target.sessionId)).folder;
             const project = await this.projects.forFolder(folder);
-            if (project && this.projects.remoteMounts.projectOffline(project.project.id)) throw new Error(t('remote.projectOffline'));
+            if (project) {
+                const remote = this.projects.remoteMounts;
+                // An unprobed mount must be resolved now: a stale status would otherwise either
+                // block a reachable project or let an unreachable read fail the open.
+                if (remote.list(project.project.id).some(mount => remote.status(mount.mountId) !== 'online'))
+                    await remote.checkConnections(project.project.id, { timeoutMs: 3000 });
+                if (remote.projectOffline(project.project.id)) {
+                    // An unavailable remote project disables its own view; it must never abort
+                    // bootstrap or navigation, so report the state and stay on the disabled workbench.
+                    this.container.inert = true;
+                    this.container.classList.add('project-workbench--offline');
+                    this.container.setAttribute('aria-disabled', 'true');
+                    this.message(t('remote.projectOffline'));
+                    return;
+                }
+            }
             this.container.inert = false; this.container.classList.remove('project-workbench--offline'); this.container.setAttribute('aria-disabled', 'false');
         }
         const route = parseSessionRoute(resourceId);

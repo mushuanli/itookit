@@ -22,7 +22,7 @@ export class RemoteFilesSettingsEditor extends BaseSettingsEditor<ProjectService
         for (const connection of connections) {
             const row = document.createElement('section'); row.className = 'remote-settings__project';
             const label = document.createElement('h3'); label.textContent = connection.name;
-            const address = document.createElement('p'); address.textContent = `${connection.endpoint} · ${connection.username} · ${t(`remote.state.${this.service.remoteMounts!.status(connection.id)}`)}`; row.append(label, address);
+            const address = document.createElement('p'); address.textContent = `${connection.endpoint} · ${connection.username} · ${t(`remote.state.${this.service.remoteMounts!.connectionStatus(connection.id)}`)}`; row.append(label, address);
             this.button(row, t('remote.connectionEdit'), () => this.edit(connection));
             this.button(row, t('remote.connectionRemove'), async () => { await this.service.remoteMounts!.removeConnection(connection.id); });
             this.button(row, t('remote.check'), () => this.service.remoteMounts!.checkConnection(connection.id, { signal: this.controller.signal, timeoutMs: 3000 }));
