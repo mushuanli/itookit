@@ -12,6 +12,7 @@
  *
  * Create via IFileSystem.openFile(path) or a format-specific file factory.
  */
+import type { ReadOptions, WriteOptions } from './core/options';
 import type { FSNode } from './core/types';
 import type { FSEventType, FSEvent } from './core/events';
 import type { IIOStream } from './io';
@@ -56,8 +57,8 @@ export interface IFile extends IIOStream {
     setTags(tags: string[]): Promise<void>;
 
     // ========== High-level content ==========
-    read(): Promise<string | ArrayBuffer>;
-    write(content: string | ArrayBuffer): Promise<void>;
+    read(options?: ReadOptions): Promise<string | ArrayBuffer>;
+    write(content: string | ArrayBuffer, options?: WriteOptions): Promise<void>;
 
     // ========== Lifecycle ==========
     rename(newName: string): Promise<void>;
@@ -66,8 +67,8 @@ export interface IFile extends IIOStream {
     delete(): Promise<void>;
 
     // ========== Low-level: raw main-file access ==========
-    readRaw(): Promise<string | ArrayBuffer>;
-    writeRaw(content: string | ArrayBuffer): Promise<void>;
+    readRaw(options?: ReadOptions): Promise<string | ArrayBuffer>;
+    writeRaw(content: string | ArrayBuffer, options?: WriteOptions): Promise<void>;
 
     // ========== Assetdir ==========
     /** Get a handle to a sub-file in the companion assetdir */

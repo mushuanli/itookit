@@ -1,3 +1,4 @@
+import type { OperationOptions } from '../core/operation';
 import type { FSCapabilities } from '../core/types';
 import type { FSEventEmitter } from '../core/events';
 import type { IFSDriver } from './fs-driver';
@@ -22,7 +23,7 @@ export interface IFileSystem extends FSEventEmitter {
      */
     readonly external?: boolean;
     openFile(path: string): IFile;
-    capabilitiesAt(path: string): Promise<FSCapabilities>;
+    capabilitiesAt(path: string, options?: OperationOptions): Promise<FSCapabilities>;
     /** Rule inheritance boundary in this authorized view (defaults to its root). */
     discoveryRoot?(path: string): string;
 }

@@ -14,6 +14,8 @@
  *   - symlink() / readlink() / hardlink()
  */
 
+import type { OperationOptions } from '../core/operation';
+
 import type {
     FSNode,
     DirEntry,
@@ -49,7 +51,7 @@ import type { FSEventEmitter } from '../core/events';
  * 事务内的事件在 commit 后重放；数据回滚能力由具体 backend 决定。
  */
 export interface IFSDriverTransaction {
-    getNode(path: string): Promise<FSNode | null>;
+    getNode(path: string, options?: OperationOptions): Promise<FSNode | null>;
     readContent(path: string, options: ReadOptions & { encoding: 'utf-8' }): Promise<string>;
     readContent(path: string, options: ReadOptions & { encoding: 'binary' }): Promise<ArrayBuffer>;
     readContent(path: string, options?: ReadOptions): Promise<FileContent>;
@@ -91,13 +93,13 @@ export interface IFSDriver extends FSEventEmitter {
      * 获取节点详情
      * @param path 节点路径
      */
-    getNode(path: string): Promise<FSNode | null>;
+    getNode(path: string, options?: OperationOptions): Promise<FSNode | null>;
 
     /**
      * Type-only node lookup for capability checks (`FileSystemView.noLinks`): same source as
      * `getNode`, but allowed to skip metadata. Callers fall back to `getNode` when absent.
      */
-    getNodeType?(path: string): Promise<Pick<FSNode, 'type'> | null>;
+    getNodeType?(path: string, options?: OperationOptions): Promise<Pick<FSNode, 'type'> | null>;
 
     /** 获取直接子节点 */
     getChildren(
@@ -125,10 +127,10 @@ export interface IFSDriver extends FSEventEmitter {
     readContent(path: string, options?: ReadOptions): Promise<FileContent>;
 
     /** 解析路径，确认节点存在 @returns 存在返回 path，不存在返回 null */
-    resolvePath(path: string): Promise<string | null>;
+    resolvePath(path: string, options?: OperationOptions): Promise<string | null>;
 
     /** 检查路径是否存在 */
-    exists(path: string): Promise<boolean>;
+    exists(path: string, options?: OperationOptions): Promise<boolean>;
 
     /** 遍历节点树 */
     walkTree?(callback: TreeWalkCallback, options?: TreeWalkOptions): Promise<number>;

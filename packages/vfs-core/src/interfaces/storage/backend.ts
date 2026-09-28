@@ -9,34 +9,36 @@
  * 不支持的实现将对应属性设为 undefined 或不定义。
  */
 
+import type { OperationOptions } from '../core/operation';
 import type { FSNode, FSSearchQuery, DirEntry } from '../core/types';
 import type { IRecordStore } from './record-backend';
 
 export interface IStorageBackend {
     readonly name: string;
+    readonly fileStorage?: import('./file-storage').FileStorageBackend;
 
     // ── 结构操作 ──
 
     /** 获取节点信息 */
-    stat(path: string): Promise<FSNode | null>;
+    stat(path: string, options?: OperationOptions): Promise<FSNode | null>;
 
     /**
      * Type-only lookup for capability checks (`FileSystemView.noLinks`). Must derive the type from
      * the same source as `stat`, but a backend whose `stat` pays a remote/sidecar round trip should
      * override this to skip it. Callers fall back to `stat` when absent.
      */
-    statType?(path: string): Promise<Pick<FSNode, 'type'> | null>;
+    statType?(path: string, options?: OperationOptions): Promise<Pick<FSNode, 'type'> | null>;
 
     /** 列出子节点 */
-    list(path: string): Promise<FSNode[]>;
+    list(path: string, options?: OperationOptions): Promise<FSNode[]>;
     /** Same children as list, without extended metadata. Fall back to list when absent. */
-    listEntries?(path: string): Promise<DirEntry[]>;
+    listEntries?(path: string, options?: OperationOptions): Promise<DirEntry[]>;
 
     /** 创建目录 */
-    mkdir(path: string): Promise<FSNode>;
+    mkdir(path: string, options?: OperationOptions): Promise<FSNode>;
 
     /** 删除节点 */
-    delete(path: string, options?: { recursive?: boolean }): Promise<void>;
+    delete(path: string, options?: OperationOptions & { recursive?: boolean }): Promise<void>;
 
     /**
      * Optional subtree layout guard for structural mutations. Ancestors are still checked
@@ -46,15 +48,16 @@ export interface IStorageBackend {
     assertMutableSubtree?(path: string): Promise<void>;
 
     /** 重命名/移动 */
-    rename(fromPath: string, toPath: string): Promise<void>;
+    rename(fromPath: string, toPath: string, options?: OperationOptions): Promise<void>;
 
     // ── 内容操作 ──
 
     /** 读取文件内容 */
-    read(path: string, options?: { offset?: number; length?: number }): Promise<Uint8Array>;
+    read(path: string, options?: import('../core/options').ReadOptions): Promise<Uint8Array>;
 
     /** 写入文件内容 */
     write(path: string, content: Uint8Array): Promise<FSNode>;
+    replace?(path: string, content: Uint8Array, condition: import('./file-storage').ReplaceCondition, options?: OperationOptions): Promise<FSNode>;
 
     // ── 元数据 ──
 

@@ -1,3 +1,4 @@
+import { checkOperation, type OperationOptions } from '../../protocol';
 /**
  * @file packages/vfs-core/src/impl/engine/vfs-engine.ts
  * @desc VFS 引擎 — 系统级核心操作（v4.1: path-based 后端）
@@ -181,17 +182,18 @@ export class VFSEngine {
     // ── Path Resolution ──
 
     /** Stat a path (throws if not found) */
-    async stat(path: string): Promise<import('../../protocol').FSNode> {
+    async stat(path: string, options?: OperationOptions): Promise<import('../../protocol').FSNode> {
+        checkOperation(options);
         const { backend, localPath, mountPath } = this.resolveStore(path);
-        this._inc('stat'); const node = await backend.stat(localPath === '/' ? '/' : localPath);
+        this._inc('stat'); const node = await backend.stat(localPath, options);
         if (!node) throw new FSError('ENOENT', 'not found', 'stat', path);
         return this.mapToSystemNode(node, mountPath);
     }
 
     /** Stat that returns null on not found */
-    async tryStat(path: string): Promise<import('../../protocol').FSNode | null> {
+    async tryStat(path: string, options?: OperationOptions): Promise<import('../../protocol').FSNode | null> {
         const { backend, localPath, mountPath } = this.resolveStore(path);
-        const node = await backend.stat(localPath);
+        const node = await backend.stat(localPath, options);
         return node ? this.mapToSystemNode(node, mountPath) : null;
     }
 
@@ -200,10 +202,10 @@ export class VFSEngine {
      * `stat` fetches metadata over a remote/sidecar round trip can skip it; the reported type is
      * otherwise identical to `stat`.
      */
-    async tryStatType(path: string): Promise<Pick<import('../../protocol').FSNode, 'type'> | null> {
+    async tryStatType(path: string, options?: OperationOptions): Promise<Pick<import('../../protocol').FSNode, 'type'> | null> {
         const { backend, localPath } = this.resolveStore(path);
-        if (backend.statType) return backend.statType(localPath);
-        const node = await backend.stat(localPath);
+        if (backend.statType) return backend.statType(localPath, options);
+        const node = await backend.stat(localPath, options);
         return node ? { type: node.type } : null;
     }
 
@@ -216,11 +218,11 @@ export class VFSEngine {
     async readContent(path: string, options?: ReadOptions): Promise<ArrayBuffer> {
         try {
             const { backend, localPath } = this.resolveStore(path);
-            const node = await this.tryStatType(path);
+            const node = await this.tryStatType(path, options);
             if (!node) throw new FSError('ENOENT', 'not found', 'read', path);
             if (node.type === 'directory') throw new FSError('EISDIR', 'cannot read directory', 'read', path);
             this._inc('read');
-            const data = await backend.read(localPath, { offset: options?.offset, length: options?.length });
+            const data = await backend.read(localPath, { ...options });
             return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
         } catch (error) {
             if (error instanceof FSError) throw error;
@@ -241,8 +243,17 @@ export class VFSEngine {
     ): Promise<void> {
         const { backend, localPath } = this.resolveStore(path);
 
+        checkOperation(options);
+        if (backend.replace) {
+            if (!options?.ifRevision) throw new FSError('ECONFLICT', 'Read the file before conditional replacement');
+            if (options.mode === 'append' || options.offset !== undefined || options.expectedVersion !== undefined || options.metadata)
+                throw new FSCapabilityError('conditional whole-file replacement only');
+            const result = await backend.replace(localPath, new Uint8Array(toBuffer(content)), { kind: 'match', revision: options.ifRevision }, options);
+            options.onRevision?.(result.revision); return;
+        }
+
         if (options?.expectedVersion !== undefined) {
-            this._inc('stat'); const current = await backend.stat(localPath);
+            this._inc('stat'); const current = await backend.stat(localPath, options);
             if (!current) throw new FSError('ENOENT', 'not found', 'write', path);
             if (current.version !== options.expectedVersion) {
                 throw new FSConflictError(path, options.expectedVersion, current.version);
@@ -288,32 +299,34 @@ export class VFSEngine {
         type: import('../../protocol').FSNodeType = 'file',
         content?: FileContent,
         metadata?: Record<string, unknown>,
-        opts?: { overwrite?: boolean; recursive?: boolean; deviceHandlerId?: string },
+        opts?: OperationOptions & { overwrite?: boolean; recursive?: boolean; deviceHandlerId?: string },
     ): Promise<import('../../protocol').FSNode> {
         validateFilename(name, this.filenamePattern);
 
         // Ensure intermediate directories when recursive is requested
         if (opts?.recursive) {
-            await this.ensureDirectoryPath(parentPath);
+            await this.ensureDirectoryPath(parentPath, opts);
         }
 
         const { backend, localPath: parentLocal, mountPath } = this.resolveStore(parentPath);
         const fullPath = parentLocal === '/' ? `/${name}` : `${parentLocal}/${name}`;
 
+        if (backend.fileStorage && metadata && Object.keys(metadata).length === 0) metadata = undefined;
+        if (backend.fileStorage && (opts?.overwrite || metadata || type === 'device')) throw new FSCapabilityError('file creation options');
         if (!opts?.overwrite) {
-            this._inc('stat'); const existing = await backend.stat(fullPath);
+            this._inc('stat'); const existing = await backend.stat(fullPath, opts);
             if (existing) throw new FSAlreadyExistsError(name, parentPath);
         }
 
         if (type === 'directory') {
-            this._inc('mkdir'); const node = await backend.mkdir(fullPath);
+            this._inc('mkdir'); const node = await backend.mkdir(fullPath, opts);
             if (metadata) { this._inc('metadata'); await backend.updateMetadata(fullPath, metadata); }
             return this.mapToSystemNode(node, mountPath);
         }
 
         const raw = content ? toBuffer(content) : new Uint8Array(0);
         const buf = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
-        this._inc('write'); const node = await backend.write(fullPath, buf);
+        this._inc('write'); const node = backend.replace ? await backend.replace(fullPath, buf, { kind: 'create-only' }, opts) : await backend.write(fullPath, buf);
 
         if (type === 'device' && opts?.deviceHandlerId) {
             const deviceMeta = {
@@ -342,16 +355,16 @@ export class VFSEngine {
 
     async delete(path: string, options?: DeleteOptions): Promise<void> {
         const { backend, localPath } = this.resolveStore(path);
-        this._inc('stat'); const node = await backend.stat(localPath);
+        this._inc('stat'); const node = await backend.stat(localPath, options);
         if (!node) {
             if (options?.force) return;
             throw new FSError('ENOENT', 'not found', 'delete', path);
         }
         await this.assertMutableLayout(path);
-        this._inc('delete'); await backend.delete(localPath, { recursive: options?.recursive });
+        this._inc('delete'); await backend.delete(localPath, options);
 
         // Cascade: delete companion asset dir
-        if (node.type !== 'directory' && options?.assetDirStrategy !== 'keep') {
+        if (!backend.fileStorage && node.type !== 'directory' && options?.assetDirStrategy !== 'keep') {
             const parentDir = P.dirname(localPath);
             const assetDirName = toAssetDirName(nameFromPath(localPath));
             try {
@@ -378,6 +391,7 @@ export class VFSEngine {
         const { backend, localPath } = this.resolveStore(path);
         const prefix = P.normalize(path).replace(/\/$/, '') + '/';
         const nestedMount = this._mountRouter?.listMounts().some(mount => mount.mountPath.startsWith(prefix));
+        if (backend.fileStorage && !nestedMount) return;
         if (backend.assertMutableSubtree && !nestedMount) return backend.assertMutableSubtree(localPath);
         const visit = async (current: string): Promise<void> => {
             const node = await stat(current);
@@ -389,7 +403,7 @@ export class VFSEngine {
 
     // ── Rename / Move ──
 
-    async rename(path: string, newName: string): Promise<void> {
+    async rename(path: string, newName: string, options?: OperationOptions): Promise<void> {
         await this.assertMutableLayout(path);
         validateFilename(newName, this.filenamePattern);
         const { backend, localPath } = this.resolveStore(path);
@@ -399,8 +413,9 @@ export class VFSEngine {
         this._inc('stat'); const existing = await backend.stat(newPath);
         if (existing) throw new FSAlreadyExistsError(newName, dir);
 
-        this._inc('rename'); await backend.rename(localPath, newPath);
+        this._inc('rename'); await backend.rename(localPath, newPath, options);
 
+        if (backend.fileStorage) return;
         // Rename companion asset dir
         const oldAssetName = toAssetDirName(nameFromPath(localPath));
         const newAssetName = toAssetDirName(newName);
@@ -409,7 +424,7 @@ export class VFSEngine {
         } catch { /* no asset dir */ }
     }
 
-    async move(sourcePath: string, targetParentPath: string): Promise<void> {
+    async move(sourcePath: string, targetParentPath: string, options?: OperationOptions): Promise<void> {
         await this.assertMutableLayout(sourcePath);
         await this.assertMutableLayout(P.join(targetParentPath, P.basename(sourcePath)));
         const { backend: srcBackend, localPath: srcLocal } = this.resolveStore(sourcePath);
@@ -422,8 +437,9 @@ export class VFSEngine {
         const name = nameFromPath(srcLocal);
         const newPath = dstLocal === '/' ? `/${name}` : `${dstLocal}/${name}`;
 
-        await srcBackend.rename(srcLocal, newPath);
+        await srcBackend.rename(srcLocal, newPath, options);
 
+        if (srcBackend.fileStorage) return;
         // Move companion asset dir
         const srcDir = P.dirname(srcLocal);
         const assetDirName = toAssetDirName(name);
@@ -434,16 +450,18 @@ export class VFSEngine {
 
     // ── List ──
 
-    async listChildren(path: string): Promise<import('../../protocol').FSNode[]> {
+    async listChildren(path: string, options?: OperationOptions): Promise<import('../../protocol').FSNode[]> {
+        checkOperation(options);
         const { backend, localPath, mountPath } = this.resolveStore(path);
-        this._inc('list'); const nodes = await backend.list(localPath === '/' ? '/' : localPath);
+        this._inc('list'); const nodes = await backend.list(localPath, options);
         return nodes.map(n => this.mapToSystemNode(n, mountPath));
     }
 
-    async listEntries(path: string): Promise<DirEntry[]> {
+    async listEntries(path: string, options?: OperationOptions): Promise<DirEntry[]> {
+        checkOperation(options);
         const { backend, localPath, mountPath } = this.resolveStore(path);
         this._inc('list');
-        const entries = await (backend.listEntries ? backend.listEntries(localPath) : backend.list(localPath));
+        const entries = await (backend.listEntries ? backend.listEntries(localPath, options) : backend.list(localPath, options));
         return entries.map(node => ({ path: this.mapToSystemPath(node.path, mountPath), name: node.name,
             type: node.type, modifiedAt: node.modifiedAt, ...('size' in node ? { size: node.size } : {}) }));
     }
@@ -603,16 +621,16 @@ export class VFSEngine {
 
     // ── Ensure Directory Path (recursive mkdir) ──
 
-    async ensureDirectoryPath(systemPath: string): Promise<void> {
+    async ensureDirectoryPath(systemPath: string, options?: OperationOptions): Promise<void> {
         const parts = systemPath.split('/').filter(Boolean);
         let current = '';
         for (const seg of parts) {
             current += '/' + seg;
             const { backend, localPath } = this.resolveStore(current);
             this._inc('stat');
-            const exists = backend.statType ? await backend.statType(localPath) : await backend.stat(localPath);
+            const exists = backend.statType ? await backend.statType(localPath, options) : await backend.stat(localPath, options);
             if (!exists) {
-                this._inc('mkdir'); await backend.mkdir(localPath);
+                this._inc('mkdir'); await backend.mkdir(localPath, options);
             } else if (exists.type !== 'directory') throw new FSError('ENOTDIR', 'Not a directory', 'mkdir', current);
         }
     }

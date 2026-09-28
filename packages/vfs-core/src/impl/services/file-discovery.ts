@@ -31,17 +31,17 @@ function isFile(entry: FileDiscoveryEntry): boolean {
     return entry.type === 'file' || entry.type === 'seqfile';
 }
 
-export function createVFSFileDiscoverySource(fs: IFileSystem): FileDiscoverySource {
+export function createVFSFileDiscoverySource(fs: IFileSystem, options?: import('../../protocol').OperationOptions): FileDiscoverySource {
     return {
-        list: path => fs.driver.getChildren(path, { includeHidden: true }),
-        stat: path => fs.driver.getNode(path),
+        list: path => fs.driver.getChildren(path, { ...options, includeHidden: true }),
+        stat: path => fs.driver.getNode(path, options),
         rootFor: path => fs.discoveryRoot?.(path) ?? '/',
         async readIgnoreFile(path) {
-            if (fs.driver.getNodeType && (await fs.driver.getNodeType(path))?.type !== 'file') return null;
-            const node = await fs.driver.getNode(path);
+            if (fs.driver.getNodeType && (await fs.driver.getNodeType(path, options))?.type !== 'file') return null;
+            const node = await fs.driver.getNode(path, options);
             if (!node || node.type !== 'file') return null;
             if ((node.size ?? 0) > 1024 * 1024) throw new Error('Ignore file size limit exceeded');
-            return fs.driver.readContent(path, { encoding: 'utf-8' });
+            return fs.driver.readContent(path, { ...options, encoding: 'utf-8' });
         },
     };
 }

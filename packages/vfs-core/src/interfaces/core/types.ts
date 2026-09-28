@@ -1,3 +1,4 @@
+import type { OperationOptions } from './operation';
 /**
  * @file packages/vfs-core/src/interfaces/core/types.ts
  * @desc VFS 基础类型定义
@@ -52,6 +53,7 @@ interface FSNodeBase {
     readonly modifiedAt: number;
     readonly path: string;
     readonly version: number;
+    readonly revision?: string;
     readonly tags: readonly string[];
     readonly metadata: Readonly<FSNodeMetadata>;
     readonly viewId?: string;
@@ -143,7 +145,7 @@ export type FileContent = string | ArrayBuffer | Uint8Array;
 // 搜索（结构化查询）
 // ═══════════════════════════════════════════════════════════════
 
-export interface FSSearchQuery {
+export interface FSSearchQuery extends OperationOptions {
     /** 文件名匹配 */
     name?: {
         exact?: string;

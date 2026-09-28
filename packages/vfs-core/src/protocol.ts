@@ -203,3 +203,8 @@ export type {
     VFSInstance,
     VFSFactory,
 } from './interfaces/services/factory';
+
+export { checkOperation, FSOperationCancelledError } from './interfaces/core/operation';
+export type { OperationOptions, OperationOutcome } from './interfaces/core/operation';
+
+export type { FileStorageBackend, FileReader, FileStat, FileEntry, FilePage, FileListOptions, FileReadOptions, FileReadResult, FileMutations, ReplaceCondition } from './interfaces/storage/file-storage';

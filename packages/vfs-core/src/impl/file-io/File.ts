@@ -1,3 +1,4 @@
+import type { ReadOptions, WriteOptions } from '../../protocol';
 /**
  * @file packages/vfs-core/src/impl/file-io/File.ts
  * @desc Base IFile implementation backed by IFileSystem.
@@ -75,6 +76,7 @@ class InlineAssetObj implements AssetObj {
 
 export class FileHandle implements IFile {
     private _path: string;
+    private revision?: string;
     get path(): string { return this._path; }
 
     constructor(
@@ -95,8 +97,8 @@ export class FileHandle implements IFile {
 
     // ══ High-level content ═════════════════════════════════════
 
-    async read(): Promise<string | ArrayBuffer> { return this.readRaw(); }
-    async write(content: string | ArrayBuffer): Promise<void> { await this.writeRaw(content); }
+    async read(options?: ReadOptions): Promise<string | ArrayBuffer> { return this.readRaw(options); }
+    async write(content: string | ArrayBuffer, options?: WriteOptions): Promise<void> { await this.writeRaw(content, options); }
 
     // ══ Lifecycle ══════════════════════════════════════════════
 
@@ -132,13 +134,14 @@ export class FileHandle implements IFile {
 
     // ══ Low-level: raw main-file ═══════════════════════════════
 
-    async readRaw(): Promise<string | ArrayBuffer> {
-        const content = await this.fs.driver.readContent(this.path);
+    async readRaw(options?: ReadOptions): Promise<string | ArrayBuffer> {
+        const content = await this.fs.driver.readContent(this.path, { ...options, onRevision: value => { this.revision = value; options?.onRevision?.(value); } });
         return typeof content === 'string' ? content : toBuffer(content);
     }
 
-    async writeRaw(content: string | ArrayBuffer): Promise<void> {
-        await this.fs.driver.writeContent(this.path, content);
+    async writeRaw(content: string | ArrayBuffer, options?: WriteOptions): Promise<void> {
+        await this.fs.driver.writeContent(this.path, content, { ...options, ifRevision: options?.ifRevision ?? this.revision,
+            onRevision: value => { this.revision = value; options?.onRevision?.(value); } });
     }
 
     // ══ Assetdir ═══════════════════════════════════════════════
@@ -166,6 +169,7 @@ export class FileHandle implements IFile {
 
     /** @internal — resolve through the current view, including its lifetime gate. */
     async _resolveAssetDirPath(): Promise<string | null> {
+        if (!(await this.fs.capabilitiesAt(this.path)).assets) return null;
         return this.fs.meta.assets.getAssetDirPath(this.path);
     }
 

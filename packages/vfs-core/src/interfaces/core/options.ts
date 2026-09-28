@@ -6,6 +6,8 @@
  * 默认值由实现方定义（CoC），此处通过 JSDoc 标注。
  */
 
+import type { OperationOptions } from './operation';
+
 import type { FSNodeType, FSNodeMetadata } from './types';
 
 /**
@@ -20,7 +22,10 @@ export interface VisibilityOptions {
     includeInternalDirs?: boolean;
 }
 
-export interface ReadOptions {
+export interface ReadOptions extends OperationOptions {
+    ifRevision?: string;
+    /** Validator belonging to the returned bytes, never a separate stat result. */
+    onRevision?: (revision: string | undefined) => void;
     /** auto preserves SeqFile projection; bytes reads physical content; records reads only the record projection. */
     representation?: 'auto' | 'bytes' | 'records';
     /** 起始偏移（需要 capabilities.partialRead） */
@@ -39,7 +44,9 @@ export interface ReadOptions {
     deviceSessionId?: string;
 }
 
-export interface WriteOptions {
+export interface WriteOptions extends OperationOptions {
+    ifRevision?: string;
+    onRevision?: (revision: string | undefined) => void;
     /** 起始偏移（需要 capabilities.partialWrite） */
     offset?: number;
     /**
@@ -59,7 +66,7 @@ export interface WriteOptions {
     metadata?: Partial<FSNodeMetadata>;
 }
 
-export interface CreateFileOptions {
+export interface CreateFileOptions extends OperationOptions {
     name: string;
     parentPath: string | null;
     content?: string | ArrayBuffer;
@@ -80,7 +87,7 @@ export interface CreateFileOptions {
     overwrite?: boolean;
 }
 
-export interface CreateDirectoryOptions {
+export interface CreateDirectoryOptions extends OperationOptions {
     name: string;
     parentPath: string | null;
     metadata?: FSNodeMetadata;
@@ -92,7 +99,7 @@ export interface CreateDirectoryOptions {
     recursive?: boolean;
 }
 
-export interface DeleteOptions {
+export interface DeleteOptions extends OperationOptions {
     /**
      * AssetDir 处理策略
      * - 'remove': 同时删除 assetdir 及其全部内容（默认）
@@ -121,7 +128,7 @@ export interface DeleteOptions {
     referencePolicy?: 'clean' | 'deny' | 'ignore';
 }
 
-export interface RenameOptions {
+export interface RenameOptions extends OperationOptions {
     /**
      * 是否同步重命名 assetdir
      * @default true
@@ -129,7 +136,7 @@ export interface RenameOptions {
     syncAssetDir?: boolean;
 }
 
-export interface MoveOptions {
+export interface MoveOptions extends OperationOptions {
     /**
      * 是否同步移动 assetdir
      * @default true
@@ -137,7 +144,7 @@ export interface MoveOptions {
     syncAssetDir?: boolean;
 }
 
-export interface CopyOptions {
+export interface CopyOptions extends OperationOptions {
     /**
      * 已存在时是否覆盖
      * @default false
@@ -155,7 +162,7 @@ export interface CopyOptions {
     recursive?: boolean;
 }
 
-export interface ListOptions extends VisibilityOptions {
+export interface ListOptions extends VisibilityOptions, OperationOptions {
     /**
      * 返回字段控制
      * - 'full': 返回完整 FSNode（默认）
@@ -165,7 +172,7 @@ export interface ListOptions extends VisibilityOptions {
     fields?: 'full' | 'entry';
 }
 
-export interface TreeWalkOptions extends VisibilityOptions {
+export interface TreeWalkOptions extends VisibilityOptions, OperationOptions {
     /** 遍历顺序 @default 'depth-first' */
     order?: 'breadth-first' | 'depth-first';
     /** 最大深度，rootPath 自身深度为 0；-1 无限制 @default -1 */

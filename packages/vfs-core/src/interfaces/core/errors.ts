@@ -9,6 +9,8 @@
  */
 
 export type FSErrorCode =
+    | 'ECANCELLED'
+    | 'ETIMEDOUT'
     | 'ENOENT'
     | 'EEXIST'
     | 'EISDIR'

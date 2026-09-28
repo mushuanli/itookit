@@ -1,3 +1,4 @@
+import type { OperationOptions } from '../../protocol';
 /**
  * @file packages/vfs-core/src/impl/services/DirectoryContext.ts
  * @desc 模块共享上下文 — 状态 + 路径映射 + 事件发射 + SeqFile 序列化。
@@ -100,9 +101,9 @@ export class DirectoryContext implements EnginePort {
     }
 
     /** Stat + return { node, realPath }. Throws if not found. */
-    async resolveNode(path: string): Promise<{ node: FSNode; realPath: string }> {
+    async resolveNode(path: string, options?: OperationOptions): Promise<{ node: FSNode; realPath: string }> {
         const realPath = this.toRealPath(path);
-        const node = await this.engine.stat(realPath);
+        const node = await this.engine.stat(realPath, options);
         if (!node) throw new FSNotFoundError(path);
         return { node, realPath };
     }

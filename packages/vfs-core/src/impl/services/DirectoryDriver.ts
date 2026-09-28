@@ -1,3 +1,4 @@
+import { checkOperation, type OperationOptions } from '../../protocol';
 /**
  * @file packages/vfs-core/src/impl/services/DirectoryDriver.ts
  * @desc IFSDriver 实现 — 模块的 chroot 隔离 CRUD。
@@ -70,8 +71,8 @@ export class DirectoryDriver implements IFSDriver {
     // ── plugin pipeline helper ──────────────────────────────────────────────
 
     /** Resolve a single-file operation target (throws if missing, like the op itself). */
-    private resolveTarget(path: string): () => Promise<FSNode | null> {
-        return async () => (await this.ctx.resolveNode(path)).node;
+    private resolveTarget(path: string, options?: OperationOptions): () => Promise<FSNode | null> {
+        return async () => (await this.ctx.resolveNode(path, options)).node;
     }
 
     /** Inject asset/metadata helpers into the plugin operation context. */
@@ -113,17 +114,15 @@ export class DirectoryDriver implements IFSDriver {
     // Read
     // ══════════════════════════════════════════════════════════
 
-    async getNode(path: string): Promise<FSNode | null> {
-        try {
-            const realPath = this.ctx.toRealPath(path);
-            const node = await this.ctx.engine.stat(realPath);
-            return node ? this.ctx.toVirtualNode(node) : null;
-        } catch { return null; }
+    async getNode(path: string, options?: OperationOptions): Promise<FSNode | null> {
+        checkOperation(options);
+        const node = await this.ctx.engine.tryStat(this.ctx.toRealPath(path), options);
+        return node ? this.ctx.toVirtualNode(node) : null;
     }
 
-    /** Type-only lookup for capability checks — same source as `getNode`, without metadata. */
-    async getNodeType(path: string): Promise<Pick<FSNode, 'type'> | null> {
-        return this.ctx.engine.tryStatType(this.ctx.toRealPath(path));
+    async getNodeType(path: string, options?: OperationOptions): Promise<Pick<FSNode, 'type'> | null> {
+        checkOperation(options);
+        return this.ctx.engine.tryStatType(this.ctx.toRealPath(path), options);
     }
 
     getChildren(path: string, options?: ListOptions & { fields?: 'full' }): Promise<FSNode[]>;
@@ -133,12 +132,12 @@ export class DirectoryDriver implements IFSDriver {
         const realPath = this.ctx.toRealPath(path);
 
         if (options?.fields === 'entry') {
-            const entries = await this.ctx.engine.listEntries(realPath);
+            const entries = await this.ctx.engine.listEntries(realPath, options);
             return entries.filter(entry => this.visibleChild(entry.name, options))
                 .map(entry => ({ ...entry, path: this.ctx.toVirtualPath(entry.path) }))
                 .filter(entry => entry.path !== path);
         }
-        const children = await this.ctx.engine.listChildren(realPath);
+        const children = await this.ctx.engine.listChildren(realPath, options);
 
         const filtered = children.filter(c => this.visibleChild(c.name, options));
         // Filter out any child whose virtualized path equals the request path
@@ -159,7 +158,7 @@ export class DirectoryDriver implements IFSDriver {
     async readContent(path: string, options?: ReadOptions): Promise<FileContent> {
         const realPath = this.ctx.toRealPath(path);
         if (options?.representation !== 'bytes') {
-            const node = await this.ctx.engine.tryStatType(realPath);
+            const node = await this.ctx.engine.tryStatType(realPath, options);
             if (!node) throw new FSError('ENOENT', 'not found', 'read', path);
             if (node.type === 'directory') throw new FSError('EISDIR', 'cannot read directory', 'read', path);
             const records = this.ctx.recordsForPath(realPath);
@@ -178,16 +177,13 @@ export class DirectoryDriver implements IFSDriver {
         return data;
     }
 
-    async resolvePath(path: string): Promise<string | null> {
-        return await this.exists(path) ? path : null;
+    async resolvePath(path: string, options?: OperationOptions): Promise<string | null> {
+        return await this.exists(path, options) ? path : null;
     }
 
-    async exists(path: string): Promise<boolean> {
-        try {
-            const realPath = this.ctx.toRealPath(path);
-            const node = await this.ctx.engine.tryStatType(realPath);
-            return node !== null;
-        } catch { return false; }
+    async exists(path: string, options?: OperationOptions): Promise<boolean> {
+        checkOperation(options);
+        return (await this.ctx.engine.tryStatType(this.ctx.toRealPath(path), options)) !== null;
     }
 
     async walkTree(callback: TreeWalkCallback, options?: TreeWalkOptions): Promise<number> {
@@ -238,7 +234,7 @@ export class DirectoryDriver implements IFSDriver {
 
             const node = await this.ctx.engine.createFile(parentPath, o.name,
                 o.type ?? 'file', o.content, o.metadata,
-                { overwrite: o.overwrite, recursive: o.recursive });
+                { overwrite: o.overwrite, recursive: o.recursive, signal: o.signal, timeoutMs: o.timeoutMs });
 
             const virtual = this.ctx.toVirtualNode(node);
             this.ctx.emit('node:created', { nodes: [{ path: virtual.path, parentPath: virtual.parentPath, type: virtual.type }] });
@@ -256,7 +252,7 @@ export class DirectoryDriver implements IFSDriver {
     }
 
     async writeContent(path: string, content: FileContent, options?: WriteOptions): Promise<void> {
-        return this.runOperation('write', path, this.resolveTarget(path), { content, options }, async (args, node) => {
+        return this.runOperation('write', path, this.resolveTarget(path, options), { content, options }, async (args, node) => {
             const a = args as { content: FileContent; options?: WriteOptions };
             const realPath = this.ctx.toRealPath(path);
 
@@ -274,13 +270,13 @@ export class DirectoryDriver implements IFSDriver {
         return this.writeContent(path, content, { mode: 'append' });
     }
 
-    async rename(path: string, newName: string): Promise<void> {
+    async rename(path: string, newName: string, options?: OperationOptions): Promise<void> {
         return this.runOperation('rename', path, this.resolveTarget(path), { newName }, async (args, node) => {
             const a = args as { newName: string };
             const realPath = this.ctx.toRealPath(path);
 
             this.ctx.assertWritable(realPath);
-            await this.ctx.engine.rename(realPath, a.newName);
+            await this.ctx.engine.rename(realPath, a.newName, options);
             const newRealPath = P.dirname(realPath) + '/' + a.newName;
             const newVirtualPath = this.ctx.scope.toVirtualPath(newRealPath);
             const virtualNode = node ? this.ctx.toVirtualNode(node) : null;
@@ -288,7 +284,7 @@ export class DirectoryDriver implements IFSDriver {
         });
     }
 
-    async move(paths: string[], targetParentPath: string | null): Promise<void> {
+    async move(paths: string[], targetParentPath: string | null, options?: OperationOptions): Promise<void> {
         return this.runOperation('move', targetParentPath ?? undefined, undefined, { paths, targetParentPath }, async (args) => {
             const a = args as { paths: string[]; targetParentPath: string | null };
             const targetPath = a.targetParentPath
@@ -304,7 +300,7 @@ export class DirectoryDriver implements IFSDriver {
                 const newParentVirtual = this.ctx.scope.toVirtualPath(targetPath);
                 const newPath = newParentVirtual + '/' + node.name;
                 nodes.push({ oldPath, newPath, oldParentPath: this.ctx.scope.toVirtualPath(node.parentPath!), newParentPath: newParentVirtual });
-                await this.ctx.engine.move(realPath, targetPath);
+                await this.ctx.engine.move(realPath, targetPath, options);
             }
             this.ctx.emit('node:moved', { nodes });
         });

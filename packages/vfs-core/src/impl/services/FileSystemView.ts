@@ -1,3 +1,5 @@
+import { checkOperation, FSOperationCancelledError, type OperationOptions } from '../../protocol';
+import { withOperation } from '../../utils/operation';
 import type {
     IFileSystem, IFileSystemDriver, IFSMetaDriver, FSNode, FSCapabilities, DirEntry, ListOptions,
     FSEvent, FSEventType, FSSearchQuery, FSSearchResult, TreeWalkCallback, TreeWalkOptions,
@@ -49,6 +51,7 @@ export class FileSystemView implements IFileSystem {
     private readonly mounts: Binding[];
     private readonly readablePaths?: readonly string[];
     private closed = false;
+    private readonly lifetime = new AbortController();
     private active = 0;
     private drain?: () => void;
     private disposing?: Promise<void>;
@@ -101,18 +104,19 @@ export class FileSystemView implements IFileSystem {
         return inner && P.isUnder(inner, mount.root) ? this.virtualPath(mount, inner) : mount.at;
     }
 
-    async capabilitiesAt(path: string): Promise<FSCapabilities> {
-        return this.operation(async () => {
+    async capabilitiesAt(path: string, options?: OperationOptions): Promise<FSCapabilities> {
+        return this.operation(() => withOperation(options, async scope => {
             const m = this.find(normalizeVirtualPath(path));
             if (!m) return { ...this.capabilities, readonly: true };
-            const caps = await m.fs.capabilitiesAt(this.sourcePath(m, path));
+            const caps = await m.fs.capabilitiesAt(this.sourcePath(m, path), scope);
             return { ...caps, tags: this.capabilities.tags && caps.tags, symlinks: false, hardlinks: false, deviceFiles: false, watch: false, readonly: m.access === 'ro' || caps.readonly };
-        });
+        }, this.lifetime.signal));
     }
 
     dispose(): Promise<void> {
         if (this.disposing) return this.disposing;
         this.closed = true;
+        this.lifetime.abort(new FSOperationCancelledError());
         for (const unsubscribe of this.subscriptions) unsubscribe();
         this.subscriptions.clear();
         this.disposing = this.active === 0 ? Promise.resolve() : new Promise(resolve => { this.drain = resolve; });
@@ -155,11 +159,12 @@ export class FileSystemView implements IFileSystem {
         if (!this.visible(path)) throw new FSError('EACCES', 'Path is outside the system projection');
         const m = this.find(path);
         if (!m) throw new FSError(write ? 'EROFS' : 'ENOENT', 'No source mounted at this path', undefined, path);
+        if (structural && this.mounts.some(n => P.isUnder(n.at.toLowerCase(), path.toLowerCase()))) throw new FSError('EBUSY', 'Cannot replace a mount or its ancestor', undefined, path);
         if (write && m.access === 'ro') throw new FSError('EROFS', 'Read-only mount', undefined, path);
-        if (structural && this.mounts.some(n => P.isUnder(n.at, path))) throw new FSError('EBUSY', 'Cannot replace a mount or its ancestor', undefined, path);
         return m;
     }
-    private async noLinks(m: Binding, path: string): Promise<Pick<FSNode, 'type'> | null | undefined> {
+    private async noLinks(m: Binding, path: string, options?: OperationOptions): Promise<Pick<FSNode, 'type'> | null | undefined> {
+        checkOperation(options);
         const source = this.sourcePath(m, path);
         // The prefix walk only needs the node type. Prefer the driver's type-only lookup so a
         // backend whose `getNode` fetches metadata over a remote/sidecar round trip can skip it.
@@ -174,8 +179,8 @@ export class FileSystemView implements IFileSystem {
         const checked = await Promise.all(segments.map(async segment => {
             try {
                 return { node: typeof driver.getNodeType === 'function'
-                    ? await this.invoke(m, driver, 'getNodeType', [segment])
-                    : await this.invoke(m, m.fs.driver, 'getNode', [segment]) };
+                    ? await this.invoke(m, driver, 'getNodeType', [segment, options])
+                    : await this.invoke(m, m.fs.driver, 'getNode', [segment, options]) };
             } catch (error) {
                 // Settle every check: a rejected sibling must not escape as an unhandled rejection.
                 return { error };
@@ -199,8 +204,12 @@ export class FileSystemView implements IFileSystem {
         // it a read-only or capability failure is indistinguishable from a real I/O fault.
         try { return await fn.apply(api, args); }
         catch (error) {
+            if (error instanceof FSOperationCancelledError) throw error;
             if (error instanceof FSError) {
-                throw new FSError(error.code, `Source operation failed: ${method}`, method, undefined, error);
+                const wrapped = new FSError(error.code, `Source operation failed: ${method}`, method, undefined, error);
+                const receipt = error as FSError & { operationId?: string; outcome?: string };
+                if (receipt.operationId) Object.assign(wrapped, { operationId: receipt.operationId, outcome: receipt.outcome });
+                throw wrapped;
             }
             throw new FSError('EIO', `Source operation failed: ${method}`, method, undefined,
                 error instanceof Error ? error : undefined);
@@ -209,8 +218,8 @@ export class FileSystemView implements IFileSystem {
 
     private makeDriver(): IFileSystemDriver {
         const methods: Methods = {
-            getNode: (path: string) => this.stat(path),
-            getNodeType: (path: string) => this.statType(path),
+            getNode: (path: string, options?: OperationOptions) => this.stat(path, options),
+            getNodeType: (path: string, options?: OperationOptions) => this.statType(path, options),
             getStats: async () => {
                 let fileCount = 0, directoryCount = 0, totalSize = 0, lastModifiedAt = 0;
                 await this.walk(node => {
@@ -220,8 +229,8 @@ export class FileSystemView implements IFileSystem {
                 });
                 return { fileCount, directoryCount, totalSize, lastModifiedAt };
             },
-            exists: async (path: string) => (await this.statType(path)) !== null,
-            resolvePath: async (path: string) => await this.statType(path) ? normalizeVirtualPath(path) : null,
+            exists: async (path: string, options?: OperationOptions) => (await this.statType(path, options)) !== null,
+            resolvePath: async (path: string, options?: OperationOptions) => await this.statType(path, options) ? normalizeVirtualPath(path) : null,
             getChildren: (path: string, options?: ListOptions) => this.children(path, options),
             search: (query: FSSearchQuery) => this.search(query),
             walkTree: (callback: TreeWalkCallback, options?: TreeWalkOptions) => this.walk(callback, options),
@@ -234,13 +243,13 @@ export class FileSystemView implements IFileSystem {
         return { ...methods, capabilities: this.capabilities, on: this.on.bind(this), onAny: this.onAny.bind(this) } as unknown as IFileSystemDriver;
     }
 
-    private async stat(input: string): Promise<FSNode | null> {
+    private async stat(input: string, options?: OperationOptions): Promise<FSNode | null> {
         const path = normalizeVirtualPath(input);
         if (!this.visible(path)) throw new FSError('EACCES', 'Path is outside the system projection');
         const m = this.find(path);
         if (m) {
-            await this.noLinks(m, path);
-            const value = await this.invoke(m, m.fs.driver, 'getNode', [this.sourcePath(m, path)]);
+            await this.noLinks(m, path, options);
+            const value = await this.invoke(m, m.fs.driver, 'getNode', [this.sourcePath(m, path), options]);
             if (value) return this.node(m, value);
         }
         return this.synthetic(path);
@@ -250,19 +259,19 @@ export class FileSystemView implements IFileSystem {
      * Type-only `stat` for capability checks. Validates the path on its mount exactly like `stat`,
      * but never asks for metadata; a nested view therefore keeps a prefix walk metadata-free.
      */
-    private async statType(input: string): Promise<Pick<FSNode, 'type'> | null> {
+    private async statType(input: string, options?: OperationOptions): Promise<Pick<FSNode, 'type'> | null> {
         const path = normalizeVirtualPath(input);
         if (!this.visible(path)) throw new FSError('EACCES', 'Path is outside the system projection');
         const m = this.find(path);
         if (m) {
-            const checked = await this.noLinks(m, path);
+            const checked = await this.noLinks(m, path, options);
             if (checked) return { type: checked.type };
             if (checked === undefined) {
                 const source = this.sourcePath(m, path);
                 const driver = m.fs.driver as unknown as { getNodeType?: (p: string) => Promise<Pick<FSNode, 'type'> | null> };
                 const node = typeof driver.getNodeType === 'function'
-                    ? await this.invoke(m, driver, 'getNodeType', [source])
-                    : await this.invoke(m, m.fs.driver, 'getNode', [source]);
+                    ? await this.invoke(m, driver, 'getNodeType', [source, options])
+                    : await this.invoke(m, m.fs.driver, 'getNode', [source, options]);
                 if (node) return { type: node.type };
             }
         }
@@ -278,12 +287,12 @@ export class FileSystemView implements IFileSystem {
 
     private async children(input: string, options?: ListOptions): Promise<Array<FSNode | DirEntry>> {
         const path = normalizeVirtualPath(input);
-        const parent = await this.statType(path);
+        const parent = await this.statType(path, options);
         if (!parent) throw new FSError('ENOENT', 'Directory not found', 'list', path);
         if (parent.type !== 'directory') throw new FSError('ENOTDIR', 'Not a directory', 'list', path);
         const entries = new Map<string, FSNode | DirEntry>();
         const m = this.find(path);
-        if (m && await m.fs.driver.exists(this.sourcePath(m, path))) {
+        if (m && await m.fs.driver.exists(this.sourcePath(m, path), options)) {
             const nodes: Array<FSNode | DirEntry> = await this.invoke(m, m.fs.driver, 'getChildren', [this.sourcePath(m, path), options]);
             for (const n of nodes) {
                 if (!P.isUnder(n.path, m.root) || P.dirname(n.path) !== this.sourcePath(m, path)) throw new FSError('EACCES', 'Invalid source listing');
@@ -295,7 +304,7 @@ export class FileSystemView implements IFileSystem {
         for (const mount of this.mounts) {
             if (mount.at === path || !P.isUnder(mount.at, path)) continue;
             const name = P.relative(path, mount.at).split('/')[0];
-            const child = await this.stat(P.join(path, name));
+            const child = await this.stat(P.join(path, name), options);
             if (child) entries.set(name, options?.fields === 'entry'
                 ? { path: child.path, name: child.name, type: child.type, modifiedAt: child.modifiedAt,
                     ...('size' in child ? { size: child.size } : {}) } : child);
@@ -305,6 +314,9 @@ export class FileSystemView implements IFileSystem {
 
     private async driverCall(method: string, input: any[], api?: object, expected?: Binding): Promise<any> {
         const args = [...input];
+        const options = method === 'readContent' ? args[1] : method === 'writeContent' ? args[2]
+            : method === 'createFile' || method === 'createDirectory' ? args[0] : method === 'delete' ? args[1] : ['rename', 'move'].includes(method) ? args[2] : undefined;
+        checkOperation(options);
         let paths: string[];
         const create = method === 'createFile' || method === 'createDirectory';
         if (create) {
@@ -319,7 +331,7 @@ export class FileSystemView implements IFileSystem {
         if (expected && m !== expected) throw new FSError('EXMOUNT', 'Transaction crossed a mount');
         for (const path of paths) {
             if (this.binding(path, write, structural) !== m) throw new FSError('EXMOUNT', 'Operation crossed a mount');
-            await this.noLinks(m, path);
+            await this.noLinks(m, path, options);
         }
         if (method === 'move' || method === 'copy') {
             const target = normalizeVirtualPath(args[1] ?? '/');
@@ -328,10 +340,10 @@ export class FileSystemView implements IFileSystem {
             for (const path of paths) {
                 const destination = P.join(target, args[2] && method === 'copy' ? args[2] : P.basename(path));
                 if (this.binding(destination, true, true) !== m) throw new FSError('EXMOUNT', 'Destination crossed a mount');
-                await this.noLinks(m, destination);
+                await this.noLinks(m, destination, options);
             }
             if (method === 'copy' && (await this.stat(paths[0]))?.type === 'directory') throw new FSCapabilityError('Recursive copy requires a view-aware copy operation');
-            await this.noLinks(m, target);
+            await this.noLinks(m, target, options);
             args[1] = this.sourcePath(m, target);
         }
         if (method === 'rename') {
@@ -441,6 +453,9 @@ export class FileSystemView implements IFileSystem {
             return this.seqEntriesMany(input[0] ?? [], api, expected);
         }
         const args = [...input];
+        const options = method === 'readContent' ? args[1] : method === 'writeContent' ? args[2]
+            : method === 'createFile' || method === 'createDirectory' ? args[0] : method === 'delete' ? args[1] : ['rename', 'move'].includes(method) ? args[2] : undefined;
+        checkOperation(options);
         const write = !/^(get|has|list|walk|query|validate)/.test(method);
         const path = normalizeVirtualPath(args[0]);
         if (!this.readable(path)) throw new FSError('EACCES', 'Projection ancestors are navigation only');
@@ -526,7 +541,8 @@ export class FileSystemView implements IFileSystem {
         let processed = 0;
         while (queue.length) {
             const [path, depth] = queue.shift()!;
-            const node = await this.stat(path);
+            checkOperation(options);
+            const node = await this.stat(path, options);
             if (!node) continue;
             const types = options.typeFilter ? [options.typeFilter].flat() : undefined;
             let result: Awaited<ReturnType<TreeWalkCallback>> = undefined;
@@ -573,11 +589,11 @@ export class FileSystemView implements IFileSystem {
             if (query.references && !await this.hasAnyReference(node.path, query.references)) return;
             if (query.text) {
                 if (node.type !== 'file' || !this.readable(node.path)) return;
-                const text = await this.driverCall('readContent', [node.path, { encoding: 'utf-8' }]);
+                const text = await this.driverCall('readContent', [node.path, { encoding: 'utf-8', signal: query.signal, timeoutMs: query.timeoutMs }]);
                 if (!text.toLowerCase().includes(query.text.toLowerCase())) return;
             }
             nodes.push(node);
-        }, { includeHidden: true, includeInternalDirs: true, includeAssetDirs: true });
+        }, { signal: query.signal, timeoutMs: query.timeoutMs, includeHidden: true, includeInternalDirs: true, includeAssetDirs: true });
         const order = query.orderBy;
         nodes.sort((a, b) => {
             const av = order ? (order === 'name' ? a.name.toLowerCase() : order === 'size' ? ('size' in a ? a.size : 0) : a[order]) : a.path;
@@ -628,7 +644,15 @@ export class FileSystemView implements IFileSystem {
         for (const key of Object.keys(this.driver)) {
             if (key === 'on' || key === 'onAny' || typeof (this.driver as any)[key] !== 'function') continue;
             const method = (this.driver as any)[key];
-            (this.driver as any)[key] = (...args: any[]) => this.operation(() => method(...args));
+            (this.driver as any)[key] = (...args: any[]) => this.operation(() => {
+                const index = ['createFile', 'createDirectory', 'search'].includes(key) ? 0 : ['writeContent', 'rename', 'move'].includes(key) ? 2
+                    : ['getNode', 'getNodeType', 'exists', 'resolvePath', 'getChildren', 'readContent', 'walkTree', 'delete'].includes(key) ? 1 : -1;
+                if (index < 0) return method(...args);
+                return withOperation(args[index], options => {
+                    args[index] = { ...args[index], ...options };
+                    return method(...args);
+                }, this.lifetime.signal);
+            });
         }
         return this;
     }

@@ -18,12 +18,12 @@ export interface CapabilityOverrides {
  */
 export function detectCapabilities(backend: IStorageBackend, overrides: CapabilityOverrides = {}): FSCapabilities {
     return Object.freeze({
-        readonly: overrides.readonly ?? false,
+        readonly: overrides.readonly ?? (backend.fileStorage ? !backend.fileStorage.mutations : false),
         search: !!backend.search,
         semanticSearch: false,
         syncable: overrides.syncable ?? false,
-        assets: true,
-        tags: true,
+        assets: !backend.fileStorage,
+        tags: !backend.fileStorage,
         deviceFiles: overrides.deviceFiles ?? false,
         seqFiles: !!backend.records,
         transactionalSeqFiles: !!backend.records?.transaction,
@@ -31,7 +31,7 @@ export function detectCapabilities(backend: IStorageBackend, overrides: Capabili
         symlinks: !!backend.symlink,
         hardlinks: false,
         partialRead: true,
-        partialWrite: true,
+        partialWrite: !backend.fileStorage,
         treeWalk: true,
         streaming: false,
         watch: false,

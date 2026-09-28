@@ -73,3 +73,6 @@ export type {
 export { createFileSystemSource, type FileSystemSourceOwner } from './impl/services/FileSystemSource';
 
 export { exportFileSystem, importFileSystem, type FileSystemArchive } from './impl/services/file-system-archive';
+
+export { operationScope, withOperation } from './utils/operation';
+export { FileStorageAdapter } from './impl/services/FileStorageAdapter';
