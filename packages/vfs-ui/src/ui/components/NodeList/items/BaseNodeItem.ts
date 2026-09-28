@@ -35,6 +35,11 @@ export abstract class BaseNodeItem {
     const newEl = temp.firstElementChild as HTMLElement;
     this.element.parentNode?.replaceChild(newEl, this.element);
     this.element = newEl;
+    const disabled = this.item.metadata.custom._disabled === true;
+    this.element.classList.toggle('vfs-node-item--unavailable', disabled);
+    this.element.setAttribute('aria-disabled', String(disabled));
+    this.element.inert = disabled;
+    if (disabled) this.element.draggable = false;
   }
 
   protected shouldRerender(oldItem: VFSNodeUI, newItem: VFSNodeUI): boolean {
@@ -43,6 +48,7 @@ export abstract class BaseNodeItem {
         JSON.stringify(newItem.metadata.tags) ||
       oldItem.metadata.title !== newItem.metadata.title ||
       oldItem.icon !== newItem.icon ||
+      oldItem.metadata.custom._disabled !== newItem.metadata.custom._disabled ||
       oldItem.metadata.size !== newItem.metadata.size ||
       oldItem.metadata.lastModified !== newItem.metadata.lastModified ||
       JSON.stringify(oldItem.presentation) !== JSON.stringify(newItem.presentation) ||

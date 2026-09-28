@@ -1462,3 +1462,6 @@
 .vfs-node-item__pin { display: inline-flex; flex-shrink: 0; }
 .vfs-node-item__pin svg { width: 12px; height: 12px; }
 .vfs-node-list--density-compact .vfs-node-item--file-details .vfs-node-item__row-secondary { display: flex; }
+
+.vfs-node-item--unavailable { opacity: .45; filter: grayscale(1); cursor: not-allowed; }
+.vfs-node-item--unavailable .vfs-directory-item__header { cursor: not-allowed; }

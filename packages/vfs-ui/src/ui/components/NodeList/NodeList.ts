@@ -230,6 +230,10 @@ export class NodeList extends BaseComponent<NodeListState> {
   }
 
   protected bindEvents(): void {
+    // Capture also blocks synthetic events and browsers without inert support.
+    for (const type of ['click', 'dblclick', 'keydown', 'contextmenu', 'dragstart', 'drop']) this.bodyEl.addEventListener(type, event => {
+      if ((event.target as Element).closest('[aria-disabled="true"]')) { event.preventDefault(); event.stopImmediatePropagation(); }
+    }, true);
     const search = debounce((query: string) => this.commandBus.execute('ui:updateSearch', { query }), 300);
     this.searchEl.addEventListener('input', () => search(this.searchEl.value));
 

@@ -138,6 +138,7 @@ export const FEEDBACK_ICONS = {
 export const ENTITY_ICONS = {
     chat:         '💬',
     project:      '▣',
+    remoteProject: '🌐',
     agent:   '🤖',
     skill:   '⚡',
     tool:    '🔧',
