@@ -1,3 +1,4 @@
+import { remoteFilesCommand } from './remote-files-command';
 import { createHttpMindOSRuntime, startHttpServer } from './http-server';
 import { installRuntimeDiagnostics, recordRuntimeDiagnostic, traceRuntimeStage } from './diagnostics';
 import { errorDetails } from '@itookit/common';
@@ -41,6 +42,7 @@ async function main(argv: string[]): Promise<number> {
     // -p / --prompt：直接运行一段 prompt（优先于 command 分发）
     if (parsed.options.prompt) return promptCommand(parsed.options);
     switch (parsed.command) {
+        case 'fs': return remoteFilesCommand(parsed.positional, parsed.options);
         case 'memory': return sharedMemoryCommand(parsed.positional, parsed.options);
         case 'validate': return validateCommand(parsed.options);
         case 'run': return runCommand(parsed.options);
@@ -142,6 +144,7 @@ function help(): string {
         `  mindos rerun <run-id> [--state-dir .mindos] [--headless] [--json]\n` +
         `  mindos export-config <run-id> [--state-dir .mindos]\n` +
         `  mindos export <run-id> [--state-dir .mindos] [--out file.json] [--max-bytes N]\n` +
+        `  mindos fs list|read|stat <endpoint> <alias> [relative-path] [--api-key-env ENV] [--out file]\n` +
         `  mindos sandbox doctor\n\n` +
         `  mindos memory list|create|inspect|grant|revoke|delete|audit [id] [incarnation] [session] [--profile root] [--value JSON]\n\n` +
         `选项：\n` +

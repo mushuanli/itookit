@@ -35,7 +35,8 @@
     "dexie": "^4.2.1",
     "immer": "^10.2.0",
     "marked": "^16.4.2",
-    "mermaid": "^11.12.1"
+    "mermaid": "^11.12.1",
+    "@itookit/vfsdriver-http": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.19.25",

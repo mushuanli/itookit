@@ -29,7 +29,8 @@
     "@itookit/vfsdriver-localfs": "workspace:*",
     "@itookit/app-core": "workspace:*",
     "yaml": "^2.8.2",
-    "zod": "^4.1.0"
+    "zod": "^4.1.0",
+    "@itookit/vfsdriver-http": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.19.25",

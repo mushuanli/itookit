@@ -1,3 +1,4 @@
+import { createHttpSourceProvider } from '@itookit/vfsdriver-http';
 import { installTauriMCP } from './shell/tauri-mcp-transport';
 import { recordDiagnostic, observeTools } from './log/desktop-diagnostics';
 import { errorDetails, t } from '@itookit/common';
@@ -316,6 +317,7 @@ async function bootstrap(): Promise<void> {
     const flowWorkspaces = new TauriFlowWorkspaces(rootDir);
     const llmLogger = new TauriLLMLogger(rootDir);
     const runtime = await createApplicationRuntime({
+        remoteSourceProvider: createHttpSourceProvider(),
         backend: rootBackend,
         additionalMounts: [...workspaceMounts],
         ownerKind: 'tauri',

@@ -1,4 +1,7 @@
+config.toml
+itookit-vfs-server
 priv/
+
 node_modules/
 .pnpm-store/
 target/

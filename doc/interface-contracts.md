@@ -6,6 +6,7 @@
 
 | 接口 | 核心方法 | 定义 | 实现 | 消费 |
 |---|---|---|---|---|
+| `FileStorageBackend` / `OperationOptions` | `files` + 可选 `mutations`，signal/timeoutMs，opaque revision | `vfs-core/src/interfaces/storage/file-storage.ts`、`vfs-core/src/interfaces/core/operation.ts` | `vfsdriver-http` | `FileStorageAdapter` → VFS |
 | `IStorageBackend` | `stat/list/read/write/mkdir/delete/rename` | `vfs-core/interfaces/storage/` | `vfsdriver-indexeddb`、`vfsdriver-localfs` | `vfs-core (VFSEngine)` |
 | `IVFSManager` | `openFileSystem()/mounts/devices/plugins` | `vfs-core/interfaces/services/vfs-manager.ts` | `vfs-core (VFSManager)` | `app-core`、`app-shell`、`device-llm` |
 | `IFileSystem` | `openFile()/driver/meta/capabilities/capabilitiesAt()/discoveryRoot?()` | `vfs-core/interfaces/services/file-system.ts` | `vfs-core (FileSystemView)` | `vfs-ui`、`llm-ui`、`llm-session`、`app-core` |
@@ -136,3 +137,5 @@
 桌面 `fs_read_file` 和 `directory_read_file` 使用 Tauri 原始 `ArrayBuffer` 响应；后者缺失文件返回 `null`，越界、符号链接或已关闭 grant 仍拒绝访问。旧的完整文件 JSON 数字数组不再是这两个客户端入口的协议。
 
 `EditorOptions.signal` 用于编辑器初始化期间的视图取消；完成初始化后解除绑定。宿主隐藏已创建的编辑器时调用 `cancelPendingRender`，独立于 `flushPendingSave`。取消预览不取消保存或持久任务。
+
+HTTP 外挂的条件写入、取消与项目授权见 [HTTP VFS 设计](design/vfs-http-driver.md)；调用方必须使用读取字节时返回的 revision，不使用保存前 stat 替代读取版本。
