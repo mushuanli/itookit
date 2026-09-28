@@ -135,6 +135,6 @@ TTY：TtyEffectAdapter → device-tty（node-pty）
 
 ## HTTP 项目外挂
 
-工作台项目 → ProjectRemoteMountService → 项目组合视图 → FileStorageAdapter → HttpFSBackend → fetch → Rust fs-server 的导出别名。Session 将同一项目视图挂到 `/workspace`。凭据由宿主 provider 持有；项目配置只保存 credentialRef。服务端源码不在本仓库（`tools/` 仅放部署产物），协议与边界详见 [设计与实现边界](design/vfs-http-driver.md)。
+工作台项目 → ProjectRemoteMountService → 项目组合视图 → FileStorageAdapter → HttpFSBackend → fetch → Rust fs-server 的导出别名。Session 将同一项目视图挂到 `/workspace`。凭据由宿主 provider 持有；项目配置只保存 credentialRef。服务端源码位于 `tools/itookit-fs-server/`（独立 git 仓库，`tools/` 另放部署产物），协议与边界详见 [设计与实现边界](design/vfs-http-driver.md)。
 
 命名连接入口：Settings → Storage → `RemoteFilesSettingsEditor` → `saveConnection` 保存非敏感连接描述；工作台新建项目 → `ProjectService.createRemote` → `bindProject`，以服务地址和别名内路径去重，将远程根组合到项目 `/` 及 Session `/workspace`。连接名称可改，引用使用稳定 ID；Basic 密码仅存宿主凭据 provider。

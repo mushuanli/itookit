@@ -1,5 +1,6 @@
 config.toml
 itookit-vfs-server
+fs-svr
 priv/
 
 node_modules/

@@ -493,7 +493,7 @@ processMounts 必须区分 VFS 可访问性与本地进程目录能力。HTTP �
 
 ## 14. 本轮实现与验收边界（2026-09-28）
 
-服务端源码与 README 不在本仓库：本仓库只在 `tools/` 放置部署用的可执行文件与 `config.toml`（均被 `.gitignore` 忽略），配置格式见第 4 节与第 14.2 节。服务端实际采用 Linux `openat2(BENEATH | NO_SYMLINKS | NO_MAGICLINKS)` 的目录句柄实现；不在不支持的平台退化成字符串检查。三种客户端均使用可注入的 fetch，Tauri 当前复用 WebView fetch，遵守同样的 CORS/混合内容限制，尚未引入原生 HTTP 插件。
+服务端位于 `tools/itookit-fs-server/`（独立 git 仓库，自带 README 与 Rust 测试）；`tools/` 另放部署用的可执行文件与 `config.toml`（均被 `.gitignore` 忽略）。配置格式见第 4 节与第 14.2 节。服务端实际采用 Linux `openat2(BENEATH | NO_SYMLINKS | NO_MAGICLINKS)` 的目录句柄实现；不在不支持的平台退化成字符串检查。三种客户端均使用可注入的 fetch，Tauri 当前复用 WebView fetch，遵守同样的 CORS/混合内容限制，尚未引入原生 HTTP 插件。
 
 | 部分 | 已实现 |
 |---|---|
@@ -545,3 +545,13 @@ Rust 服务端采用单用户配置：顶层凭据可为内联 `password`、环�
 远程文件系统位于 Settings → Storage 中，移除独立 remote-files 分类。列表支持多条命名连接，每条提供编辑、凭据更新、连接检查和删除；项目选择连接名称与路径。Storage 生命周期负责释放注入的远程设置子编辑器。
 
 移除旧远程同步 UI/Service/类型/样式、同步缓存清理入口与“上次同步”指标，同时删除 SettingsService 中重复的 HTTP 同步实现、配置加载、自动同步订阅及定时器。已有 `/etc/sync_config.json` 不再读取或执行，不自动删除用户历史数据。本地存储统计、快照、导入导出和重置功能继续保留。
+
+失去入口的项目额外挂载对话框（`showRemoteMountDialog`）与仅为它保留的文案一并移除：当前产品流是「Settings 管理命名连接 → 新建项目选择连接与路径」，项目根即所选远程目录。`ProjectRemoteMountService` 仍保留多挂载点的能力与测试。
+
+### 14.4 断线降级与契约校正（2026-09-28 修复）
+
+- 离线项目不再抛错中断 `openResource`/启动恢复：工作台只把该项目视图置灰、`inert` 并显示 `remote.projectOffline`；挂载状态未探测时先做一次有界探测（3 秒），避免未知状态被误判为可用或不可用。
+- HTTP 驱动：Range 响应与请求长度逐项比对；可读错误体优先取其 `code`；明确的 4xx 记为 `not-committed` 且不发送对账 cancel，仅结果未知才对账；批量 stat 继承订阅者剩余预算；`2024:Q1.md` 这类含冒号的名称只按平台前缀规则拒绝；`nameSemantics` 声明为大小写折叠的来源不启用强条件写入。
+- vfs-core：条件写入先判能力错误再判缺失 revision；删除/重命名/事务路径透传取消选项；挂载保留名检查按大小写敏感路由；`IStorageBackend.init` 可接收操作选项。
+- app-core：项目去重键含用户名/身份；删除项目前先做忙时预检再删会话；连接状态与挂载状态分开存储，瞬时握手失败不再把连接永久钉成离线，取消恢复原状态；重连即使视图失效也释放被替换来源；catalog 逐条校验，坏记录进入 `loadWarnings` 而不阻断启动；同名遮蔽以 `degraded` 暴露到抽屉描述。
+- 提供方按「endpoint + 身份 + 别名」复用来源并引用计数，最后一个 owner 释放才关闭连接。
