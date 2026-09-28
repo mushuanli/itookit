@@ -7,8 +7,9 @@ export async function remoteFilesCommand(args: string[], options: CommandOptions
     const [operation, endpoint, alias, path = ''] = args;
     if (!['list', 'read', 'stat', 'status'].includes(operation) || !endpoint || !alias) throw new Error('Usage: mindos fs list|read|stat|status <endpoint> <alias> [relative-path]');
     const username = process.env.FS_SERVER_USER;
-    const token = process.env[options.apiKeyEnv ?? (username ? 'FS_SERVER_PASSWORD' : 'FS_SERVER_TOKEN')];
-    if (!token) throw new Error('Set FS_SERVER_USER/FS_SERVER_PASSWORD, FS_SERVER_TOKEN, or use --api-key-env');
+    const credentialEnv = options.credentialEnv ?? (username ? 'FS_SERVER_PASSWORD' : 'FS_SERVER_TOKEN');
+    const token = process.env[credentialEnv];
+    if (!token) throw new Error(`Set FS_SERVER_USER/FS_SERVER_PASSWORD, FS_SERVER_TOKEN, or --credential-env (${credentialEnv} is empty)`);
     const controller = new AbortController(), stop = () => controller.abort();
     const backend = new HttpFSBackend({ endpoint, alias, username, credential: () => token, maxReadBytes: options.maxBytes });
     process.once('SIGINT', stop);

@@ -174,6 +174,9 @@ export async function createCliRuntime(
         createHttpSourceProvider(ref => process.env[`MINDOS_REMOTE_${ref.replace(/-/g, '_')}`] ?? ''),
         async () => { throw new Error('Change project mounts from the workbench while the CLI is stopped'); }, async () => {});
     await remoteMounts.init();
+    // Same wiring as createApplicationRuntime: ProjectService must compose remote mounts for every
+    // consumer of openFiles(), not only for the Session workspace path below.
+    projects.remoteMounts = remoteMounts;
     const project = await projects.forFolder((await sessionRepository.getManifest(manifest.sessionId)).folder);
     const hasRemoteMounts = !!project && remoteMounts.list(project.project.id).length > 0;
     sessionFiles.workspaceComposer = async (_id, mount) => {

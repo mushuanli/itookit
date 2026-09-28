@@ -43,6 +43,8 @@ export interface CommandOptions {
     prompt?: string;
     model?: string;
     apiKeyEnv?: string;
+    /** --credential-env: environment variable holding the remote file server credential. */
+    credentialEnv?: string;
     baseUrl?: string;
     /** --no-tools: omit client tools from a quick prompt. */
     noTools?: boolean;

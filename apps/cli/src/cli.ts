@@ -89,6 +89,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
         else if (arg === '-p' || arg === '--prompt') options.prompt = (options.prompt ? `${options.prompt} ` : '') + required(rest[++index], 'prompt');
         else if (arg === '--model') options.model = required(rest[++index], 'model');
         else if (arg === '--api-key-env') options.apiKeyEnv = required(rest[++index], 'api-key-env');
+        else if (arg === '--credential-env') options.credentialEnv = required(rest[++index], 'credential environment variable');
         else if (arg === '--base-url') options.baseUrl = required(rest[++index], 'base-url');
         else if (arg === '--protocol') options.protocol = required(rest[++index], 'protocol');
         else if (arg === '--responses-path') options.responsesPath = required(rest[++index], 'responses-path');
@@ -144,7 +145,7 @@ function help(): string {
         `  mindos rerun <run-id> [--state-dir .mindos] [--headless] [--json]\n` +
         `  mindos export-config <run-id> [--state-dir .mindos]\n` +
         `  mindos export <run-id> [--state-dir .mindos] [--out file.json] [--max-bytes N]\n` +
-        `  mindos fs list|read|stat <endpoint> <alias> [relative-path] [--api-key-env ENV] [--out file]\n` +
+        `  mindos fs list|read|stat|status <endpoint> <alias> [relative-path] [--credential-env ENV] [--out file]\n` +
         `  mindos sandbox doctor\n\n` +
         `  mindos memory list|create|inspect|grant|revoke|delete|audit [id] [incarnation] [session] [--profile root] [--value JSON]\n\n` +
         `选项：\n` +
