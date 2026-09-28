@@ -500,7 +500,7 @@ processMounts 必须区分 VFS 可访问性与本地进程目录能力。HTTP �
 | 核心 | `FileStorageBackend` / `FileReader` / 可选 `FileMutations`，旧接口的 `FileStorageAdapter`；OperationOptions 与视图独立取消；文件读取回传 opaque revision，FileHandle/工具/编辑器使用读到的 revision 保存 |
 | HTTP | exports、批量 stat、目录分页、二进制内容、单段 Range、If-Match；Basic 用户名/密码与兼容 Bearer 身份、Origin 白名单、no-store、禁止重定向、body 上限、剩余 deadline、只读有限重试 |
 | 可写 | exclusive 根锁、epoch + inode generation；条件 replace、mkdir、禁止覆盖的 rename、文件/空目录 remove；operationId 注册/状态/取消/过期、临时上传清理，响应丢失返回 unknown |
-| 项目 | ProjectRemoteMountService；挂载名称保留、远程优先、同名诊断、断线占位、Session 继承、重连与撤权；描述符存 `/etc/project-remote-mounts.seq` 的 catalog 条目，事务 CAS 防止覆盖其他管理端更新 |
+| 项目 | ProjectRemoteMountService；挂载名称保留、远程优先、同名诊断、断线占位、Session 继承、重连与撤权；连接描述符存 `/etc/fs/remote/<connectionId>.seq`，项目挂载存 `/etc/fs/projects/<projectId>.seq`；索引与记录事务 CAS 防止覆盖其他管理端更新 |
 | 三端 | Web/Tauri 注入 provider；CLI HTTP runtime、工作流 runtime 与 `mindos fs list/read/stat/status`；项目带远程挂载时不为 Agent 装配宿主 Shell/TTY |
 | 工作台 | Settings → Storage 命名连接；新建本地/远程项目，按连接和路径去重，会话仅在项目内创建；默认只读，显式授权读写；凭据不入项目配置；关闭对话框取消连接；冲突或未知结果时保留编辑内容 |
 
@@ -520,9 +520,9 @@ Settings 与断线状态补充后的回归：app-core 174 项、app-shell 420 �
 
 ### 14.1 Settings 与断线项目状态
 
-Settings → Storage 的“远程文件系统”区域管理可复用连接：名称、IP:端口或 HTTP(S) endpoint、用户名、密码。连接使用稳定 ID 和 credentialRef，项目引用 ID，界面显示可重命名的名称；密码仅在宿主运行期保存，不写入 catalog。包含远程来源的项目抽屉使用 common 的 remoteProject 图标。
+Settings → Storage 的“远程文件系统”区域管理可复用连接：名称、IP:端口或 HTTP(S) endpoint、用户名、密码。连接使用稳定 ID 和 credentialRef，项目引用 ID，界面显示可重命名的名称；密码保存到连接 seqfile 的独立 password 记录，启动时加载到宿主凭据缓存，不进入 catalog 或公开连接描述符。包含远程来源的项目抽屉使用 common 的 remoteProject 图标。
 
-按用户确认的项目粒度：某项目的任一远程挂载不可用时，**只禁用该断线项目的整个抽屉及内部各项（包括本地项）**，其他项目不受影响。抽屉保留内容位置，置灰、aria-disabled 与 inert 阻止鼠标/键盘/拖放，浏览器投影另拒绝内容和结构操作；已打开内容区保留编辑状态并禁用交互。Settings 的配置和重连入口保持可用。断线不删除文件，也不自动取消已经运行的 Task。
+断线仅禁用该项目的文件入口、文件操作及新建会话；项目抽屉仍可展开，已有 Session 和历史可查看，其他项目不受影响。不可用文件项置灰并阻止操作，已打开文件区保留编辑状态并禁用交互；已有会话不设 inert。Settings 的配置入口保持可用。断线不删除文件，也不自动取消已经运行的 Task。
 
 工作台存续期间每轮完成后 15 秒检查一次连接，单次探测预算 3 秒；读取检测到传输失败时也标记离线。状态为 unknown/checking/online/offline；成功检查或显式重连恢复状态。探测使用目录 stat，不读文件内容；缓存来源视图通过动态可用性门恢复，避免把断线当成本地同名目录。原生 WebView/浏览器的网络权限限制也会体现为连接失败。
 
@@ -533,9 +533,9 @@ Settings → Storage 的“远程文件系统”区域管理可复用连接：�
 
 项目去重键为规范化 endpoint + alias + root：移除 endpoint 尾斜杠、折叠路径重复/尾斜杠，拒绝 `..`、反斜杠和 NUL，不做 Unicode 归一化或物理路径推断。重复选择同一路径打开已有项目（保留原名称和权限），不同路径创建独立项目。当前运行期创建串行化；catalog CAS 防止跨宿主并发提交重复授权，CAS 失败的一方回滚未发布的项目并报冲突。不同网络地址指向同一物理服务、大小写不敏感宿主上的路径别名不进行跨地址/物理身份合并。
 
-连接名称唯一；同 endpoint + username 不重复配置。一个连接可被多个项目引用，修改显示名称不改变项目身份；已被引用的连接禁止删除或改 endpoint，修改凭据前检查关联会话，撤销旧视图并重新探测。连接配置与挂载授权同存 `/etc/project-remote-mounts.seq` catalog，旧附加挂载结构仍可读取，新 UI 以命名连接和项目根引用为主。
+连接名称唯一；同 endpoint + username 不重复配置。一个连接可被多个项目引用，修改显示名称不改变项目身份；已被引用的连接禁止删除或改 endpoint，修改凭据前检查关联会话，撤销旧视图并重新探测。连接配置与挂载授权按稳定 ID 分别存入 `/etc/fs/remote/` 和 `/etc/fs/projects/`，旧 catalog 自动迁移，旧附加挂载结构仍可读取，新 UI 以命名连接和项目根引用为主。
 
-Rust 服务端采用单用户配置：顶层凭据可为内联 `password`、环境变量 `password_env = "ENV"`（至少 8 字节，二者只能选一种），或旧 Bearer 的 `token` / `token_env`（至少 24 字节，与密码互斥且不设置 `username`）；用户名取 `username`，未写时读 `FS_SERVER_USER`。导出目录写成一个扁平 `[[exports]]` 列表，`alias` 默认取目录名、`access` 默认 `ro`，`rw` 直接申请独占锁，因此不再有 per-client 授权与 `writer_policy` 二次配置。Basic 内容采用 UTF-8 编码，跨机器部署使用 HTTPS；不在 URL 或日志输出密码。Web/Tauri/CLI 共用相同认证实现。当前未接入持久化密码库，重启后用户在设置更新密码，CLI 可由凭据引用环境变量注入。
+Rust 服务端采用单用户配置：顶层凭据可为内联 `password`、环境变量 `password_env = "ENV"`（至少 8 字节，二者只能选一种），或旧 Bearer 的 `token` / `token_env`（至少 24 字节，与密码互斥且不设置 `username`）；用户名取 `username`，未写时读 `FS_SERVER_USER`。导出目录写成一个扁平 `[[exports]]` 列表，`alias` 默认取目录名、`access` 默认 `ro`，`rw` 直接申请独占锁，因此不再有 per-client 授权与 `writer_policy` 二次配置。Basic 内容采用 UTF-8 编码，跨机器部署使用 HTTPS；不在 URL 或日志输出密码。Web/Tauri/CLI 共用相同认证实现。密码使用本地 VFS 持久化，重启后自动加载；CLI 在没有本地密码时仍可由凭据引用环境变量注入。
 
 命名连接补充验收：app-core 175 项、app-shell 421 项通过；HTTP 驱动单元测试 6 项、Rust 服务端 9 项通过。测试包含连接名称选择、同路径并发去重、不同路径隔离、Session 继承、目录删除后释放引用、catalog 重载、Basic 错误用户名/密码拒绝与禁止 Bearer 降级。工作台/CLI 类型检查、Rust clippy、文档/样式/架构边界检查通过。
 
@@ -550,8 +550,45 @@ Rust 服务端采用单用户配置：顶层凭据可为内联 `password`、环�
 
 ### 14.4 断线降级与契约校正（2026-09-28 修复）
 
-- 离线项目不再抛错中断 `openResource`/启动恢复：工作台只把该项目视图置灰、`inert` 并显示 `remote.projectOffline`；挂载状态未探测时先做一次有界探测（3 秒），避免未知状态被误判为可用或不可用。
+- 离线项目不再抛错中断 `openResource`/启动恢复：工作台只把该项目的文件视图置灰、`inert` 并显示 `remote.projectOffline`；打开文件且挂载状态未探测时先做一次有界探测（3 秒），打开已有会话不做该探测，避免未知状态被误判为可用或不可用。
 - HTTP 驱动：Range 响应与请求长度逐项比对；可读错误体优先取其 `code`；明确的 4xx 记为 `not-committed` 且不发送对账 cancel，仅结果未知才对账；批量 stat 继承订阅者剩余预算；`2024:Q1.md` 这类含冒号的名称只按平台前缀规则拒绝；`nameSemantics` 未列入 v1 取值表（仅 `source`）的导出一律不启用强条件写入。
 - vfs-core：条件写入先判能力错误再判缺失 revision；删除/重命名/事务路径透传取消选项；挂载保留名检查按大小写敏感路由；`IStorageBackend.init` 可接收操作选项。
 - app-core：项目去重键含用户名/身份；删除项目前先做忙时预检再删会话；连接状态与挂载状态分开存储，瞬时握手失败不再把连接永久钉成离线，取消恢复原状态；重连即使视图失效也释放被替换来源；catalog 逐条校验，坏记录进入 `loadWarnings` 而不阻断启动；同名遮蔽以 `degraded` 暴露到抽屉描述。
 - 提供方按「endpoint + 身份 + 别名」复用来源并引用计数，最后一个 owner 释放才关闭连接。
+
+### 远程文件系统配置与目录选择交互
+
+- Storage 内的远程文件系统是按内容高度布局的嵌入区域，不继承整页编辑器的 `height: 100%`。连接列表仅提供编辑、删除；连接检测放在配置弹窗内，保存前验证当前草稿。
+- 编辑时密码留空沿用凭据提供器中的原密码；非空密码只用于草稿检测，成功保存才替换原凭据。失败保留表单，关闭取消检测。密码与连接配置在同一事务中持久化，重启后自动加载。
+- 新建远程项目可从授权导出别名逐级浏览子目录，也可以输入路径；列表按页读取，只展示目录，切换连接/路径或关闭弹窗取消旧请求，过期响应不更新界面。目录选择不自动创建项目，仍需确认项目名称和路径。
+- 无需修改 fs-server：复用 `GET /v1/exports` 与 `GET /v1/fs/{alias}/entries`。客户端不请求或展示宿主物理根路径，不全量递归扫描。
+
+连接错误必须保留可判断的结构化信息：HTTP 状态码区分 401 认证失败、403 权限不足、404 接口地址错误、429 繁忙与 5xx 服务错误；本地凭据缺失、超时、协议解析失败分别展示对应处理提示。浏览器 fetch 的不可达错误无法可靠区分服务未启动、DNS/TCP/TLS 与 CORS，因此提示排查范围，不把它误报为密码错误。错误提示不直接展示远端响应内容或凭据；配置弹窗与目录浏览共用本地化错误映射。
+
+断线项目的禁用粒度调整为：项目抽屉仍可展开，已有 Session 与历史记录仍可查看；仅文件入口/文件操作与新建 Session 禁用。打开已有 Session 不为可用性检查等待远程握手，底层远程文件访问仍受不可用状态限制。新建项目选择远程连接即读取导出目录，不可达显示具体错误并阻止提交；用户可重试，恢复后选择有效目录再创建。
+
+文件列表使用统一的展开控制位、20px 图标列和名称列；同层目录与文件对齐，嵌套仅由子目录容器增加缩进。目录不显示无意义的大小占位横线；真实文件使用紧凑单行详情，窄列表优先保留文件名和大小，隐藏相对时间。默认 SVG 图标按文件名/后缀分类（包括 PDF、表格、演示、音视频及点配置文件），保留显式自定义图标，不额外读取文件内容。
+
+图标采用形状与分类色双重提示：目录琥珀色并轻填充，代码蓝、配置紫、图片青、PDF 红、表格绿；文字保持统一颜色。颜色由 vfs-ui 的主题变量控制，深色主题使用较亮配色，显式业务图标不受覆盖。
+
+远程项目选择器在切换到远程模式时检查各连接（最多两个并发请求）；检查中不可选择，失败的连接标注“无法连接”并禁用，可用连接才允许选中。提供“重新检查”以恢复已启动的服务器；检查返回的导出目录直接用于选择列表，避免重复握手。重新检查清空旧路径与选择，失败原因逐连接显示。
+
+目录导航（导出目录、上一级、浏览此路径）与连接重新检查使用统一线性 SVG 图标按钮，必须提供翻译后的 `title` 与 `aria-label`。连接选择占位和错误原因保留文字，不使用图标替代语义提示；重新检查按钮与连接下拉并排。
+
+
+### 配置存储布局迁移
+
+- `/etc/fs/remote/<connectionId>.seq` 的 `config` 保存命名连接；`/etc/fs/projects/<projectId>.seq` 的 `config` 保存该项目的挂载数组。
+- `/etc/fs/catalog.seq` 的 `index` 仅保存版本、revision 和连接/项目 ID 列表。索引与变更记录在同一 SeqFile 事务提交，加载也使用事务快照和批量记录读取。日常保存只写变更的记录；索引 CAS 拒绝陈旧管理端覆盖。
+- 启动发现旧 `/etc/project-remote-mounts.seq` 而尚无新索引时，验证后自动迁移；保持连接、项目、挂载 ID 与 credentialRef。迁移前准备的空 seqfile 不代表迁移完成，只有事务提交的新索引才是完成标志。旧文件保留备份，新索引存在时不再读取它；不支持旧版本继续修改备份。
+- 移除配置在事务内删除 `config` 记录与索引引用，空 seqfile 可保留，避免事务外删除与并发重新创建发生竞争。
+- 项目名称与组织关系仍在 `/var/lib/sessions/folders.seq`，本次迁移仅拆分连接与挂载配置，不移动项目文件和会话历史。密码写入连接 seqfile 的独立 `password` 记录，运行时使用宿主凭据缓存。
+
+
+密码持久化：`/etc/fs/remote/<connectionId>.seq` 的 `password` 键保存密码（本地 VFS 原文存储，未加密）；`config`、项目挂载、索引和公开连接 API 不含密码。编辑留空不改密码，显式新密码与配置原子更新；删除连接同时删除密码记录并清除运行时缓存。以前仅存内存的密码不能从旧文件恢复，旧连接首次升级后需输入并保存一次。Web 使用宿主 VFS 的 IndexedDB 持久化，Tauri/CLI 使用对应本地 profile 存储。
+
+### 大文件读取与预览
+
+HTTP 单次内存读取默认限制 32 MiB。超过上限返回 `EFBIG`（不是网络 `EIO`）；无编码转换时可通过 Content-Length 提前拒绝并取消响应流，未知长度继续按实际接收字节计数。该错误不使项目断线。
+
+项目文件打开先读取文件 stat。超过 32 MiB 的文本仅用一次 Range 读取前 256 KiB，显示明确的只读截断提示并使用纯文本预览，不创建编辑器、不提供保存命令；已知二进制大文件只显示大小与无法内嵌预览说明。大小未知或 stat 后增长触发 `EFBIG` 时也转入预览。部分预览不代表完整文件，也不做跨版本分段拼接。
