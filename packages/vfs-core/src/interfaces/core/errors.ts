@@ -22,6 +22,7 @@ export type FSErrorCode =
     | 'ENOTTY'
     | 'EINVAL'
     | 'ELOOP'
+    | 'EFBIG'
     | 'EIO'
     | 'EPLUGIN'
     | 'ENOTRECORD'
