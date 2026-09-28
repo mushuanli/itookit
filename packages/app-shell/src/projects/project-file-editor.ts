@@ -1,3 +1,4 @@
+import { PROJECT_EDITOR_MAX_BYTES, showLargeFilePreview } from './large-file-preview';
 import type { ProjectService } from '@itookit/app-core';
 import { buildRenamedFilename, traceBoot, t } from '@itookit/common';
 import type { EditorFactory, EditorHostContext, IEditor } from '@itookit/ui-common';
@@ -25,15 +26,21 @@ export async function openProjectFileEditor(projects: ProjectService, target: { 
         const source = await load.read(async () => owner = await traceBoot('projectFile.source', () => projects.openFiles(target.folder)));
         const context: FileSystemContextOwner = { context: { fs: source.fs, cwd: target.path.slice(0, target.path.lastIndexOf('/')) || '/' }, release: () => source.dispose() };
         const driver = source.fs.driver;
-        const node = await load.read(() => traceBoot('projectFile.type', () => driver.getNodeType
-            ? driver.getNodeType(target.path, { signal: load.signal }) : driver.getNode(target.path, { signal: load.signal })));
+        const node = await load.read(() => traceBoot('projectFile.type', () => driver.getNode(target.path, { signal: load.signal })));
         if (!node) throw new FSError('ENOENT', 'File not found');
         if (node.type === 'directory') {
             await context.release(); owner = undefined; load.check(); return undefined;
         }
         mount = await options.mount(); load.check();
+        const large = async () => {
+            previewCleanup = await showLargeFilePreview(context, target.path, node.type === 'file' ? node.size : undefined, mount!, load);
+            return { context, previewCleanup };
+        };
+        if (node.type === 'file' && node.size !== undefined && node.size > PROJECT_EDITOR_MAX_BYTES) return await large();
         let revision: string | undefined;
-        const bytes = await load.read(() => traceBoot('projectFile.read', () => driver.readContent(target.path, { encoding: 'binary', signal: load.signal, onRevision: value => { revision = value; } })));
+        let bytes: ArrayBuffer;
+        try { bytes = await load.read(() => traceBoot('projectFile.read', () => driver.readContent(target.path, { encoding: 'binary', signal: load.signal, onRevision: value => { revision = value; } }))); }
+        catch (error) { if (error instanceof FSError && error.code === 'EFBIG') return await large(); throw error; }
         const content = decodeFile(target.path, bytes);
         if (content === undefined) previewCleanup = options.showBinary(mount, target.path, bytes);
         else editor = await load.read(async () => editor = await createTextEditor(context, target.path, content, mount!, load, options, revision));

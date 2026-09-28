@@ -206,3 +206,8 @@
 .remote-connection__controls select { flex: 1; min-width: 0; }
 .project-dialog .remote-directory__icon-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 40px; width: 40px; height: 40px; padding: 0; }
 .project-dialog .remote-directory__icon-button:hover:not(:disabled) { background: var(--vfs-active-bg, #eef2ff); }
+.project-file-preview { display: flex; flex-direction: column; min-height: 0; height: 100%; padding: 20px; box-sizing: border-box; gap: 12px; }
+.project-file-preview h2 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.project-file-preview p { margin: 0; color: var(--text-secondary, #64748b); font-size: 13px; line-height: 1.6; }
+.project-file-preview pre { flex: 1; min-height: 0; overflow: auto; white-space: pre; margin: 0; font: 13px/1.6 monospace; }
+.project-file-preview pre:focus-visible { outline: 2px solid var(--primary-color, #6366f1); }
