@@ -1,4 +1,4 @@
-import { FILE_ICONS } from '@itookit/common';
+import { FILE_ICONS, fileTypeIcon } from '@itookit/common';
 import { formatFileSize } from '../../../../utils/file-size';
 /**
  * @file vfs-ui/ui/components/NodeList/items/itemTemplates.ts
@@ -116,7 +116,7 @@ export const createFileItemHTML = (
       ? `<div class="vfs-node-item__outline is-expanded">${createOutlineHTML(headings)}</div>`
       : '';
 
-  const displayIcon = icon || FILE_ICONS.file;
+  const displayIcon = icon || fileTypeIcon(title);
 
   const menuHTML = custom.navigationMenu ? `<button type="button" class="vfs-node-item__action-btn" data-action="item-menu" aria-label="${escapeHTML(t('vfs.columns.more'))}">⋯</button>` : '';
   const hasActions = deleteBtnHTML || outlineToggleHTML || menuHTML;
@@ -209,7 +209,6 @@ export const createDirectoryItemHTML = (
             <span class="vfs-directory-item__title">${highlight(title, searchQueries)}</span>
             ${typeof metadata.custom.navigationDescription === 'string' ? `<span class="vfs-directory-item__description">${escapeHTML(metadata.custom.navigationDescription)}</span>` : ''}
             ${tagsHtml}
-            ${dir.presentation?.fileDetails ? '<span class="vfs-node-item__size">—</span>' : ''}
           </div>
         </div>
         ${metadata.custom.navigationMenu ? `<button type="button" class="vfs-directory-item__menu" data-action="item-menu" aria-label="${escapeHTML(t('vfs.columns.more'))}">⋯</button>` : ''}

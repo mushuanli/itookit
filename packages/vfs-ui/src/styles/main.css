@@ -200,7 +200,7 @@
   align-items: stretch;
   flex-grow: 1;
   min-width: 0;
-  padding: var(--spacing-2) var(--spacing-3) var(--spacing-2) 0;
+  padding: var(--spacing-2) var(--spacing-3) var(--spacing-2) 24px;
   cursor: pointer;
   border-left: 3px solid transparent;
   gap: var(--spacing-2);
@@ -223,7 +223,8 @@
   width: 20px;
   text-align: center;
   align-self: flex-start;
-  margin-top: 2px;
+  margin-top: 0;
+  height: 20px;
 }
 
 /* --- Body Content Area --- */
@@ -507,9 +508,12 @@
 }
 
 .vfs-directory-item__header {
+  position: relative;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
-  padding: var(--spacing-2) var(--spacing-3) var(--spacing-2) 0;
+  padding: var(--spacing-2) var(--spacing-3) var(--spacing-2) 24px;
   cursor: pointer;
   border-left: 3px solid transparent;
   transition: background-color var(--transition-fast), border-color var(--transition-fast);
@@ -529,8 +533,10 @@
   width: 16px;
   height: 16px;
   flex-shrink: 0;
-  position: relative;
-  margin-right: var(--spacing-1);
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .vfs-directory-item__toggle::before {
@@ -549,6 +555,8 @@
 }
 
 .vfs-directory-item__icon {
+  width: 20px;
+  height: 20px;
   margin-right: var(--spacing-2);
   flex-shrink: 0;
 }
@@ -1465,3 +1473,63 @@
 
 .vfs-node-item--unavailable { opacity: .45; filter: grayscale(1); cursor: not-allowed; }
 .vfs-node-item--unavailable .vfs-directory-item__header { cursor: not-allowed; }
+
+/* Shared row geometry keeps folder and file names on the same column. */
+.vfs-node-item__content, .vfs-directory-item__header { box-sizing: border-box; min-height: 36px; border-radius: 6px; }
+.vfs-node-item__title, .vfs-directory-item__title { line-height: 20px; text-decoration: none; }
+.vfs-node-item__content:focus-visible { outline: 2px solid var(--color-primary-default); outline-offset: -2px; }
+.vfs-node-item--file-details .vfs-node-item__content { align-items: center; }
+.vfs-node-item--file-details .vfs-node-item__icon { align-self: center; }
+.vfs-node-item--file-details .vfs-node-item__body { flex-direction: row; align-items: center; gap: 12px; }
+.vfs-node-item--file-details .vfs-node-item__row-primary { flex: 1; min-width: 0; }
+.vfs-node-item--file-details .vfs-node-item__row-secondary { flex: 0 1 auto; min-width: 0; }
+.vfs-node-item--file-details .vfs-node-item__secondary-left:empty { display: none; }
+.vfs-node-item--file-details .vfs-node-item__timestamp { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vfs-directory-action:disabled { opacity: .45; cursor: not-allowed; }
+.vfs-node-list { container-type: inline-size; }
+@container (max-width: 320px) {
+  .vfs-node-item--file-details .vfs-node-item__timestamp { display: none; }
+  .vfs-node-item--file-details .vfs-node-item__body { gap: 6px; }
+}
+
+/* Type color is a secondary cue: shape and filename remain readable without color. */
+.vfs-ui {
+  --file-folder: #a56b16;
+  --file-document: #526b89;
+  --file-code: #356cc2;
+  --file-config: #8060ad;
+  --file-image: #168275;
+  --file-media: #a24b81;
+  --file-archive: #927044;
+  --file-pdf: #c24a4a;
+  --file-spreadsheet: #2a8054;
+  --file-slides: #bb6829;
+  --file-audio: #8e59ae;
+  --file-database: #487da0;
+}
+[data-theme="dark"] .vfs-ui {
+  --file-folder: #dfb45f;
+  --file-document: #a2b5cc;
+  --file-code: #85b3f0;
+  --file-config: #b99ade;
+  --file-image: #6fc7b4;
+  --file-media: #dd92be;
+  --file-archive: #c6ab84;
+  --file-pdf: #ee9494;
+  --file-spreadsheet: #80cba0;
+  --file-slides: #e9ae7c;
+  --file-audio: #c19ade;
+  --file-database: #89bedb;
+}
+.vfs-ui [data-file-icon="folder"] { color: var(--file-folder); fill: color-mix(in srgb, currentColor 14%, transparent); }
+.vfs-ui [data-file-icon="document"] { color: var(--file-document); }
+.vfs-ui [data-file-icon="code"] { color: var(--file-code); }
+.vfs-ui [data-file-icon="config"] { color: var(--file-config); }
+.vfs-ui [data-file-icon="image"] { color: var(--file-image); }
+.vfs-ui [data-file-icon="media"] { color: var(--file-media); }
+.vfs-ui [data-file-icon="archive"] { color: var(--file-archive); }
+.vfs-ui [data-file-icon="pdf"] { color: var(--file-pdf); }
+.vfs-ui [data-file-icon="spreadsheet"] { color: var(--file-spreadsheet); }
+.vfs-ui [data-file-icon="slides"] { color: var(--file-slides); }
+.vfs-ui [data-file-icon="audio"] { color: var(--file-audio); }
+.vfs-ui [data-file-icon="database"] { color: var(--file-database); }

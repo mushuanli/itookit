@@ -15,7 +15,7 @@ export interface VFSColumnsOptions {
     contentHeader?: HTMLElement;
     contentCompareItems?: (a: VFSNodeUI, b: VFSNodeUI) => number | undefined;
     contentItems?: (items: VFSNodeUI[]) => VFSNodeUI[];
-    navigationAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
+    navigationAction?: { label: string; visible(path: string): boolean; disabled?(path: string): boolean; run(path: string): Promise<void> };
     navigationCard?: (node: VFSNodeUI) => boolean;
     navigationDirectoryPreview?: (node: VFSNodeUI) => number | undefined;
     /** Additional directories whose children are projected directly into an expanded navigation row. */

@@ -64,7 +64,7 @@ export interface VFSUIShellOptions extends BrowserBaseOptions {
   sort?: VFSListSort;
   defaultExtension?: string;
   fileTypes?: FileTypeDefinition[];
-  directoryAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
+  directoryAction?: { label: string; visible(path: string): boolean; disabled?(path: string): boolean; run(path: string): Promise<void> };
   activateDirectories?: boolean;
   /** Restore saved selection, but optionally keep a new tree unselected. */
   autoSelectFirst?: boolean;

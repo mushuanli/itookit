@@ -41,3 +41,15 @@ it('keeps synthetic resource titles and presentation when extensions are enabled
   expect(session.metadata.title).toBe('Conversation');
   expect(session.presentation?.fileDetails).toBe(false);
 });
+
+it('classifies common filenames without file reads and preserves explicit icons', async () => {
+  const { FILE_ICONS, fileTypeIcon } = await import('@itookit/common');
+  const examples = { pdf: ['REPORT.PDF'], spreadsheet: ['budget.xlsx', 'data.csv'], slides: ['talk.pptx'],
+    audio: ['voice.mp3'], media: ['clip.mp4'], config: ['.env.local', '.gitignore', 'tsconfig.app.json'],
+    code: ['Dockerfile', 'main.rs', 'page.vue'], document: ['README', 'notes.docx'], archive: ['backup.tar.gz'] };
+  for (const [kind, names] of Object.entries(examples)) for (const name of names)
+    expect(fileTypeIcon(name)).toBe(FILE_ICONS[kind as keyof typeof FILE_ICONS]);
+  expect(fileTypeIcon('go')).toBe(FILE_ICONS.file);
+  expect(fileTypeIcon('assets.pdf', true)).toBe(FILE_ICONS.folder);
+  expect(mapFSNodeToUIItem({ ...file, icon: 'custom' }).icon).toBe('custom');
+});

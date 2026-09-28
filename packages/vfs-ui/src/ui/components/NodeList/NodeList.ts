@@ -44,7 +44,7 @@ interface NodeListOptions extends BaseComponentDeps {
   instanceId: string;
   onError?: (error: unknown) => void;
   engine?: any;
-  directoryAction?: { label: string; visible(path: string): boolean; run(path: string): Promise<void> };
+  directoryAction?: { label: string; visible(path: string): boolean; disabled?(path: string): boolean; run(path: string): Promise<void> };
   activateDirectories?: boolean;
   primaryAction?: { label: string; run(): Promise<void> };
   exportDirectories?: boolean;
@@ -516,9 +516,10 @@ export class NodeList extends BaseComponent<NodeListState> {
         const path = row.dataset.itemId!;
         if (!action.visible(path) || row.querySelector(':scope > .vfs-node-item__main-row > .vfs-directory-action')) continue;
         const button = document.createElement('button'); button.type = 'button'; button.className = 'vfs-directory-action'; button.textContent = action.label;
-        button.onclick = event => { event.stopPropagation(); button.disabled = true;
+        button.disabled = action.disabled?.(path) ?? false;
+        button.onclick = event => { event.stopPropagation(); if (action.disabled?.(path)) return; button.disabled = true;
           void action.run(path).catch(error => { console.error('Directory action failed', error); })
-            .finally(() => { button.disabled = false; }); };
+            .finally(() => { button.disabled = action.disabled?.(path) ?? false; }); };
         row.querySelector(row.classList.contains('vfs-directory-item--card') ? ':scope > .vfs-directory-item__children' : ':scope > .vfs-node-item__main-row')?.append(button);
       }
     }

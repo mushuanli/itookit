@@ -20,7 +20,7 @@
 
 .vfs-columns .vfs-node-list__title-bar { display: flex; align-items: center; gap: 6px; min-height: 42px; }
 .vfs-columns .vfs-node-list__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vfs-columns .vfs-directory-item__header { flex: 1; min-width: 0; padding-left: 10px; }
+.vfs-columns .vfs-directory-item__header { flex: 1; min-width: 0; }
 
 
 .vfs-columns[data-content-visible="false"] { grid-template-columns: 1fr; }
