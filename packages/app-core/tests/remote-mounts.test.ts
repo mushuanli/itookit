@@ -35,7 +35,7 @@ it('shares project remote grants with Sessions, retains remote routing during sh
         const [mount] = runtime.projects.remoteMounts!.list(project.project.id);
         await runtime.projects.remoteMounts!.remove(project.project.id, mount.mountId);
         expect((await root.driver.getNode(project.project.directory + '/reference'))?.type).toBe('directory');
-        const config = await root.meta.seq!.getEntry('/etc/project-remote-mounts.seq', 'catalog'); expect(config).not.toContain('secret');
+        const config = await root.meta.seq!.getEntry('/etc/fs/catalog.seq', 'index'); expect(config).not.toContain('secret');
     } finally { await runtime.dispose(); }
 });
 
@@ -77,7 +77,11 @@ it('disables only the disconnected project and restores existing Session views a
             connected = false; await remote.checkConnections(project.project.id);
             expect(remote.projectOffline(project.project.id)).toBe(true);
             const node = await browser.fs.driver.getNode(folderBrowserPath(project.path));
-            expect(node?.metadata._disabled).toBe(true);
+            expect(node?.metadata._disabled).toBe(false);
+            const sessionPath = `${folderBrowserPath(await runtime.projects.sessionFolder(project))}/${id}`;
+            expect((await browser.fs.driver.getNode(sessionPath))?.metadata._disabled).not.toBe(true);
+            expect((await browser.fs.driver.getChildren(sessionPath)).some(item => item.name === 'tasks')).toBe(true);
+            expect((await browser.fs.driver.getChildren(folderBrowserPath(project.path))).find(item => item.path.endsWith('/@files'))?.metadata._disabled).toBe(true);
             expect((await browser.fs.driver.getNode(folderBrowserPath(local.path)))?.metadata._disabled).toBe(false);
             const children = await browser.fs.driver.getChildren(folderBrowserPath(project.path) + '/@files');
             expect(children.find(item => item.name === 'local.txt')?.metadata._disabled).toBe(true);
@@ -133,7 +137,7 @@ it('shares named connections across distinct remote roots and reuses the same pr
         await expect(remote.removeConnection(connection)).rejects.toMatchObject({ code: 'EBUSY' });
         await expect(runtime.projects.createRemote('Escape', null, connection, '/docs/../private')).rejects.toMatchObject({ code: 'EINVAL' });
         const root = await runtime.vfs.openFileSystem('/');
-        const saved = await root.meta.seq!.getEntry('/etc/project-remote-mounts.seq', 'catalog');
+        const saved = await root.meta.seq!.getEntry(`/etc/fs/remote/${connection}.seq`, 'config');
         expect(saved).not.toContain('password-for-files'); expect(saved).toContain('Renamed');
         const { ProjectRemoteMountService } = await import('../src/projects/remote-mounts');
         const reloaded = new ProjectRemoteMountService(root, { ...provider, async dispose() {} }, async () => {}, async () => {});
@@ -213,12 +217,12 @@ it('skips damaged catalog records instead of blocking startup', async () => {
         const connection = await remote.saveConnection({ name: 'Files', endpoint: 'files.test', username: 'alice' }, 'secret');
         const project = await runtime.projects.createRemote('Remote', null, connection, '/docs/a');
         const root = await runtime.vfs.openFileSystem('/');
-        const path = '/etc/project-remote-mounts.seq';
-        const raw = (await root.meta.seq!.getEntry(path, 'catalog'))!;
+        const path = `/etc/fs/projects/${project.project.id}.seq`;
+        const raw = (await root.meta.seq!.getEntry(path, 'config'))!;
         const parsed = JSON.parse(raw);
-        parsed.projects[project.project.id].push({ mountId: 'damaged', at: 'relative', root: '/', access: 'ro' });
+        parsed.push({ mountId: 'damaged', at: 'relative', root: '/', access: 'ro' });
         await root.meta.seq!.transaction(async tx => {
-            await tx.compareAndSet(path, 'catalog', { expected: raw, value: JSON.stringify(parsed) });
+            await tx.compareAndSet(path, 'config', { expected: raw, value: JSON.stringify(parsed) });
         });
         const { ProjectRemoteMountService } = await import('../src/projects/remote-mounts');
         const reloaded = new ProjectRemoteMountService(root, memoryProvider(), async () => {}, async () => {});

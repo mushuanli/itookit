@@ -1,3 +1,4 @@
+import { RemoteMountStore, type RemoteMountCatalog as Catalog } from './remote-mount-store';
 import { randomUUID } from '@itookit/common';
 import { checkOperation, createFileSystemView, FSError, normalizeVirtualPath, operationScope,
     type FileSystemSourceOwner, type FileSystemMount, type IFileSystem, type OperationOptions } from '@itookit/vfs-core';
@@ -6,17 +7,18 @@ import { normalizeConnection, remoteProjectPath, type RemoteFileSystemConfig, ty
 
 export interface RemoteFileConnection { endpoint: string; alias: string; credentialRef: string; username?: string; }
 export interface RemoteFileSourceProvider {
+    clearCredential?(reference: string): void;
     setCredential(reference: string, secret: string): void | (() => void);
     open(connection: RemoteFileConnection, options?: OperationOptions): Promise<FileSystemSourceOwner>;
     check?(connection: Omit<RemoteFileConnection, 'alias'>, options?: OperationOptions): Promise<void>;
+    browse?(connection: Omit<RemoteFileConnection, 'alias'>, path: string, cursor?: string, options?: OperationOptions): Promise<{ paths: string[]; nextCursor: string | null }>;
+    checkDraft?(connection: Omit<RemoteFileConnection, 'alias'>, password: string, options?: OperationOptions): Promise<void>;
     dispose(): Promise<void>;
 }
 export interface ProjectRemoteMount extends RemoteFileConnection {
     mountId: string; at: string; root: string; access: 'ro' | 'rw'; connectionId?: string;
 }
-interface Catalog { version: 1; revision: number; projects: Record<string, ProjectRemoteMount[]>; connections?: RemoteFileSystemConfig[]; }
 export type RemoteConnectionStatus = 'unknown' | 'checking' | 'online' | 'offline';
-const catalogPath = '/etc/project-remote-mounts.seq';
 
 /** Project-owned grants; credentials stay in the injected host provider. */
 export class ProjectRemoteMountService {
@@ -26,7 +28,7 @@ export class ProjectRemoteMountService {
     private readonly missing = new Map<string, Promise<FileSystemSourceOwner>>();
     private tail: Promise<unknown> = Promise.resolve();
     private closed = false;
-    private persisted: string | null = null;
+    private readonly catalogStore: RemoteMountStore;
     private readonly states = new Map<string, RemoteConnectionStatus>();
     private readonly connectionStates = new Map<string, RemoteConnectionStatus>();
     private readonly listeners = new Set<() => void>();
@@ -34,31 +36,26 @@ export class ProjectRemoteMountService {
     readonly diagnostics = new Map<string, string[]>();
     /** Entries dropped while loading the catalog, so a single bad record cannot block startup. */
     readonly loadWarnings: string[] = [];
-    constructor(private readonly store: IFileSystem, private readonly provider: RemoteFileSourceProvider,
+    constructor(store: IFileSystem, private readonly provider: RemoteFileSourceProvider,
         private readonly beforeChange: (projectId: string) => Promise<void>,
-        private readonly afterChange: (projectId: string) => Promise<void>) {}
+        private readonly afterChange: (projectId: string) => Promise<void>) { this.catalogStore = new RemoteMountStore(store); }
     async init(): Promise<void> {
-        if (!await this.store.driver.exists(catalogPath)) return;
-        const raw = await this.store.meta.seq!.getEntry(catalogPath, 'catalog');
-        if (raw === null || raw === undefined) return;
-        let saved: Catalog;
-        try { saved = JSON.parse(raw) as Catalog; }
-        catch { throw new FSError('EINVAL', 'Invalid remote mount catalog'); }
-        this.persisted = raw;
+        const saved = await this.catalogStore.load();
+        if (!saved) return;
         if (!saved || saved.version !== 1 || (!Number.isSafeInteger(saved.revision) || saved.revision < 0) || !saved.projects || typeof saved.projects !== 'object') throw new FSError('EINVAL', 'Invalid remote mount catalog');
         // Validate per record: a single damaged entry must not stop the whole application from
         // starting, and the surviving grants stay usable.
         const connections = (Array.isArray(saved.connections) ? saved.connections : []).filter(connection => {
             try {
                 normalizeConnection(connection);
-                if (!connection.id || !connection.credentialRef) throw new FSError('EINVAL', 'Invalid connection reference');
+                if (!/^[a-zA-Z0-9_-]{1,128}$/.test(connection.id) || !connection.credentialRef) throw new FSError('EINVAL', 'Invalid connection reference');
                 return true;
             } catch { this.loadWarnings.push(`INVALID_CONNECTION:${(connection as { id?: string })?.id ?? 'unknown'}`); return false; }
         });
         const known = new Set(connections.map(connection => connection.id));
         const projects: Record<string, ProjectRemoteMount[]> = {};
         for (const [projectId, mounts] of Object.entries(saved.projects)) {
-            if (!Array.isArray(mounts)) { this.loadWarnings.push(`INVALID_PROJECT:${projectId}`); continue; }
+            if (!/^[a-zA-Z0-9_-]{1,128}$/.test(projectId) || !Array.isArray(mounts)) { this.loadWarnings.push(`INVALID_PROJECT:${projectId}`); continue; }
             const valid = mounts.filter(mount => {
                 try {
                     validateMount(mount);
@@ -69,6 +66,11 @@ export class ProjectRemoteMountService {
             if (valid.length) projects[projectId] = valid;
         }
         this.catalog = { ...saved, projects, connections };
+        if (this.catalogStore.needsMigration) await this.persist(this.catalog);
+        for (const connection of connections) {
+            const password = this.catalogStore.password(connection.id);
+            if (password) this.provider.setCredential(connection.credentialRef, password);
+        }
     }
     list(projectId: string): ProjectRemoteMount[] {
         return structuredClone((this.catalog.projects[projectId] ?? []).map(mount => {
@@ -98,6 +100,17 @@ export class ProjectRemoteMountService {
         const offline = projects.some(projectId => this.projectOffline(projectId)) || (handshakeFailed && !projects.length);
         this.setConnectionStatus(id, offline ? 'offline' : 'online');
     }
+    async checkDraft(input: RemoteFileSystemInput, password: string, id?: string, options?: OperationOptions): Promise<void> {
+        const value = normalizeConnection(input);
+        const credentialRef = id ? this.connection(id).credentialRef : '';
+        if (!this.provider.checkDraft) throw new FSError('ECAPABILITY', 'Connection checks unavailable');
+        await this.provider.checkDraft({ ...value, credentialRef }, password, options);
+    }
+    async browseDirectories(id: string, path: string, cursor?: string, options?: OperationOptions) {
+        if (!this.provider.browse) throw new FSError('ECAPABILITY', 'Directory browsing unavailable');
+        const normalized = path === '/' ? '/' : (() => { const { alias, root } = remoteProjectPath(path); return `/${alias}${root === '/' ? '' : root}`; })();
+        return this.provider.browse(this.connection(id), normalized, cursor, options);
+    }
     saveConnection(input: RemoteFileSystemInput, password: string, id?: string): Promise<string> {
         return this.serial(async () => {
             const value = normalizeConnection(input), existing = id ? this.connection(id) : undefined;
@@ -110,7 +123,7 @@ export class ProjectRemoteMountService {
             for (const projectId of affected) await this.beforeChange(projectId);
             const next = { ...value, id: id ?? randomUUID(), credentialRef: existing?.credentialRef ?? randomUUID() };
             const restore = password ? this.provider.setCredential(next.credentialRef, password) : undefined;
-            try { await this.persist({ ...this.catalog, connections: [...connections.filter(item => item.id !== id), next] }); }
+            try { await this.persist({ ...this.catalog, connections: [...connections.filter(item => item.id !== id), next] }, password ? { id: next.id, password } : undefined); }
             catch (error) { restore?.(); throw error; }
             for (const projectId of affected) {
                 await this.changed(projectId);
@@ -124,7 +137,9 @@ export class ProjectRemoteMountService {
     removeConnection(id: string): Promise<void> {
         return this.serial(async () => {
             if (this.connectionProjects(id).length) throw new FSError('EBUSY', 'Remote file system is referenced by projects');
+            const credentialRef = this.connection(id).credentialRef;
             await this.persist({ ...this.catalog, connections: this.connections().filter(item => item.id !== id) });
+            this.provider.clearCredential?.(credentialRef);
             this.connectionStates.delete(id);
             for (const listener of this.listeners) listener();
         });
@@ -349,19 +364,12 @@ export class ProjectRemoteMountService {
     private async save(projectId: string, mounts: ProjectRemoteMount[]) {
         await this.persist({ ...this.catalog, projects: { ...this.catalog.projects, [projectId]: mounts } });
     }
-    private async persist(catalog: Catalog) {
+    private async persist(catalog: Catalog, credential?: { id: string; password: string }) {
         const next = { ...catalog, revision: this.catalog.revision + 1 };
-        const content = JSON.stringify(next);
-        if (!this.store.meta.seq?.transaction) throw new FSError('ECAPABILITY', 'Remote grants require transactional records');
-        if (!await this.store.driver.exists(catalogPath)) {
-            try { await this.store.driver.createFile({ parentPath: '/etc', name: 'project-remote-mounts.seq', type: 'seqfile', recursive: true }); }
-            catch (error) { if (!(error instanceof FSError) || error.code !== 'EEXIST') throw error; }
-        }
-        await this.store.meta.seq.transaction(async tx => {
-            if (!await tx.compareAndSet(catalogPath, 'catalog', { expected: this.persisted, value: content })) throw new FSError('ECONFLICT', 'Remote grants changed; reload the project');
-        });
-        this.persisted = content; this.catalog = next;
+        await this.catalogStore.save(next, credential);
+        this.catalog = next;
     }
+
     private serial<T>(action: () => Promise<T>): Promise<T> {
         if (this.closed) return Promise.reject(new FSError('EACCES', 'Remote mounts closed'));
         const pending = this.tail.catch(() => {}).then(() => { if (this.closed) throw new FSError('EACCES', 'Remote mounts closed'); return action(); });
