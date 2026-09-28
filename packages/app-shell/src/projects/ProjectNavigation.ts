@@ -39,8 +39,13 @@ export class ProjectNavigation {
                 run: async path => { await this.actions.createSession(path); } },
             contentLeaf: node => resolveBrowserTarget(node.id).kind === 'session',
             contentCompareItems: (a, b) => this.family ? this.compareFamily(a, b) : undefined,
-            contentItems: items => this.family ? this.familyItems(items) : items,
+            contentItems: items => {
+                const nodes = this.family ? this.familyItems(items) : items;
+                return this.project && this.projects.remoteMounts?.projectOffline(this.project.project.id)
+                    ? nodes.map(node => ({ ...node, metadata: { ...node.metadata, custom: { ...node.metadata.custom, _disabled: true, _readOnly: true } } })) : nodes;
+            },
             navigationToolbar: 'full', navigationToolbarOptions: { directoryFirst: true, directoryLabel: t('vfs.toolbar.project'), fileLabel: t('vfs.toolbar.session'),
+                hiddenActions: ['create-file'],
                 actions: this.projectToolbarActions() }, navigationHeader: this.retryHeader() };
     }
     private searchLoading?: Promise<void>;

@@ -1,3 +1,4 @@
+import { RemoteFilesSettingsEditor } from './files/RemoteFilesSettingsEditor';
 import { createFileChatHandler } from './projects/file-chat';
 import { createOcrControls } from './configuration/ocr-controls';
 import { OcrService } from '@itookit/app-core';
@@ -103,7 +104,6 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const settingsSources = await Promise.all(workspaces.filter(workspace => !['settings', 'skills', 'toolbox'].includes(workspace.type ?? '')).map(async workspace => ({
         name: workspace.workspaceName, description: workspace.title,
         fs: workspace.files?.fs ?? await vfs.openFileSystem(workspaceRoot(workspace.workspaceName)),
-        syncEnabled: workspace.syncEnabled && !workspace.isSystem,
     })));
     const settingsModule = await traceBoot('createSettingsModule', () => createSettingsModule(vfs, settingsSources, { excludedPages: toolboxId ? ['providers', 'connections', 'mcp-servers', 'system-prompts'] : [] }));
     cleanupFns.push(() => settingsModule.service.dispose());
@@ -114,6 +114,9 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const ocr = createOcrControls(ocrService, agentService, request => handleNavigationRequest(request));
     const deletionDialog = new ConfigurationDeletionDialog(runtime.configuration, undefined, ocr.deletionImpact);
     const settingsFactory = createSettingsFactory({
+        remoteFiles: runtime.projects.remoteMounts ? async (container, editorOptions) => {
+            const editor = new RemoteFilesSettingsEditor(container, runtime.projects, editorOptions); await editor.init(container); return editor;
+        } : undefined,
         settingsService: settingsModule.service, agentService, connectionService: llmDriver, llmUiEditors: options.ui.llmUiEditors,
         connectBrowser: (browser, fs, container, factory) => connectEditorLifecycle(browser, fs, container, factory, { readOnly: true }),
         restoreFlows: options.ui.restoreFlowLibrary ? () => options.ui.restoreFlowLibrary!(commandBus) : undefined,

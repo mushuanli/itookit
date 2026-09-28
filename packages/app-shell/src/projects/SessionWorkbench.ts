@@ -1,5 +1,6 @@
+import { monitorRemoteConnections } from '../files/remote-status-monitor';
 import { EditorLease } from '../browser/editor-lease';
-import { openProjectFileEditor } from './project-file-editor';
+import { openProjectFileEditor, localizeRemoteWriteError } from './project-file-editor';
 import { fileContentFormat } from '../browser/file-format';
 import { ViewLoad, ViewLoadCancelled, LatestViewLoad } from '../lifecycle/view-load';
 import { SubscriptionScope } from '../lifecycle/subscription-scope';
@@ -189,6 +190,8 @@ export class SessionWorkbench implements WorkspaceController {
             if (event.reason !== 'content') this.scheduleRefresh('kernel:' + event.reason);
         }));
         await traceBoot('sessionWorkbench.sidebar', () => this.sidebarUI!.start());
+        if (this.projects?.remoteMounts) this.subscriptions.add(
+            this.projects.remoteMounts.onChange(() => { this.updateRemoteAvailability(); this.scheduleRefresh('remote-status'); }), monitorRemoteConnections(this.projects));
         if (this.projectNavigation && !this.active) {
             const current = await traceBoot('sessionWorkbench.currentProject', () => this.projects!.current());
             // The startup project is already resolved; hand it to the first sync so it does
@@ -245,6 +248,14 @@ export class SessionWorkbench implements WorkspaceController {
      * Coalesce a burst of structural changes (Task created → started → finished)
      * into one sidebar re-render. Content changes never reach here.
      */
+    private updateRemoteAvailability(): void {
+        if (!this.projects?.remoteMounts) return;
+        const project = this.projectNavigation?.currentProject();
+        const offline = !!project && !!this.projects?.remoteMounts?.projectOffline(project.project.id);
+        this.container.inert = offline;
+        this.container.classList.toggle('project-workbench--offline', offline);
+        this.container.setAttribute('aria-disabled', String(offline));
+    }
     private scheduleRefresh(source: string): void {
         if (this.closed || !this.visible) return;
         this.refreshSources.add(source);
@@ -273,7 +284,7 @@ export class SessionWorkbench implements WorkspaceController {
             this.browser?.invalidateNavigation();
             await this.sidebarUI?.refresh();
             if (!this.visible || this.closed) return;
-            await this.projectNavigation?.refresh();
+            await this.projectNavigation?.refresh(); this.updateRemoteAvailability();
             if (!this.visible || this.closed) return;
             await this.syncBranchRoute();
             for (const id of this.waiting) this.sidebarUI?.setNodeAttention(await this.sessionPath(id), t('project.waitingInput'));
@@ -340,6 +351,14 @@ export class SessionWorkbench implements WorkspaceController {
         void tracked.finally(() => this.readCleanup.delete(tracked));
     }
     async openResource(resourceId: string, options: { reload?: boolean; branch?: string } = {}): Promise<void> {
+        if (this.projects?.remoteMounts && !isFlowPath(parseSessionRoute(resourceId).path)) {
+            const target = resolveBrowserTarget(parseSessionRoute(resourceId).path);
+            const folder = target.kind === 'project-files' ? target.folder : target.kind === 'folder'
+                ? folderPathFromBrowserPath(parseSessionRoute(resourceId).path) : (await this.repository.getManifest(target.sessionId)).folder;
+            const project = await this.projects.forFolder(folder);
+            if (project && this.projects.remoteMounts.projectOffline(project.project.id)) throw new Error(t('remote.projectOffline'));
+            this.container.inert = false; this.container.classList.remove('project-workbench--offline'); this.container.setAttribute('aria-disabled', 'false');
+        }
         const route = parseSessionRoute(resourceId);
         let path = route.path;
         if (isFlowPath(path)) {
@@ -427,7 +446,8 @@ export class SessionWorkbench implements WorkspaceController {
                                 },
                             } : undefined, toggleSidebar: () => this.sidebarUI?.toggleSidebar() } }));
                     } else {
-                        const bytes = await load.read(() => context.context.fs.driver.readContent(target.path, { encoding: 'binary' }));
+                        let revision: string | undefined;
+                        const bytes = await load.read(() => context.context.fs.driver.readContent(target.path, { encoding: 'binary', signal: load.signal, onRevision: value => { revision = value; } }));
                         load.check();
                         let content: string | undefined;
                         try {
@@ -447,8 +467,8 @@ export class SessionWorkbench implements WorkspaceController {
                                     saveContent: readOnly ? undefined : async (_path, text) => {
                                         // A failed write must never look like a successful save: the
                                         // editor keeps its dirty state, and the user is told now.
-                                        try { await context.context.fs.driver.writeContent(target.path, text); }
-                                        catch (error) { this.report(error); throw error; }
+                                        try { await context.context.fs.driver.writeContent(target.path, text, { ifRevision: revision, signal: load.signal, onRevision: value => { revision = value; } }); }
+                                        catch (error) { const failure = localizeRemoteWriteError(error); this.report(failure); throw failure; }
                                         this.refresh();
                                     } },
                             }));
@@ -555,6 +575,8 @@ export class SessionWorkbench implements WorkspaceController {
                 const directory = document.createElement('p'); directory.className = 'project-workbench__directory';
                 directory.textContent = project.project.directory.startsWith('host:') ? project.project.directory.slice(5) : t('project.managedDirectory'); panel.append(directory);
                 this.actionButton(panel, t('project.createSession'), () => this.createResource({ parentPath: path }));
+                const remote = this.projects.remoteMounts?.list(project.project.id).find(mount => mount.at === '/');
+                if (remote?.connectionId) directory.textContent = `${this.projects.remoteMounts!.connection(remote.connectionId).name}: /${remote.alias}${remote.root === '/' ? '' : remote.root}`;
             }
         }
         if (target.kind === 'files' && target.path === '/' && this.directoryMounts) {
@@ -726,8 +748,9 @@ export class SessionWorkbench implements WorkspaceController {
             if (target.kind === 'session') folder = (await this.sessions.get(target.sessionId)).folder ?? null;
         }
         if (!this.projects) return folder;
-        const project = await this.projects.forFolder(folder) ?? await this.projects.current();
-        if (!project) return folder;
+        const project = await this.projects.forFolder(folder);
+        if (!project) throw new Error(t('project.selectForSession'));
+        if (this.projects.remoteMounts?.projectOffline(project.project.id)) throw new Error(t('remote.projectOffline'));
         return folder && folder.startsWith(project.path + '/') ? folder : this.projects.sessionFolder(project);
     }
     private actionButton(parent: HTMLElement, label: string, action: () => Promise<unknown>): void {
@@ -765,6 +788,10 @@ export class SessionWorkbench implements WorkspaceController {
     }
     async createChild(parentSessionId: string): Promise<string> {
         if (!this.projects) throw new Error('Projects unavailable');
+        const parent = await this.sessions.get(parentSessionId);
+        const project = await this.projects.forFolder(parent.folder);
+        if (!project) throw new Error(t('project.selectForSession'));
+        if (this.projects.remoteMounts?.projectOffline(project.project.id)) throw new Error(t('remote.projectOffline'));
         const id = await this.projects.sessions.createChild(parentSessionId);
         await this.sidebarUI?.refresh(); await this.openResource(id); this.projectNavigation?.showContent(); this.editor?.focus?.(); return id;
     }
@@ -783,7 +810,7 @@ export class SessionWorkbench implements WorkspaceController {
         const title = document.createElement('h1'); title.textContent = t('project.welcome');
         const hint = document.createElement('p'); hint.textContent = t('project.welcomeHint');
         panel.append(mark, title, hint);
-        this.actionButton(panel, t('project.createSession'), () => this.createResource());
+        if (this.projects) this.actionButton(panel, t('project.create'), () => this.createProject('/'));
         this.container.replaceChildren(panel);
     }
     private async editorMount(folder?: string | null, sessionId?: string): Promise<HTMLElement> {
@@ -887,6 +914,11 @@ export class SessionWorkbench implements WorkspaceController {
         this.sidebarUI?.cancelPendingSelection?.(); this.dialogs.abort(); this.subscriptions.dispose();
         if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = undefined; }
         await Promise.all([this.tail, this.refreshTail]); await this.fileNavigation; await Promise.all(this.readCleanup); await this.closeEditor(); this.sidebarUI?.destroy();
+        if (this.projects?.remoteMounts) {
+            this.container.inert = false;
+            this.container.classList.remove('project-workbench--offline');
+            this.container.removeAttribute('aria-disabled');
+        }
         await this.navigationFiles?.dispose(); await this.browser?.dispose(); this.container.replaceChildren();
     }
 }

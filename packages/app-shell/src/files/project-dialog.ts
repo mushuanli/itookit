@@ -1,5 +1,6 @@
 import { t } from '@itookit/common';
 import type { ProjectService } from '@itookit/app-core';
+import { remoteProjectFields } from './remote-project-fields';
 
 /** Keep validation errors and the user's draft inside the dialog. */
 export function showNameDialog(title: string, label: string, signal: AbortSignal,
@@ -41,15 +42,23 @@ export async function showProjectDialog(projects: ProjectService, parent: string
         const option = document.createElement('option'); option.value = folder.path; option.textContent = folder.path; select.append(option);
     }
     select.value = parent ?? ''; group.append(select); fields.append(group);
-    const hint = document.createElement('p'); hint.textContent = t('project.directoryHint'); fields.append(hint);
+    const local = document.createElement('div');
+    const remote = projects.remoteMounts ? remoteProjectFields(projects, fields, local) : undefined;
+    fields.append(local);
+    const hint = document.createElement('p'); hint.textContent = t('project.directoryHint'); local.append(hint);
     let directory: string | undefined;
     if (projects.canSelectDirectory) {
         const button = document.createElement('button'); button.type = 'button'; button.textContent = t('project.openDirectory');
         button.onclick = () => { void projects.chooseDirectory().then(path => {
             if (path) { directory = path.startsWith('host:') ? path : `host:${path}`; button.textContent = path; }
-        }).catch(error => { hint.textContent = error.message; }); }; fields.append(button);
+        }).catch(error => { hint.textContent = error.message; }); }; local.append(button);
     }
-    await showNameDialog(t('project.create'), t('project.name'), signal, async name => {
-        const project = await projects.create(name, select.value || null, directory); await created(project.path);
-    }, fields);
+    const controller = new AbortController();
+    const abort = () => controller.abort(); signal.addEventListener('abort', abort, { once: true });
+    try { await showNameDialog(t('project.create'), t('project.name'), signal, async name => {
+        const project = remote?.isRemote()
+            ? await projects.createRemote(name, select.value || null, remote.connection.value, remote.path.value.trim(), remote.writable.checked ? 'rw' : 'ro', { signal: controller.signal, timeoutMs: 10000 })
+            : await projects.create(name, select.value || null, directory);
+        await created(project.path);
+    }, fields); } finally { controller.abort(); signal.removeEventListener('abort', abort); }
 }

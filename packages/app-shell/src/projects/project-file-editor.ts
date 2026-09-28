@@ -1,5 +1,5 @@
 import type { ProjectService } from '@itookit/app-core';
-import { buildRenamedFilename, traceBoot } from '@itookit/common';
+import { buildRenamedFilename, traceBoot, t } from '@itookit/common';
 import type { EditorFactory, EditorHostContext, IEditor } from '@itookit/ui-common';
 import { FSError, type FileSystemContextOwner } from '@itookit/vfs-core';
 import { fileContentFormat } from '../browser/file-format';
@@ -26,16 +26,17 @@ export async function openProjectFileEditor(projects: ProjectService, target: { 
         const context: FileSystemContextOwner = { context: { fs: source.fs, cwd: target.path.slice(0, target.path.lastIndexOf('/')) || '/' }, release: () => source.dispose() };
         const driver = source.fs.driver;
         const node = await load.read(() => traceBoot('projectFile.type', () => driver.getNodeType
-            ? driver.getNodeType(target.path) : driver.getNode(target.path)));
+            ? driver.getNodeType(target.path, { signal: load.signal }) : driver.getNode(target.path, { signal: load.signal })));
         if (!node) throw new FSError('ENOENT', 'File not found');
         if (node.type === 'directory') {
             await context.release(); owner = undefined; load.check(); return undefined;
         }
         mount = await options.mount(); load.check();
-        const bytes = await load.read(() => traceBoot('projectFile.read', () => driver.readContent(target.path, { encoding: 'binary' })));
+        let revision: string | undefined;
+        const bytes = await load.read(() => traceBoot('projectFile.read', () => driver.readContent(target.path, { encoding: 'binary', signal: load.signal, onRevision: value => { revision = value; } })));
         const content = decodeFile(target.path, bytes);
         if (content === undefined) previewCleanup = options.showBinary(mount, target.path, bytes);
-        else editor = await load.read(async () => editor = await createTextEditor(context, target.path, content, mount!, load, options));
+        else editor = await load.read(async () => editor = await createTextEditor(context, target.path, content, mount!, load, options, revision));
         load.check();
         return { editor, context, previewCleanup };
     } catch (error) {
@@ -53,7 +54,7 @@ function decodeFile(path: string, bytes: ArrayBuffer): string | undefined {
 }
 
 async function createTextEditor(context: FileSystemContextOwner, path: string, content: string,
-    mount: HTMLElement, load: ViewLoad, options: ProjectFileOptions): Promise<IEditor> {
+    mount: HTMLElement, load: ViewLoad, options: ProjectFileOptions, revision?: string): Promise<IEditor> {
     const { fs } = context.context;
     const readOnly = (await fs.capabilitiesAt(path)).readonly;
     load.check();
@@ -63,8 +64,18 @@ async function createTextEditor(context: FileSystemContextOwner, path: string, c
         initialContent: content, readOnly, signal: load.signal, title: buildRenamedFilename(filename, filename).title,
         hostContext: { ...options.host,
             saveContent: readOnly ? undefined : async (file, text) => {
-                await fs.driver.writeContent(file, text); options.changed();
+                try {
+                    await fs.driver.writeContent(file, text, { ifRevision: revision, signal: load.signal, onRevision: value => { revision = value; } }); options.changed();
+                } catch (error) {
+                    throw localizeRemoteWriteError(error);
+                }
             },
         },
     }));
+}
+
+export function localizeRemoteWriteError(error: unknown): unknown {
+    const receipt = error as { code?: string; outcome?: string; operationId?: string };
+    if (receipt.outcome === 'unknown') return new Error(`${t('remote.writeUnknown')} ${receipt.operationId ?? ''}`);
+    return receipt.code === 'ECONFLICT' ? new Error(t('remote.writeConflict')) : error;
 }

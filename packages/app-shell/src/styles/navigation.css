@@ -346,3 +346,8 @@ textarea {
 [data-theme="dark"] .app-nav-btn.active { background: #312e81; color: #e0e7ff; }
 [data-theme="dark"] .mobile-more-menu { background: #1e293b; color: #e2e8f0; }
 @media (max-width: 768px) { .main-content-area { height: 0; } }
+
+.remote-settings__project { padding: 1rem 0; border-bottom: 1px solid var(--border-color, #ddd); }
+.remote-settings__project button { margin-right: .5rem; }
+
+.project-workbench--offline { opacity: .45; filter: grayscale(1); }

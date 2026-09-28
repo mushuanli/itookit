@@ -72,6 +72,7 @@ function makeRuntime(): ApplicationRuntime {
         flowEngine: { engine: {} },
         sessionFiles: {},
         directoryMounts: {},
+        projects: {},
         kernel: { kernel: {}, sessions: {} },
         sessionManager: { onGlobalEvent: vi.fn(() => () => {}) },
         commandBus: {},

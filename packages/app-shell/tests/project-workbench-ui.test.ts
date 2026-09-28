@@ -32,6 +32,8 @@ it('creates project Sessions from the selected project and edits its files in th
     try {
         await workbench.start();
         expect(sidebar.querySelector('[aria-label="新建项目"]')).not.toBeNull();
+        expect(sidebar.querySelector('.vfs-columns__navigation [data-action="create-file"]')).toBeNull();
+        await expect(workbench.createResource({ parentPath: '/' })).rejects.toThrow('请在项目内创建会话');
         expect(sidebar.querySelector('.project-navigation__actions')).toBeNull();
         await workbench.openResource(projectPath);
         expect(sidebar.querySelector('.vfs-columns__navigation')?.textContent).toContain('Research');
