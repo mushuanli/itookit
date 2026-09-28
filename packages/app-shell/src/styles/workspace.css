@@ -196,3 +196,13 @@
 .session-family__information { margin: 0 0 8px; display: grid; gap: 3px; }
 .session-family__information dt, .session-family__metadata small { color: var(--text-secondary, #64748b); font-size: 11px; line-height: 1.5; }
 .session-family__information dd { margin: 0 0 6px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.remote-directory { margin: 12px 0; padding: 12px; border: 1px solid var(--mm-border-color, #cbd5e1); border-radius: 8px; }
+.remote-directory__actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.remote-directory__list { display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; }
+.remote-directory__list button { text-align: left; }
+.project-dialog input[type="checkbox"] { width: 18px; min-height: 18px; align-self: flex-start; }
+.project-dialog button:disabled { opacity: .5; cursor: default; }
+.remote-connection__controls { display: flex; gap: 8px; align-items: center; }
+.remote-connection__controls select { flex: 1; min-width: 0; }
+.project-dialog .remote-directory__icon-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 40px; width: 40px; height: 40px; padding: 0; }
+.project-dialog .remote-directory__icon-button:hover:not(:disabled) { background: var(--vfs-active-bg, #eef2ff); }

@@ -35,13 +35,13 @@ export class ProjectNavigation {
             navigationChildren: node => node.metadata.custom.projectId ? [node.id + '/folder:%40sessions'] : [],
             navigationLeaf: node => ['session', 'project-files'].includes(resolveBrowserTarget(node.id).kind),
             navigationCompareItems: (a, b) => fileFirst(a, b),
-            navigationAction: { label: t('project.createSession'), visible: path => this.projectPaths.has(path),
+            navigationAction: { label: t('project.createSession'), visible: path => this.projectPaths.has(path), disabled: path => this.offlinePaths.has(path),
                 run: async path => { await this.actions.createSession(path); } },
             contentLeaf: node => resolveBrowserTarget(node.id).kind === 'session',
             contentCompareItems: (a, b) => this.family ? this.compareFamily(a, b) : undefined,
             contentItems: items => {
                 const nodes = this.family ? this.familyItems(items) : items;
-                return this.project && this.projects.remoteMounts?.projectOffline(this.project.project.id)
+                return resolveBrowserTarget(this.path).kind === 'project-files' && this.project && this.projects.remoteMounts?.projectOffline(this.project.project.id)
                     ? nodes.map(node => ({ ...node, metadata: { ...node.metadata, custom: { ...node.metadata.custom, _disabled: true, _readOnly: true } } })) : nodes;
             },
             navigationToolbar: 'full', navigationToolbarOptions: { directoryFirst: true, directoryLabel: t('vfs.toolbar.project'), fileLabel: t('vfs.toolbar.session'),
@@ -56,6 +56,7 @@ export class ProjectNavigation {
         return this.searchLoading;
     }
     private projectPaths = new Set<string>();
+    private offlinePaths = new Set<string>();
     private projectToolbarActions() {
         return {
             'create-directory': async (context: VFSToolbarContext) => { await this.actions.createProject(context.selectedIds[0] ?? context.parentPath); },
@@ -95,6 +96,7 @@ export class ProjectNavigation {
         if (revision !== this.revision) return;
         this.retry.hidden = !snapshot.pending.length; this.retry.textContent = t('project.retryDeletion', { count: snapshot.pending.length });
         this.projectPaths = new Set(projects.map(item => folderBrowserPath(item.path)));
+        this.offlinePaths = new Set(projects.filter(item => this.projects.remoteMounts?.projectOffline(item.project.id)).map(item => folderBrowserPath(item.path)));
         this.options.navigationAction!.visible = path => this.projectPaths.has(path);
         this.project = project; this.path = path; this.session = manifest?.id;
         this.family = manifest ? snapshot.roots.get(manifest.id) : undefined;

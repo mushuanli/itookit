@@ -251,7 +251,8 @@ export class SessionWorkbench implements WorkspaceController {
     private updateRemoteAvailability(): void {
         if (!this.projects?.remoteMounts) return;
         const project = this.projectNavigation?.currentProject();
-        const offline = !!project && !!this.projects?.remoteMounts?.projectOffline(project.project.id);
+        const target = this.active ? resolveBrowserTarget(parseSessionRoute(this.active).path) : undefined;
+        const offline = (target?.kind === 'project-files' || target?.kind === 'files') && !!project && !!this.projects?.remoteMounts?.projectOffline(project.project.id);
         this.container.inert = offline;
         this.container.classList.toggle('project-workbench--offline', offline);
         this.container.setAttribute('aria-disabled', String(offline));
@@ -356,7 +357,7 @@ export class SessionWorkbench implements WorkspaceController {
             const folder = target.kind === 'project-files' ? target.folder : target.kind === 'folder'
                 ? folderPathFromBrowserPath(parseSessionRoute(resourceId).path) : (await this.repository.getManifest(target.sessionId)).folder;
             const project = await this.projects.forFolder(folder);
-            if (project) {
+            if (project && (target.kind === 'project-files' || target.kind === 'files')) {
                 const remote = this.projects.remoteMounts;
                 // An unprobed mount must be resolved now: a stale status would otherwise either
                 // block a reachable project or let an unreachable read fail the open.
@@ -589,7 +590,9 @@ export class SessionWorkbench implements WorkspaceController {
             if (project) {
                 const directory = document.createElement('p'); directory.className = 'project-workbench__directory';
                 directory.textContent = project.project.directory.startsWith('host:') ? project.project.directory.slice(5) : t('project.managedDirectory'); panel.append(directory);
-                this.actionButton(panel, t('project.createSession'), () => this.createResource({ parentPath: path }));
+                const create = this.actionButton(panel, t('project.createSession'), () => this.createResource({ parentPath: path }));
+                create.disabled = !!this.projects.remoteMounts?.projectOffline(project.project.id);
+                if (create.disabled) create.title = t('remote.projectOffline');
                 const remote = this.projects.remoteMounts?.list(project.project.id).find(mount => mount.at === '/');
                 if (remote?.connectionId) directory.textContent = `${this.projects.remoteMounts!.connection(remote.connectionId).name}: /${remote.alias}${remote.root === '/' ? '' : remote.root}`;
             }
@@ -768,10 +771,10 @@ export class SessionWorkbench implements WorkspaceController {
         if (this.projects.remoteMounts?.projectOffline(project.project.id)) throw new Error(t('remote.projectOffline'));
         return folder && folder.startsWith(project.path + '/') ? folder : this.projects.sessionFolder(project);
     }
-    private actionButton(parent: HTMLElement, label: string, action: () => Promise<unknown>): void {
+    private actionButton(parent: HTMLElement, label: string, action: () => Promise<unknown>): HTMLButtonElement {
         const button = document.createElement('button'); button.type = 'button'; button.textContent = label;
         button.onclick = () => { button.disabled = true; void action().catch(error => this.report(error)).finally(() => { button.disabled = false; }); };
-        parent.append(button);
+        parent.append(button); return button;
     }
     private installProjectNavigation(): void {
         this.sidebar.classList.add('project-workbench');

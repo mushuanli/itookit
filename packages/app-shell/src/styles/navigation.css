@@ -351,3 +351,20 @@ textarea {
 .remote-settings__project button { margin-right: .5rem; }
 
 .project-workbench--offline { opacity: .45; filter: grayscale(1); }
+
+/* Embedded settings regions must size to their contents, not the viewport. */
+.remote-settings { height: auto; min-height: 0; }
+.remote-settings__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.remote-settings__header h2 { margin: 0; font-size: 1.125rem; }
+.remote-settings p { color: var(--st-text-secondary); font-size: .875rem; line-height: 1.5; }
+.remote-settings button { padding: 8px 12px; border: 1px solid var(--st-border-color); border-radius: 8px; background: var(--st-bg-secondary); color: inherit; cursor: pointer; }
+.remote-settings__project h3 { margin: 0; font-size: 1rem; }
+.remote-settings__project p { overflow-wrap: anywhere; margin: 6px 0 12px; }
+.remote-settings button:disabled { opacity: .5; cursor: default; }
+.remote-settings__project { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.remote-settings__details { min-width: 0; flex: 1 1 180px; }
+.remote-settings__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.remote-settings__actions button { margin: 0; }
+.remote-settings__status { display: inline-block; font-size: 12px; padding: 3px 8px; border-radius: 12px; background: var(--st-bg-secondary); color: var(--st-text-secondary); }
+.remote-settings__status[data-state="online"] { color: var(--st-success, #15803d); }
+.remote-settings__status[data-state="offline"] { color: var(--st-danger, #b91c1c); }

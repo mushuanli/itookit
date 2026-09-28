@@ -21,8 +21,10 @@ export function showNameDialog(title: string, label: string, signal: AbortSignal
         cancel.onclick = close; dialog.oncancel = event => { event.preventDefault(); close(); };
         form.onsubmit = event => {
             event.preventDefault(); if (submit.disabled) return; submit.disabled = true;
+            const inputs = Array.from(form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input, select, button')).filter(item => item !== cancel && item !== submit && !item.disabled);
+            inputs.forEach(item => { item.disabled = true; });
             void save(input.value.trim()).then(close).catch(error => { status.textContent = error.message; })
-                .finally(() => { submit.disabled = false; });
+                .finally(() => { submit.disabled = false; inputs.forEach(item => { item.disabled = false; }); });
         };
         actions.append(cancel, submit); form.append(field); if (extra) form.append(extra); form.append(status, actions);
         dialog.append(heading, form); signal.addEventListener('abort', close, { once: true });
@@ -32,6 +34,7 @@ export function showNameDialog(title: string, label: string, signal: AbortSignal
 
 export async function showProjectDialog(projects: ProjectService, parent: string | null, signal: AbortSignal,
     created: (path: string) => Promise<void>): Promise<void> {
+    const controller = new AbortController();
     const fields = document.createElement('div');
     const group = document.createElement('label'); group.textContent = t('project.group');
     const select = document.createElement('select');
@@ -43,7 +46,7 @@ export async function showProjectDialog(projects: ProjectService, parent: string
     }
     select.value = parent ?? ''; group.append(select); fields.append(group);
     const local = document.createElement('div');
-    const remote = projects.remoteMounts ? remoteProjectFields(projects, fields, local) : undefined;
+    const remote = projects.remoteMounts ? remoteProjectFields(projects, fields, local, controller.signal) : undefined;
     fields.append(local);
     const hint = document.createElement('p'); hint.textContent = t('project.directoryHint'); local.append(hint);
     let directory: string | undefined;
@@ -53,7 +56,6 @@ export async function showProjectDialog(projects: ProjectService, parent: string
             if (path) { directory = path.startsWith('host:') ? path : `host:${path}`; button.textContent = path; }
         }).catch(error => { hint.textContent = error.message; }); }; local.append(button);
     }
-    const controller = new AbortController();
     const abort = () => controller.abort(); signal.addEventListener('abort', abort, { once: true });
     try { await showNameDialog(t('project.create'), t('project.name'), signal, async name => {
         const project = remote?.isRemote()

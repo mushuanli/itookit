@@ -130,9 +130,10 @@ it('restores a bookmark inside an unreachable remote project without aborting bo
     const mounts = new DirectoryMountService(root, files); await mounts.init();
     const projects = new ProjectService(root, repository, mounts, files); await projects.ensureStartup();
     const remote = await projects.create('Remote');
+    const existing = await repository.createSession('Existing history', await projects.sessionFolder(remote));
     // Only the affected project is offline; the rest of the workbench must keep working.
     projects.remoteMounts = {
-        onChange: () => () => {}, async checkConnections() {}, projectOffline: () => true, degraded: () => true,
+        onChange: () => () => {}, async compose(_id: string, owner: unknown) { return owner; }, async checkConnections() {}, projectOffline: () => true, degraded: () => true,
         list: () => [], status: () => 'offline', connectionStatus: () => 'offline', connection: () => { throw new Error('none'); },
         connections: () => [], assertUnmountable: async () => {}, forgetProject: async () => {}, dispose: async () => {},
     } as never;
@@ -143,9 +144,16 @@ it('restores a bookmark inside an unreachable remote project without aborting bo
     try {
         await workbench.start();
         await expect(workbench.restoreResource(folderBrowserPath(remote.path))).resolves.toBeUndefined();
-        expect(main.classList.contains('project-workbench--offline')).toBe(true);
+        expect(main.inert).not.toBe(true);
+        const create = Array.from(sidebar.querySelectorAll<HTMLButtonElement>('.vfs-directory-action')).find(button => button.textContent === '新建会话');
+        expect(create?.disabled).toBe(true);
+        await expect(workbench.createResource({ parentPath: folderBrowserPath(remote.path) })).rejects.toThrow();
+        await workbench.openResource(folderBrowserPath(remote.path) + '/@files');
         expect(main.inert).toBe(true);
         expect(main.textContent).toContain('远程文件无法连接');
+        await workbench.openResource(`${folderBrowserPath(await projects.sessionFolder(remote))}/${existing}`);
+        expect(main.inert).toBe(false);
+        expect(workbench.getActiveResourceId()).toContain(existing);
     } finally {
         await workbench.destroy(); await mounts.dispose(); await files.dispose(); await repository.dispose(); await manager.dispose();
         document.body.replaceChildren(); vi.unstubAllGlobals();
