@@ -84,11 +84,10 @@ export type { ProjectDraftComposer, ProjectDraftPromotion } from './projects/dra
 
 export { ProjectExecutionService } from './projects/execution/service';
 export { REMOTE_EXECUTION_ISOLATION } from './projects/execution/policy';
-export type { ExecutionCapabilities, ProjectExecutionBinding, ProjectExecutionProvider, ProjectExecutionTarget, ProjectExecutionContext } from './projects/execution/contracts';
+export type { ExecutionCapabilities, ProjectExecutionBinding, ProjectExecutionProvider, ProjectExecutionContext } from './projects/execution/contracts';
 
 export { WORKSPACE_PATH, workspacePath, projectRelativePath } from './vfs/workspace-namespace';
 
-export { ProjectExecutionStore } from './projects/execution/store';
 export { createRemoteExecutionProvider } from './projects/execution/remote-provider';
 
 export { ProjectFavorites, SeqProjectFavoriteStore } from './projects/favorites';

@@ -33,7 +33,6 @@ import {
     ProjectService,
     ProjectRemoteMountService,
     ProjectExecutionService,
-    ProjectExecutionStore,
     createRemoteExecutionProvider,
     SessionFilesService,
     SessionLeaseStore,
@@ -181,9 +180,7 @@ export async function createCliRuntime(
     // Same wiring as createApplicationRuntime: ProjectService must compose remote mounts for every
     // consumer of openFiles(), not only for the Session workspace path below.
     projects.remoteMounts = remoteMounts;
-    projects.execution = new ProjectExecutionService(new ProjectExecutionStore(systemFS), remoteMounts,
-        async () => { throw new Error('Change execution bindings from the workbench while the CLI is stopped'); },
-        async () => {}, createRemoteExecutionProvider(sessionFiles, remoteProvider));
+    projects.execution = new ProjectExecutionService(remoteMounts, createRemoteExecutionProvider(sessionFiles, remoteProvider));
     const project = await projects.forFolder((await sessionRepository.getManifest(manifest.sessionId)).folder);
     const hasRemoteMounts = !!project && remoteMounts.list(project.project.id).length > 0;
     sessionFiles.workspaceComposer = async (_id, mount) => {

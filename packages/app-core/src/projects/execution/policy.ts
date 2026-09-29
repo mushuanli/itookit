@@ -2,7 +2,7 @@ import { sha256HexSync } from '@itookit/common';
 import { FSError } from '@itookit/vfs-core';
 import { WORKSPACE_PATH } from '../../vfs/workspace-namespace';
 import type { ProjectRemoteMount } from '../remote-mounts';
-import type { ExecutionCapabilities, ProjectExecutionBinding, ProjectExecutionTarget } from './contracts';
+import type { ExecutionCapabilities, ProjectExecutionBinding } from './contracts';
 
 /**
  * Remote execution must be isolated: a cooperative host is not a safe fallback for a
@@ -10,21 +10,13 @@ import type { ExecutionCapabilities, ProjectExecutionBinding, ProjectExecutionTa
  */
 export const REMOTE_EXECUTION_ISOLATION = 'sandbox' as const;
 
-const identity = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
-export function validateExecutionTarget(value: unknown): asserts value is ProjectExecutionTarget {
-    const target = value as ProjectExecutionTarget | null;
-    if (!target || !identity(target.connectionId) || !identity(target.serverId)
-        || !['trusted-cooperative-host', 'sandbox'].includes(target.requiredIsolation))
-        throw new FSError('EINVAL', 'Invalid project execution target');
-}
-export function decodeExecutionBinding(raw: string): ProjectExecutionBinding {
-    let value: unknown;
-    try { value = JSON.parse(raw); } catch { throw invalidBinding(); }
-    validateExecutionTarget(value);
-    const binding = value as ProjectExecutionBinding;
-    const supported = (binding.version === 1 && binding.mode === 'managed-copy') || (binding.version === 2 && binding.mode === 'directory');
-    if (!supported || typeof binding.authorizationRevision !== 'string'
-        || !/^[a-f0-9]{64}$/.test(binding.authorizationRevision)) throw invalidBinding();
+/** Derive an ephemeral binding from current mounts and server capabilities. */
+export function resolveExecutionBinding(mounts: readonly ProjectRemoteMount[], connectionId: string, caps: ExecutionCapabilities): ProjectExecutionBinding | undefined {
+    if (!caps.process.exec) return undefined;
+    if (!caps.serverId) throw new FSError('ECAPABILITY', 'Remote execution requires a server identity');
+    const binding: ProjectExecutionBinding = { version: 2, mode: 'directory', connectionId, serverId: caps.serverId,
+        requiredIsolation: REMOTE_EXECUTION_ISOLATION, authorizationRevision: executionGrantRevision(mounts, connectionId) };
+    requireExecutionCapabilities(binding, caps, mounts);
     return binding;
 }
 
@@ -66,4 +58,3 @@ export function requireRemoteProcessGrant(binding: ProjectExecutionBinding, caps
         throw new FSError('ECAPABILITY', 'Remote node lacks a matching process namespace');
     return caps.processEpoch;
 }
-function invalidBinding() { return new FSError('EINVAL', 'Invalid project execution binding'); }

@@ -1,4 +1,3 @@
-import { projectExecutionMenu } from './execution-menu';
 import { projectFavoriteAction } from './project-favorites';
 import { WORKSPACE_PATH, projectRelativePath, resolveProjectFavorite } from '@itookit/app-core';
 import { createProjectDraftControls } from './project-draft-editor';
@@ -176,7 +175,7 @@ export class SessionWorkbench implements WorkspaceController {
                     if (target.kind === 'favorite' || target.kind === 'favorites') return [];
                     if (target.kind === 'project-files' && target.path === WORKSPACE_PATH) return [];
                     if (this.projects && item.metadata?.custom?.projectId)
-                        return [...defaults.filter(entry => !('id' in entry) || !['create-in-folder-session', 'create-in-folder-folder', 'import'].includes(entry.id)), ...projectExecutionMenu(this.projects, String(item.metadata.custom.projectId), async () => { await this.sidebarUI?.refresh(); })];
+                        return defaults.filter(entry => !('id' in entry) || !['create-in-folder-session', 'create-in-folder-folder', 'import'].includes(entry.id));
                     if (target.kind === 'folder' && folderPathFromBrowserPath(item.id)?.endsWith('/@sessions'))
                         return defaults.filter(entry => !('id' in entry) || !['delete', 'rename'].includes(entry.id));
                     if (target.kind === 'task') {

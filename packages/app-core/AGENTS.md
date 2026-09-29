@@ -72,8 +72,8 @@ const kernel = await createKernelRuntime({ systemFS, llmDriver, storageResolver,
 
 - 工具路径相对 cwd 做 POSIX 解析（支持 `../reference`），再交给挂载视图授权；项目编辑器以 `/workspace` 为规范根（`vfs/workspace-namespace.ts` 是唯一换算点），source view 和导航路由只用于内部操作/展示。`openFiles()` 是 source view，`openWorkspace()` 才是编辑器/执行的规范视图。
 - 浏览器投影不得逐节点回查目录catalog：`session-browser` 每次列目录解析一次 `FileProjection`（项目、远端授权、收藏查询）；浏览器目标归属文件夹统一走 `browserTargetFolder`，Session 归属只认 manifest。
-- `projects/execution` 新建 v2 directory 绑定；v1 managed-copy 必须显式重新绑定后才能执行。只读目录要求进程侧内核强制权限。
-- `projects/execution` 将 contracts（存储/来源/工作区端口）、policy（身份、授权摘要、隔离能力与远程进程命名空间校验）、service（生命周期编排）、store（seqfile CAS）、remote-provider（端口适配与 acquire/release 顺序）分开。执行 provider 必须提供同一工作区的文件和进程能力；未绑定执行目标的远程项目不得回退到宿主 Shell。`REMOTE_EXECUTION_ISOLATION` 是 bind 的隔离要求唯一来源。
+- `projects/execution` 从远程项目根与服务器能力派生临时目录执行上下文；不依赖旧的持久绑定。只读目录要求进程侧内核强制权限。
+- `projects/execution` 将 contracts（来源/工作区端口）、policy（当前挂载、隔离能力与远程进程命名空间校验）、service（获取/释放编排）、remote-provider（端口适配）分开。远程根目录默认使用服务器声明的执行能力，不持久化工作台执行开关；旧 execution 记录不再读取。服务器不支持执行时保持文件访问，不得回退宿主 Shell。`REMOTE_EXECUTION_ISOLATION` 是自动派生执行上下文的隔离要求。
 - 收藏读取会校准 Session 标题与成员（`ProjectFavorites.list`），因此 `list()` 可能发布一次变更通知；`has`/`hasSession` 只读缓存，调用方需先 `list`。`FavoriteUpdate` 必须保持纯函数（store 可能调用多次）。
 
 - Session 与 Kernel 的所有写入都必须先持有 Session 租约（`SessionLeaseStore`）；拒租只让该 Session 保持只读，不影响其他 Session。该「只读」由 `createApplicationRuntime` 注入的写入门强制（`ensureWritable` → `recovery.acquireLater` → `initializeConversationSystem.canWriteSession` → `SessionManager.sendMessage`），被拒的 Session 会在追加 round 前报 `Session is owned by another host`。

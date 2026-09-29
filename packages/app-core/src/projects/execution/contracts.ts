@@ -19,7 +19,7 @@ interface ExecutionBindingIdentity {
     authorizationRevision: string;
 }
 export type ProjectExecutionBinding = ExecutionBindingIdentity & (
-    { version: 1; mode: 'managed-copy' } | { version: 2; mode: 'directory' }
+    { version: 2; mode: 'directory' }
 );
 export type ProjectExecutionContext = Awaited<ReturnType<NonNullable<KernelAdaptersRuntimeOptions['fileContextForSession']>>>;
 export interface ProjectExecutionProvider {
@@ -30,14 +30,6 @@ export interface ProjectExecutionProvider {
         connection: Omit<RemoteFileConnection, 'alias'>;
         mounts: readonly ProjectRemoteMount[];
     }): Promise<ProjectExecutionContext>;
-}
-
-export type ProjectExecutionTarget = Pick<ProjectExecutionBinding, 'connectionId' | 'serverId' | 'requiredIsolation'>;
-export interface ExecutionBindingSnapshot { raw: string | null; binding: ProjectExecutionBinding | null }
-/** Persistence mechanism; callers own authorization policy and CAS retry decisions. */
-export interface ExecutionBindingStore {
-    read(projectId: string): Promise<ExecutionBindingSnapshot>;
-    write(projectId: string, expected: string | null, binding: ProjectExecutionBinding | null): Promise<void>;
 }
 
 /** The use case reads only connection identity and currently granted directories. */

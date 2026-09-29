@@ -164,11 +164,11 @@ PTY、自动 materialization、增量传输、缓存和结果导出，分别按�
 
 已存在的基础：
 
-- fs-agent 提供 `/v1/capabilities`；默认 exec=false。配置 execution=true 且启动探测成功后，宣告 Linux bubblewrap virtual-root、kernel-enforced readonly 与 exec=true；sync/PTY 仍为 false。
+- fs-agent 提供 `/v1/capabilities`；命令执行默认开启，配置 execution=false 可关闭；启动探测成功后，宣告 Linux bubblewrap virtual-root、kernel-enforced readonly 与 exec=true；sync/PTY 仍为 false。
 - HTTP provider 已接入能力发现；仅 capabilities 的 HTTP 404 触发旧文件服务器兼容路径。
 - SessionFiles 已有 cwd/mounts，DirectoryMountService 将项目放在 `/workspace` 并提供进程授权；Tauri/Linux 通过 bubblewrap 装配授权目录。
 - UI 项目文件入口和编辑器已改用 `/workspace` 子树视图；导航路由保持兼容，引用传递规范路径。文件工具允许相对 cwd 解析 `..`，访问仍受挂载表约束。项目内部 source view 继续服务归档等内部操作。
-- `ProjectExecutionService` 新绑定使用 v2 directory 模式，保留身份、授权摘要和隔离检查；v1 managed-copy 可读取和清除，但执行时拒绝，须显式重新绑定。共享 HTTP 进程 provider 已接入 Web/Tauri 应用运行时与 CLI；工作台项目右键菜单提供显式启用/禁用远程命令。
+- `ProjectExecutionService` 按远程根目录的连接和 fs-agent 能力声明自动获取文件/进程上下文。工作台不持久化执行开关、不提供启用/禁用菜单；历史 execution 记录不再读取，服务器关闭 `execution` 时只保留文件能力。当前挂载授权摘要、隔离要求和服务端身份仍在获取期间校验。Web/Tauri/CLI 共用此策略。
 - Tauri 原生适配在 macOS 拒绝源路径与目标路径不同的挂载，避免 seatbelt 仅改变 cwd 而制造假命名空间；完整虚拟目录执行仍需 namespace-capable 后端。
 - Rust `workspaces/leases` 是独立的未接路由机制；不作为 Harness MVP 的必选依赖，也不据此新增工作区租约协议。删除或复用它应在专门代码变更中进行。
 - 已有 `.gitignore` 展示过滤、只读 UI 联动和取消基础可以继续复用。
@@ -178,7 +178,7 @@ PTY、自动 materialization、增量传输、缓存和结果导出，分别按�
 
 ## 10. 最小远端执行的实现契约
 
-- 开启方式：fs-agent 配置顶层 `server_id` 和 `execution = true`。启动时探测真实 bubblewrap 启动、fd mount 和禁用嵌套 user namespace；失败即拒绝服务启动，不回退宿主 Shell。
+- 开启方式：fs-agent 默认启用执行，顶层 `execution = false` 显式关闭。`server_id` 可指定稳定身份；未指定时生成本次启动的随机节点身份，不承诺跨重启稳定。启动时探测真实 bubblewrap 启动、fd mount 和禁用嵌套 user namespace；失败即拒绝服务启动，不回退宿主 Shell。
 - `POST /v1/processes` 接收 serverId、epoch、requestId、command/args、cwd、mounts、timeoutMs；mount 只含 export alias、相对 path、虚拟 at、ro/rw。服务端 openat2 拒绝符号链接和越界，再通过 `--bind-fd`/`--ro-bind-fd` 挂载，客户端不能提交宿主路径。
 - `GET /v1/processes/:epoch/:id` 查询，`POST .../cancel` 取消。状态为 running/exited/cancelled/timed-out/failed/unknown。ID 绑定认证身份和启动 epoch；重复启动只返回既有状态。取消可先于启动形成拒绝执行记录。启动 POST 不自动重试；响应丢失时以原 ID 取消并报告 unknown，不能伪称没有执行。
 - 首版最多运行一个命令，命令最长 300 秒，stdout/stderr 各 64 KiB；超量触发取消并标记 truncated。状态查询返回最终有界输出，目前不提供实时流、stdin 或 PTY。最多保留 1024 条请求记录，达到上限拒绝新命令，需管理员重启；重启 epoch 改变，旧请求不得重放。

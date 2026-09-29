@@ -1,6 +1,5 @@
 import { createRemoteExecutionProvider } from '../projects/execution/remote-provider';
 import { ProjectExecutionService } from '../projects/execution/service';
-import { ProjectExecutionStore } from '../projects/execution/store';
 import type { ProjectExecutionProvider } from '../projects/execution/contracts';
 import { attachProjectDraftRecovery } from './project-draft-recovery';
 import { ProjectRemoteMountService, type RemoteFileSourceProvider } from '../projects/remote-mounts';
@@ -158,9 +157,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
                 async projectId => { for (const id of await affected(projectId)) await remoteGuard(id); },
                 async projectId => { for (const id of await affected(projectId)) { await sessionFiles.invalidate(id); await mountChanged(id); } });
             await remote.init(); projects.remoteMounts = remote;
-            projects.execution = new ProjectExecutionService(new ProjectExecutionStore(systemFS), remote,
-                async projectId => { await projects.get(projectId); for (const id of await affected(projectId)) await remoteGuard(id); },
-                async projectId => { for (const id of await affected(projectId)) { await sessionFiles.invalidate(id); await mountChanged(id); } },
+            projects.execution = new ProjectExecutionService(remote,
                 options.projectExecutionProvider ?? createRemoteExecutionProvider(sessionFiles, options.remoteSourceProvider));
             sourceCleanupFns.push(() => remote.dispose());
             sessionFiles.workspaceComposer = async (id, mount) => {
@@ -196,7 +193,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
                 const execution = project && await projects.execution?.acquire(project.project.id, id, scopeId);
                 if (execution) return execution;
                 if (project && projects.remoteMounts?.list(project.project.id).length)
-                    throw new FSError('ECAPABILITY', 'Remote project requires a bound execution workspace');
+                    throw new FSError('ECAPABILITY', 'Remote server does not provide command execution');
                 if (!options.kernelPlatform?.fileContextForScope) throw new FSError('ECAPABILITY', 'Workspace scope provider is unavailable');
                 return options.kernelPlatform.fileContextForScope(id, scopeId);
             } : undefined,
