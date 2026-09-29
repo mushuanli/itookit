@@ -1,6 +1,9 @@
+import { ProjectExecutionService } from '../projects/execution/service';
+import { ProjectExecutionStore } from '../projects/execution/store';
+import type { ProjectExecutionProvider } from '../projects/execution/contracts';
 import { attachProjectDraftRecovery } from './project-draft-recovery';
 import { ProjectRemoteMountService, type RemoteFileSourceProvider } from '../projects/remote-mounts';
-import { createFileSystemView } from '@itookit/vfs-core';
+import { createFileSystemView, FSError } from '@itookit/vfs-core';
 import { ModelConfigurationCommands } from '../configuration/model-commands';
 import { resumeSessionDeletions } from './resume-session-deletions';
 import type { IStorageBackend, MountOptions } from '@itookit/vfs-core';
@@ -74,6 +77,7 @@ export interface ApplicationRuntimeOptions {
     additionalMounts?: Array<{ path: string; backend: IStorageBackend; options?: MountOptions }>;
     directorySourceProvider?: DirectorySourceProvider;
     remoteSourceProvider?: RemoteFileSourceProvider;
+    projectExecutionProvider?: ProjectExecutionProvider;
     /** Host startup cwd, mounted into newly created Sessions only. */
     defaultSessionDirectory?: string;
     configureSessionFiles?(files: SessionFilesService): void | Promise<void>;
@@ -153,6 +157,10 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
                 async projectId => { for (const id of await affected(projectId)) await remoteGuard(id); },
                 async projectId => { for (const id of await affected(projectId)) { await sessionFiles.invalidate(id); await mountChanged(id); } });
             await remote.init(); projects.remoteMounts = remote;
+            projects.execution = new ProjectExecutionService(new ProjectExecutionStore(systemFS), remote,
+                async projectId => { await projects.get(projectId); for (const id of await affected(projectId)) await remoteGuard(id); },
+                async projectId => { for (const id of await affected(projectId)) { await sessionFiles.invalidate(id); await mountChanged(id); } },
+                options.projectExecutionProvider);
             sourceCleanupFns.push(() => remote.dispose());
             sessionFiles.workspaceComposer = async (id, mount) => {
                 const project = await projects.forFolder((await sessionRepository.getManifest(id)).folder);
@@ -174,17 +182,22 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
             maxConcurrent: 20,
             fileContextForSession: async id => {
                 const project = await projects.forFolder((await sessionRepository.getManifest(id)).folder);
+                const execution = project && await projects.execution?.acquire(project.project.id, id);
+                if (execution) return execution;
                 const remote = project && projects.remoteMounts?.list(project.project.id).length;
                 return acquireSessionProcessContext(sessionFiles, id, remote ? undefined : options.kernelPlatform?.createSessionProcesses,
                     () => directoryMounts.processMounts(id));
             },
             configureSession: options.kernelPlatform?.configureSession,
             scopeForEffect: options.kernelPlatform?.scopeForEffect,
-            fileContextForScope: options.kernelPlatform?.fileContextForScope ? async (id, scopeId) => {
-                const context = await options.kernelPlatform!.fileContextForScope!(id, scopeId);
+            fileContextForScope: options.kernelPlatform?.fileContextForScope || options.projectExecutionProvider ? async (id, scopeId) => {
                 const project = await projects.forFolder((await sessionRepository.getManifest(id)).folder);
-                return project && projects.remoteMounts?.list(project.project.id).length
-                    ? { ...context, nativeShell: undefined, ttyDriver: undefined } : context;
+                const execution = project && await projects.execution?.acquire(project.project.id, id, scopeId);
+                if (execution) return execution;
+                if (project && projects.remoteMounts?.list(project.project.id).length)
+                    throw new FSError('ECAPABILITY', 'Remote project requires a bound execution workspace');
+                if (!options.kernelPlatform?.fileContextForScope) throw new FSError('ECAPABILITY', 'Workspace scope provider is unavailable');
+                return options.kernelPlatform.fileContextForScope(id, scopeId);
             } : undefined,
             skillSource: options.kernelPlatform?.skillSource,
             skillSourceForSession: options.kernelPlatform?.skillSourceForSession,

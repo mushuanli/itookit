@@ -1,5 +1,5 @@
 import { sessionFamilyRoots } from '../projects/session-family';
-import { createFileSystemSource, FSError, normalizeVirtualPath, type FSNode, type IStorageBackend } from '@itookit/vfs-core';
+import { createFileSystemSource, FSError, normalizeVirtualPath, type FSNode, type IStorageBackend, type IFileSystem } from '@itookit/vfs-core';
 import { t, ENTITY_ICONS } from '@itookit/common';
 import type { ISessionRepository, SessionFolder } from '@itookit/llm-session';
 import type { EventEnvelope, Kernel, TaskRecord } from '@itookit/durable-kernel';
@@ -115,6 +115,8 @@ export interface SessionBrowserDependencies {
     kernel: Kernel;
     /** Defaults to a service over `repository` and `kernel`. */
     lifecycle?: SessionLifecycleService;
+    /** Optional host presentation policy. Raw project/Session file APIs are unaffected. */
+    filterDisplayedFiles?(fs: IFileSystem, nodes: FSNode[]): Promise<FSNode[]>;
 }
 class BrowserBackend implements IStorageBackend {
     readonly name = 'session-browser';
@@ -243,7 +245,10 @@ class BrowserBackend implements IStorageBackend {
         const prefix = filesBrowserPrefix(path);
         return this.withFiles(target, async fs => {
             if (target.path === '/') return this.node(path, t('project.files'), true, 0, (await fs.capabilitiesAt('/')).readonly);
-            const node = await fs.driver.getNode(target.path); return node ? this.mapped(fs, node, prefix) : null;
+            const node = await fs.driver.getNode(target.path);
+            if (!node) return null;
+            const hidden = this.deps.filterDisplayedFiles && !(await this.deps.filterDisplayedFiles(fs, [node])).length;
+            return this.mapped(fs, { ...node, metadata: { ...node.metadata, _hiddenInBrowser: !!hidden } }, prefix);
         });
     }
     async list(path: string): Promise<FSNode[]> {
@@ -286,7 +291,11 @@ class BrowserBackend implements IStorageBackend {
     }
     private async listFiles(path: string, target: FileTarget): Promise<FSNode[]> {
         const prefix = filesBrowserPrefix(path);
-        const nodes = await this.withFiles(target, async fs => Promise.all((await fs.driver.getChildren(target.path)).map(n => this.mapped(fs, n, prefix))));
+        const nodes = await this.withFiles(target, async fs => {
+            const raw = await fs.driver.getChildren(target.path);
+            const visible = this.deps.filterDisplayedFiles ? await this.deps.filterDisplayedFiles(fs, raw) : raw;
+            return Promise.all(visible.map(node => this.mapped(fs, node, prefix)));
+        });
         const project = this.deps.projects && await this.deps.projects.forFolder(target.kind === 'project-files'
             ? target.folder : (await this.deps.repository.getManifest(target.sessionId)).folder);
         const remote = this.deps.projects?.remoteMounts;

@@ -7,6 +7,6 @@
 [submodule "tookit/cc-proxy"]
 	path = tookit/cc-proxy
 	url = git@github.com:mushuanli/cc-proxy.git
-[submodule "tools/itookit-fs-server"]
-	path = tools/itookit-fs-server
-	url = git@github.com:mushuanli/itookit-fs-server.git
+[submodule "tools/fs-agent"]
+	path = tools/fs-agent
+	url = git@github.com:mushuanli/fs-agent.git

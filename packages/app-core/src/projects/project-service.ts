@@ -1,3 +1,4 @@
+import type { ProjectExecutionService } from './execution/service';
 import { ProjectDraftStore } from './drafts/store';
 import { ProjectDraftService } from './drafts/service';
 import type { ProjectRemoteMountService } from './remote-mounts';
@@ -12,6 +13,7 @@ export type ProjectFolder = SessionFolder & { project: NonNullable<SessionFolder
 
 /** Project identity and file roots survive navigation-folder renames and moves. */
 export class ProjectService {
+    execution?: ProjectExecutionService;
     remoteMounts?: ProjectRemoteMountService;
     private startupId?: string;
     private personalPending?: Promise<ProjectFolder>;

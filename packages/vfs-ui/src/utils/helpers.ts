@@ -17,6 +17,7 @@ export const shouldFilterNode = (node: {
   path?: string;
   metadata?: Record<string, unknown>;
 }): boolean => {
+  if (node.metadata?.['_hiddenInBrowser']) return true;
   if (node.metadata?.['_showAll']) return false;
   return (
     (!!node.viewId && isHiddenFile(node.viewId)) ||

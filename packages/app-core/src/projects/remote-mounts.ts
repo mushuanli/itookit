@@ -1,3 +1,4 @@
+import type { ExecutionCapabilities } from './execution/contracts';
 import { RemoteMountStore, type RemoteMountCatalog as Catalog } from './remote-mount-store';
 import { randomUUID } from '@itookit/common';
 import { checkOperation, createFileSystemView, FSError, normalizeVirtualPath, operationScope,
@@ -7,6 +8,7 @@ import { normalizeConnection, remoteProjectPath, type RemoteFileSystemConfig, ty
 
 export interface RemoteFileConnection { endpoint: string; alias: string; credentialRef: string; username?: string; }
 export interface RemoteFileSourceProvider {
+    capabilities?(connection: Omit<RemoteFileConnection, 'alias'>, options?: OperationOptions): Promise<ExecutionCapabilities>;
     clearCredential?(reference: string): void;
     setCredential(reference: string, secret: string): void | (() => void);
     open(connection: RemoteFileConnection, options?: OperationOptions): Promise<FileSystemSourceOwner>;
@@ -71,6 +73,10 @@ export class ProjectRemoteMountService {
             const password = this.catalogStore.password(connection.id);
             if (password) this.provider.setCredential(connection.credentialRef, password);
         }
+    }
+    async executionCapabilities(connectionId: string, options?: OperationOptions): Promise<ExecutionCapabilities> {
+        if (!this.provider.capabilities) throw new FSError('ECAPABILITY', 'Remote capability discovery is unavailable');
+        return this.provider.capabilities(this.connection(connectionId), options);
     }
     list(projectId: string): ProjectRemoteMount[] {
         return structuredClone((this.catalog.projects[projectId] ?? []).map(mount => {

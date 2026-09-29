@@ -65,6 +65,8 @@ const kernel = await createKernelRuntime({ systemFS, llmDriver, storageResolver,
 
 ## 约束
 
+- `projects/execution` 将 contracts（存储/来源/工作区端口）、policy（身份、授权摘要和隔离能力校验）、service（生命周期编排）、store（seqfile CAS）分开。执行 provider 必须提供同一工作区的文件和进程能力；未绑定执行目标的远程项目不得回退到宿主 Shell。
+
 - Session 与 Kernel 的所有写入都必须先持有 Session 租约（`SessionLeaseStore`）；拒租只让该 Session 保持只读，不影响其他 Session。该「只读」由 `createApplicationRuntime` 注入的写入门强制（`ensureWritable` → `recovery.acquireLater` → `initializeConversationSystem.canWriteSession` → `SessionManager.sendMessage`），被拒的 Session 会在追加 round 前报 `Session is owned by another host`。
 - `ApplicationKernelPlatform.configure(kernel, services)` 在 Session 恢复扫描前等待完成；`services` 提供已初始化的 `sessionFiles`/`directoryMounts`，宿主可据此绑定工作区工厂。
 - 修改挂载前必须确认该 Session 没有未结束的 Task（`mountGuard`）。

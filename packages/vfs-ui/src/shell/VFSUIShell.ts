@@ -58,6 +58,8 @@ export interface VFSUIShellOptions extends BrowserBaseOptions {
   /** Preview child count; active/selected entries and search matches stay visible. */
   directoryPreview?: (node: VFSNodeUI) => number | undefined;
   alwaysLoadedDirectories?: string[];
+  /** Hide .gitignore matches in file presentation; disable for synthetic resource trees. */
+  hideGitignored?: boolean;
   toolbarOptions?: import('../ui/components/NodeList/toolbar').VFSToolbarOptions;
   defaultUiSettings?: Partial<UISettings>;
   compareItems?: (a: VFSNodeUI, b: VFSNodeUI) => number | undefined;

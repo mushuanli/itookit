@@ -2,6 +2,8 @@
 
 状态：已实施基础读取、项目外挂与条件写入，2026-09-28。本文保留总体设计约束；本轮实际实现、验证与尚未开放的能力见第 14 节。连续操作与结束语义见第 6.3 节，评审取舍见第 13 节。
 
+后续演进见 [fs-agent：项目执行节点、目录同步与工作区](agent-server.md)。该文为设计提案，不改变本文现有文件协议；远端执行、同步批次与未来 sandbox 的边界单独定义。
+
 ## 1. 目标与决策
 
 在 tools/fs-server 新建独立 Rust HTTP 文件服务，在 packages/vfsdriver-http 新建三端共用驱动。服务端仅暴露预配置目录别名；工作台可把别名中的目录外挂到项目，项目文件树、编辑器和 Agent 使用同一授权视图。
@@ -493,7 +495,7 @@ processMounts 必须区分 VFS 可访问性与本地进程目录能力。HTTP �
 
 ## 14. 本轮实现与验收边界（2026-09-28）
 
-服务端位于 `tools/itookit-fs-server/`（独立 git 仓库，自带 README 与 Rust 测试）；`tools/` 另放部署用的可执行文件与 `config.toml`（均被 `.gitignore` 忽略）。配置格式见第 4 节与第 14.2 节。服务端实际采用 Linux `openat2(BENEATH | NO_SYMLINKS | NO_MAGICLINKS)` 的目录句柄实现；不在不支持的平台退化成字符串检查。三种客户端均使用可注入的 fetch，Tauri 当前复用 WebView fetch，遵守同样的 CORS/混合内容限制，尚未引入原生 HTTP 插件。
+服务端位于 `tools/fs-agent/`（独立 git 仓库，自带 README 与 Rust 测试）；`tools/` 另放部署用的可执行文件与 `config.toml`（均被 `.gitignore` 忽略）。配置格式见第 4 节与第 14.2 节。服务端实际采用 Linux `openat2(BENEATH | NO_SYMLINKS | NO_MAGICLINKS)` 的目录句柄实现；不在不支持的平台退化成字符串检查。三种客户端均使用可注入的 fetch，Tauri 当前复用 WebView fetch，遵守同样的 CORS/混合内容限制，尚未引入原生 HTTP 插件。
 
 | 部分 | 已实现 |
 |---|---|

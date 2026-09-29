@@ -35,3 +35,5 @@ src/
 - 节点操作经 `VFSService`(createFile / createDirectory / renameItem / updateMultipleItemsTags 等),事件经 `contracts/events.ts` 的映射表处理
 
 详情: [组件 + Options](./doc/components.md)
+
+文件树的 `.gitignore` 过滤属于 UI 展示，位于 `utils/gitignore-visibility.ts`；默认不额外排除 node_modules 等目录，不更改原始 VFS、工具或服务端行为。合成导航使用 `hideGitignored: false`，实际文件通过宿主注入的展示回调过滤；规则变更重新加载已展开分支。

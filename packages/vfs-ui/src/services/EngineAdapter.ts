@@ -1,3 +1,4 @@
+import { createGitignoreVisibility, filterGitignoredFiles } from '../utils/gitignore-visibility';
 /**
  * @file vfs-ui/services/EngineAdapter.ts
  * @desc Bridges IFileSystem events → VFSStore dispatches.
@@ -31,7 +32,13 @@ export class EngineAdapter {
         private readonly fileTypePort: IFileTypePort,
         private readonly showFileExtensions = false,
         private readonly alwaysLoadedDirectories: string[] = [],
+        private readonly hideGitignored = true,
     ) { }
+
+    private async displayedChildren(path: string): Promise<FSNode[]> {
+        const nodes = await this.engine.driver.getChildren(path) as FSNode[];
+        return this.hideGitignored ? filterGitignoredFiles(this.engine, nodes) : nodes;
+    }
 
     private visible = true;
     private visibilityRevision = 0;
@@ -61,7 +68,7 @@ export class EngineAdapter {
         const silent = options.silent === true && previousItems.length > 0;
         try {
             if (!silent) this.store.dispatch({ type: 'ITEMS_LOAD_START' });
-            const rootChildren = await this.engine.driver.getChildren('/') as FSNode[];
+            const rootChildren = await this.displayedChildren('/');
             if (!this.current(revision)) return;
             const uiItems = mapFSNodesToUIItems(
                 rootChildren,
@@ -101,7 +108,7 @@ export class EngineAdapter {
             for (const item of items) {
                 if (!this.current(revision)) return;
                 if (item.type !== 'directory' || !openBefore.has(item.id)) continue;
-                const children = await this.engine.driver.getChildren(item.id) as FSNode[];
+                const children = await this.displayedChildren(item.id);
                 const uiChildren = children.map(node =>
                     mapFSNodeToUIItem(node, this.iconResolver, undefined, this.showFileExtensions)
                 );
@@ -150,6 +157,10 @@ export class EngineAdapter {
             this.timers[action] = null;
 
             adapterDEBUG.processing(action, ids);
+            if (ids.some(path => path.split('/').pop() === '.gitignore')) {
+                await this.loadData({ silent: true }); return;
+            }
+            const accepts = this.hideGitignored ? createGitignoreVisibility(this.engine) : async () => true;
 
             if (action === 'delete') {
                 adapterDEBUG.dispatch('ITEM_DELETE_SUCCESS', `ids=[${ids.join(',')}]`);
@@ -166,7 +177,9 @@ export class EngineAdapter {
                         const node = await this.engine.driver.getNode(id) as FSNode | null;
                         if (!this.current(revision)) return null;
                         adapterDEBUG.nodeResult(id, node);
-                        if (!node || shouldFilterNode(node)) {
+                        const hidden = !node || shouldFilterNode(node) || !await accepts(node);
+                        if (!this.current(revision)) return null;
+                        if (!node || hidden) {
                             if (action === 'update') {
                                 adapterDEBUG.dispatch('ITEM_DELETE_SUCCESS', `filtered id=${id}`);
                                 this.store.dispatch({
@@ -322,7 +335,7 @@ export class EngineAdapter {
         this.loadingFolderIds.add(folderId);
 
         try {
-            const children = await this.engine.driver.getChildren(folderId) as FSNode[];
+            const children = await this.displayedChildren(folderId);
             if (!this.current(revision)) return;
             const uiChildren = children.map(n =>
                 mapFSNodeToUIItem(n, this.iconResolver, undefined, this.showFileExtensions)

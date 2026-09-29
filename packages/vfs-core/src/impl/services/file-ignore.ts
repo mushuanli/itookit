@@ -7,18 +7,21 @@ export const DEFAULT_DISCOVERY_EXCLUDES = [
     '.next', '.nuxt', '.cache', 'coverage', '__pycache__',
 ] as const;
 
+export interface FileIgnorePolicy { files: readonly string[]; defaults: readonly string[] }
+const defaultPolicy: FileIgnorePolicy = { files: ['.gitignore', '.mindosignore'], defaults: DEFAULT_DISCOVERY_EXCLUDES };
+
 interface DirectoryState { root: string; matcher: Ignore; ignored: boolean }
 
 /** Per-search cache: edits to ignore files are visible on the next search. */
 export class FileIgnoreFilter {
     private readonly directories = new Map<string, Promise<DirectoryState>>();
-    constructor(private readonly source: FileDiscoverySource, private readonly signal?: AbortSignal) {}
+    constructor(private readonly source: FileDiscoverySource, private readonly signal?: AbortSignal, private readonly policy: FileIgnorePolicy = defaultPolicy) {}
 
     async accepts(path: string, directory: boolean): Promise<boolean> {
         this.signal?.throwIfAborted();
-        if (directory) return !(await this.directory(path)).ignored;
+        if (directory && path === this.source.rootFor(path)) return true;
         const parent = await this.directory(dirname(path));
-        return !parent.ignored && !parent.matcher.ignores(relative(parent.root, path));
+        return !parent.ignored && !parent.matcher.ignores(relative(parent.root, path) + (directory ? '/' : ''));
     }
 
     private directory(path: string): Promise<DirectoryState> {
@@ -36,7 +39,7 @@ export class FileIgnoreFilter {
             return { ...parent, ignored: true };
         }
         const matcher = ignore({ ignorecase: false }).add(parent.matcher);
-        for (const name of ['.gitignore', '.mindosignore']) {
+        for (const name of this.policy.files) {
             this.signal?.throwIfAborted();
             const text = await this.source.readIgnoreFile(`${path === '/' ? '' : path}/${name}`);
             if (text) matcher.add(scopePatterns(text, relative(root, path)));
@@ -46,7 +49,7 @@ export class FileIgnoreFilter {
 
     private defaults(root: string): DirectoryState {
         return { root, ignored: false, matcher: ignore({ ignorecase: false })
-            .add(DEFAULT_DISCOVERY_EXCLUDES.map(name => `${name}/`)) };
+            .add(this.policy.defaults.map(name => `${name}/`)) };
     }
 }
 

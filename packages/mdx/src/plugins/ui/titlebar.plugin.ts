@@ -6,6 +6,7 @@ import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { MDxEditor } from '../../editor/mdx-editor';
 import type { PluginManager } from '../../core/plugin-manager';
 import { ACTION_ICONS, t, buildRenamedFilename } from '@itookit/common';
+import { copyText, Toast } from '@itookit/ui-common';
 import type { IFileSystem } from '@itookit/vfs-core';
 
 const replaceBasename = (path: string, filename: string): string => {
@@ -190,6 +191,17 @@ export class CoreTitleBarPlugin implements MDxPlugin {
         location: 'right',
       });
     }
+
+    context.registerTitleBarButton?.({
+      id: 'copy-content',
+      title: t('editor.copyContent'),
+      icon: ACTION_ICONS.copy,
+      location: 'right',
+      onClick: async ({ editor }) => {
+        if (await copyText(editor.getText())) Toast.success(t('editor.copySuccess'));
+        else Toast.error(t('editor.copyFailed'));
+      },
+    });
 
     if (this.options.saveCallback) {
       context.registerCommand?.('triggerSave', async (editor: MDxEditor) => {

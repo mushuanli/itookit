@@ -89,7 +89,7 @@ export function assemble(
         newFileContent: options.fileCreation?.content,
     });
 
-    const engineAdapter = options.source ? new SourceAdapter(options.source, store, options.onError) : new EngineAdapter(engine!, store, registry, options.showFileExtensions ?? false, options.alwaysLoadedDirectories);
+    const engineAdapter = options.source ? new SourceAdapter(options.source, store, options.onError) : new EngineAdapter(engine!, store, registry, options.showFileExtensions ?? false, options.alwaysLoadedDirectories, options.hideGitignored ?? true);
 
     // Wire auto-expand: when a file is created inside an unexpanded directory,
     // trigger a full load so all siblings are visible (not just the new file).

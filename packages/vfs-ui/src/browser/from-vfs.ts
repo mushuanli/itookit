@@ -1,7 +1,8 @@
+import { filterGitignoredFiles } from '../utils/gitignore-visibility';
 import { normalizeVirtualPath, type FSNode, type IFileSystem } from '@itookit/vfs-core';
 import type { BrowserNode, BrowserSource } from '../contracts/source';
 
-export interface VFSDataOptions { root?: string; include?: (node: FSNode) => boolean }
+export interface VFSDataOptions { hideGitignored?: boolean; root?: string; include?: (node: FSNode) => boolean }
 export function fromVFS(fs: IFileSystem, options: VFSDataOptions = {}): BrowserSource {
   const root = normalizeVirtualPath(options.root ?? '/');
   const within = (path: string) => root === '/' || path === root || path.startsWith(root + '/');
@@ -21,12 +22,14 @@ export function fromVFS(fs: IFileSystem, options: VFSDataOptions = {}): BrowserS
     async children(parent, signal) {
       signal?.throwIfAborted(); const path = normalizeVirtualPath(parent ?? root);
       if (!within(path)) return [];
-      const nodes = await fs.driver.getChildren(path); signal?.throwIfAborted();
+      const raw = await fs.driver.getChildren(path); signal?.throwIfAborted();
+      const nodes = options.hideGitignored === false ? raw : await filterGitignoredFiles(fs, raw, signal, root);
       return nodes.filter(node => options.include?.(node) ?? true).map(map);
     },
     subscribe(listener) {
       const notify = (paths: string[]) => {
         const parents = new Set<string | null>();
+        if (paths.some(path => within(path) && path.split('/').pop() === '.gitignore')) { listener({}); return; }
         for (const path of paths) {
           if (!within(path)) continue;
           if (path === root) { listener({}); return; }

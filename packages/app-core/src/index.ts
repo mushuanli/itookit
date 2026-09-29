@@ -79,3 +79,6 @@ export type { RemoteFileSystemConfig, RemoteFileSystemInput } from './projects/r
 export type { ProjectRemoteMount, RemoteFileSourceProvider, RemoteFileConnection, RemoteConnectionStatus } from './projects/remote-mounts';
 
 export type { ProjectDraftComposer, ProjectDraftPromotion } from './projects/drafts/contracts';
+
+export { ProjectExecutionService } from './projects/execution/service';
+export type { ExecutionCapabilities, ProjectExecutionBinding, ProjectExecutionProvider, ProjectExecutionTarget, ProjectExecutionContext } from './projects/execution/contracts';

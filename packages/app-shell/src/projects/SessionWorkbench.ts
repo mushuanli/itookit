@@ -17,7 +17,7 @@ import { localizeMountError } from '../files/localize-mount-error';
 import type { EditorFactory, IEditor, EditorHostContext, ContextMenuConfig } from '@itookit/ui-common';
 import type { ISessionRepository } from '@itookit/llm-session';
 import type { Kernel } from '@itookit/durable-kernel';
-import { createVFSUI, type VFSToolbarContext, type VFSUIShell, type VFSNodeUI } from '@itookit/vfs-ui';
+import { filterGitignoredFiles, createVFSUI, type VFSToolbarContext, type VFSUIShell, type VFSNodeUI } from '@itookit/vfs-ui';
 import { FSError, createFileSystemView, type IFileSystem, type FileSystemContextOwner, type FileSystemView } from '@itookit/vfs-core';
 
 
@@ -130,7 +130,8 @@ export class SessionWorkbench implements WorkspaceController {
         this.sessions = options.projects?.sessions ?? new ProjectSessions(options.repository);
     }
     async start(): Promise<void> {
-        this.browser = await createSessionBrowser({ repository: this.repository, files: this.files, kernel: this.kernel, projects: this.projects });
+        this.browser = await createSessionBrowser({ repository: this.repository, files: this.files, kernel: this.kernel, projects: this.projects,
+            filterDisplayedFiles: filterGitignoredFiles });
         this.navigationFiles = createFileSystemView({ viewId: 'session-navigation:admin', mounts: [
             { mountId: 'sessions', at: '/', fs: this.browser.fs, access: 'rw' },
             ...(this.flows && !this.projects ? [{ mountId: 'flows', at: '/@flows', fs: this.flows.fs, access: 'rw' as const }] : []),
@@ -140,7 +141,7 @@ export class SessionWorkbench implements WorkspaceController {
         this.sidebar.append(tree);
         if (this.projects) this.installProjectNavigation();
         this.sidebarUI = createVFSUI({ sessionListContainer: tree, title: this.projects ? t('project.workspace') : '会话', scopeId: 'session-browser:v1:admin',
-            columns: this.projectNavigation?.options, toolbar: 'full',
+            columns: this.projectNavigation?.options, toolbar: 'full', hideGitignored: false,
             searchPlaceholder: t(this.projects ? 'project.searchContents' : 'project.search'), showFileExtensions: !this.projects,
             readOnly: false, activateDirectories: true, autoSelectFirst: !this.projects, defaultUiSettings: { sortBy: 'lastModified' },
             compareItems: compareSessionEntries,

@@ -17,7 +17,7 @@ it('preserves actual filenames and sizes in both adapters without extra reads', 
   expect(mapped.presentation?.fileDetails).toBe(true);
   const getChildren = vi.fn(async () => [file]), getNode = vi.fn(), readContent = vi.fn();
   const fs = { viewId: 'files', capabilities: { readonly: false }, driver: { getChildren, getNode, readContent } };
-  const nodes = await fromVFS(fs as any).children(null);
+  const nodes = await fromVFS(fs as any, { hideGitignored: false }).children(null);
   expect(displayNode(nodes[0]).metadata).toMatchObject({ title: 'config.yaml', size: 2048 });
   expect(getChildren).toHaveBeenCalledOnce(); expect(getNode).not.toHaveBeenCalled(); expect(readContent).not.toHaveBeenCalled();
 });
