@@ -95,6 +95,8 @@ export interface ConnectionOption {
 
 export interface ChatSessionSettings {
     executionMode?: ChatExecutionMode;
+    /** Fixed after the first accepted direct run. */
+    executionModeLocked?: boolean;
     /**
      * Session connection selection.
      * Omitted means follow the global default.

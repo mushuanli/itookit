@@ -148,7 +148,7 @@ export class StateManager {
         const validate = (id: string) => this.validateAgentFn(id);
         // Navigation text overrides must not carry another Session's execution policy.
         chatInput.setConfig({ settings: { flowId: undefined, flowRevision: undefined, flowParameters: undefined,
-            ...options.sessionSettings, executionMode: options.sessionSettings?.executionMode ?? 'chat' } });
+            ...options.sessionSettings, executionModeLocked: options.sessionSettings?.executionModeLocked ?? false, executionMode: options.sessionSettings?.executionMode ?? 'chat' } });
 
         // 优先级 1：外部指定的初始状态
         if (options.initialInputState) {

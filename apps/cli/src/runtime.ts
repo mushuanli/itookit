@@ -32,6 +32,9 @@ import {
     DirectoryMountService,
     ProjectService,
     ProjectRemoteMountService,
+    ProjectExecutionService,
+    ProjectExecutionStore,
+    createRemoteExecutionProvider,
     SessionFilesService,
     SessionLeaseStore,
     syncSkillsToKernel,
@@ -170,13 +173,17 @@ export async function createCliRuntime(
     const directoryMounts = new DirectoryMountService(systemFS, sessionFiles, directorySource);
     await directoryMounts.init();
     const projects = new ProjectService(systemFS, sessionRepository, directoryMounts, sessionFiles);
+    const remoteProvider = createHttpSourceProvider(ref => process.env[`MINDOS_REMOTE_${ref.replace(/-/g, '_')}`] ?? '');
     const remoteMounts = new ProjectRemoteMountService(systemFS,
-        createHttpSourceProvider(ref => process.env[`MINDOS_REMOTE_${ref.replace(/-/g, '_')}`] ?? ''),
+        remoteProvider,
         async () => { throw new Error('Change project mounts from the workbench while the CLI is stopped'); }, async () => {});
     await remoteMounts.init();
     // Same wiring as createApplicationRuntime: ProjectService must compose remote mounts for every
     // consumer of openFiles(), not only for the Session workspace path below.
     projects.remoteMounts = remoteMounts;
+    projects.execution = new ProjectExecutionService(new ProjectExecutionStore(systemFS), remoteMounts,
+        async () => { throw new Error('Change execution bindings from the workbench while the CLI is stopped'); },
+        async () => {}, createRemoteExecutionProvider(sessionFiles, remoteProvider));
     const project = await projects.forFolder((await sessionRepository.getManifest(manifest.sessionId)).folder);
     const hasRemoteMounts = !!project && remoteMounts.list(project.project.id).length > 0;
     sessionFiles.workspaceComposer = async (_id, mount) => {
@@ -259,11 +266,15 @@ export async function createCliRuntime(
         ? new NodePtyDriver()
         : engine ? new OciTtyDriver(engine, workflow, ttyMounts) : undefined;
 
-    const acquireFiles = (id: string) => acquireSessionProcessContext(
-        sessionFiles, id,
-        hasRemoteMounts ? undefined : async () => ({ nativeShell: shell, ttyDriver, release: async () => {} }),
-        () => directoryMounts.processMounts(id),
-    );
+    const acquireFiles = async (id: string) => {
+        const execution = project && await projects.execution?.acquire(project.project.id, id);
+        if (execution) return execution;
+        return acquireSessionProcessContext(
+            sessionFiles, id,
+            hasRemoteMounts ? undefined : async () => ({ nativeShell: shell, ttyDriver, release: async () => {} }),
+            () => directoryMounts.processMounts(id),
+        );
+    };
     const core = await createKernelRuntime({
         systemFS,
         llmDriver,

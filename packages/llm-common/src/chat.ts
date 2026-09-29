@@ -15,6 +15,8 @@ export interface ChatSessionSettings {
     /** Omitted means follow the global default connection. */
     connectionId?: string;
     executionMode?: ChatExecutionMode;
+    /** Fixed after the first accepted direct run. */
+    executionModeLocked?: boolean;
     version: '1.0';
     modelId?: string;
     historyLength: number;
@@ -25,6 +27,7 @@ export interface ChatSessionSettings {
 
 export const DEFAULT_SESSION_SETTINGS: ChatSessionSettings = {
     executionMode: 'chat',
+    executionModeLocked: false,
     version: '1.0',
     modelId: undefined,
     historyLength: -1,

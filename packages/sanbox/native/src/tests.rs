@@ -46,7 +46,8 @@ fn macos_applies_seatbelt_to_native_cwd_and_escapes_profile_paths() {
     std::fs::create_dir(fixture.root.join("quoted\"\\directory")).unwrap();
     let mounts = [fixture.mount("rw", "/workspace", true), fixture.mount("quoted\"\\directory", "/input", false)];
     let script = "echo '\"; (allow default)'";
-    let command = command_for_platform("macos", script, "/workspace/sub", &mounts, NetworkAccess::Deny).unwrap();
+    let cwd = fixture.root.join("rw/sub");
+    let command = seatbelt::command(script, cwd.to_str().unwrap(), &mounts, NetworkAccess::Deny, &runtime_policy().unwrap().seatbelt);
     assert_eq!(command.get_program(), "/usr/bin/sandbox-exec");
     assert_eq!(command.get_current_dir().unwrap(), fixture.root.join("rw/sub"));
     let args = args(&command);
@@ -95,4 +96,27 @@ fn rejects_cwd_symlink_escape_after_resolving_the_native_directory() {
 fn never_downgrades_unknown_platforms_or_missing_grants_to_native() {
     assert!(command_for_platform("windows", "true", "/", &[], NetworkAccess::Deny).is_err());
     assert!(command_for_platform("linux", "true", "/", &[], NetworkAccess::Deny).unwrap_err().contains("requires a mounted"));
+}
+
+#[test]
+fn macos_rejects_virtual_aliases_instead_of_silently_changing_the_namespace() {
+    let fixture = Fixture::new();
+    let mounts = [fixture.mount("rw", "/workspace", true)];
+    assert!(command_for_platform("macos", "pwd", "/workspace", &mounts, NetworkAccess::Deny)
+        .unwrap_err().contains("namespace-capable"));
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn native_bash_uses_workspace_and_sibling_grants() {
+    if std::env::var("SANBOX_TEST_NATIVE").as_deref() != Ok("1") { return; }
+    let fixture = Fixture::new();
+    std::fs::write(fixture.root.join("rw/main.txt"), "project").unwrap();
+    std::fs::write(fixture.root.join("ro/guide.txt"), "reference").unwrap();
+    let mounts = [fixture.mount("rw", "/workspace", true), fixture.mount("ro", "/reference", false)];
+    let script = "set -eu; test \"$(pwd)\" = /workspace; test \"$(cat main.txt)\" = project; test \"$(cat ../reference/guide.txt)\" = reference; test \"$(cat /reference/guide.txt)\" = reference; if echo denied > /reference/guide.txt 2>/dev/null; then exit 12; fi; echo updated > /workspace/main.txt";
+    let result = session_command(script, "/workspace", &mounts, NetworkAccess::Deny).unwrap().output().unwrap();
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    assert_eq!(std::fs::read_to_string(fixture.root.join("rw/main.txt")).unwrap(), "updated\n");
+    assert_eq!(std::fs::read_to_string(fixture.root.join("ro/guide.txt")).unwrap(), "reference");
 }

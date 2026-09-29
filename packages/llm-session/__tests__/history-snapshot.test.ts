@@ -48,17 +48,17 @@ it('bounds cycles and tolerates missing or malformed ancestor documents', async 
 it('loads manifest, branch drafts and settings in one fresh transaction without caching later loads', async () => {
     const { repository, id, backend } = await fixture();
     await repository.updateUIState(id, { branchDrafts: { other: { inputText: 'review draft' } } });
-    await repository.saveSessionSettings(id, { executionMode: 'agent' });
+    await repository.saveSessionSettings(id, { temperature: 0.2 });
     const transaction = vi.spyOn(backend.records!, 'transaction');
     expect(await repository.getLoadState(id)).toMatchObject({
         manifest: { currentBranch: 'main', uiState: { branchDrafts: { other: { inputText: 'review draft' } } } },
-        settings: { executionMode: 'agent' },
+        settings: { temperature: 0.2 },
     });
     expect(transaction).toHaveBeenCalledTimes(1);
     await repository.updateManifest(id, { currentBranch: 'other', currentHead: 'other', title: 'Changed' });
-    await repository.saveSessionSettings(id, { executionMode: 'chat' });
+    await repository.saveSessionSettings(id, { temperature: 0.8 });
     expect(await repository.getLoadState(id)).toMatchObject({
-        manifest: { title: 'Changed', currentBranch: 'other' }, settings: { executionMode: 'chat' },
+        manifest: { title: 'Changed', currentBranch: 'other' }, settings: { temperature: 0.8 },
     });
 });
 

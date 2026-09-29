@@ -29,7 +29,8 @@ import { ConversationRunCoordinator } from './conversation-run-coordinator';
 import { SessionEventBus } from './session-event-bus';
 import { SessionState } from './session-state';
 import { bindFlowNode } from './flow-node-binder';
-import { snapshotTaskInput } from './direct-execution-mode';
+import { snapshotTaskInput, directExecutionMode } from './direct-execution-mode';
+import { resolveSessionExecutionMode } from './session-execution-mode';
 
 export interface SessionRunCallbacks {
     /** Commit persisted rounds to the projection before exposing a terminal status. */
@@ -192,6 +193,7 @@ export class SessionRunCoordinator {
     }
 
     private async createTask(input: TaskInput): Promise<ExecutionTask> {
+        input = await resolveSessionExecutionMode(this.engine, input);
         const roundLog = this.logs.get(input.sessionId)
             ?? new RoundLog(this.engine, input.sessionId);
         this.logs.set(input.sessionId, roundLog);
@@ -204,6 +206,8 @@ export class SessionRunCoordinator {
                 + 'See the [AgentResolver] warning in the console.',
             );
         }
+        const mode = input.overrides?.flowId ? undefined : directExecutionMode(input);
+        if (mode) await this.engine.saveSessionSettings(input.sessionId, { executionMode: mode, executionModeLocked: true });
         const branchRef = manifest.currentBranch || 'main';
         return {
             id: `run-request-${ulid()}`,

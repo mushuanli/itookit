@@ -82,6 +82,7 @@ export class SendMessageCommand extends Command<SendMessageParams, boolean> {
                         : { kind: 'agent', agentId: agentId || 'default', mode: overrides.executionMode },
                 },
             });
+            if (!overrides.flowId && this.ctx.getSessionId() === sessionId) this.ctx.chatInput.setConfig?.({ settings: { executionMode: overrides.executionMode, executionModeLocked: true } });
             return true;
         } catch (error: any) {
             // A rejected transport response does not prove the host rejected the send.

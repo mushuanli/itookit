@@ -236,3 +236,14 @@ describe('Session data repository', () => {
         expect(await fs.driver.exists('/var/lib/sessions/missing')).toBe(false);
     });
 });
+
+it('persists the first admitted mode and rejects stale changes without unlocking it', async () => {
+    const id = await repository.createSession('Mode');
+    await repository.saveSessionSettings(id, { executionMode: 'agent' });
+    expect((await repository.getSessionSettings(id)).executionModeLocked).toBe(false);
+    await repository.saveSessionSettings(id, { executionMode: 'agent', executionModeLocked: true });
+    await expect(repository.saveSessionSettings(id, { executionMode: 'chat' })).rejects.toThrow();
+    await repository.saveSessionSettings(id, { executionMode: undefined, executionModeLocked: false, temperature: 0.2 });
+    const reopened = new SessionRepository(fs);
+    expect((await reopened.getLoadState(id)).settings).toMatchObject({ executionMode: 'agent', executionModeLocked: true, temperature: 0.2 });
+});

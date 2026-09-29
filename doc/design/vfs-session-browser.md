@@ -19,7 +19,7 @@ Web 与 Tauri 的 Chat／项目导航统一为“工作台”，由 `ProjectServ
         文档与目录
 ```
 
-浏览器路径为 `folder:<encoded name>/…/folder:%40sessions/<sessionId>`；项目文件使用 `folder:<encoded name>/…/@files/<file path>`。`BrowserTarget` 新增 `project-files`，宿主通过 `ProjectService.openFiles()` 取得项目文件视图。此视图属于用户的导航能力，不会自动扩大任意 Session 的授权。
+浏览器路径为 `folder:<encoded name>/…/folder:%40sessions/<sessionId>`；项目文件使用 `folder:<encoded name>/…/@files/<file path>`。`BrowserTarget` 新增 `project-files`，宿主通过 `ProjectService.openWorkspace()` 取得以 `/workspace` 为规范路径的项目编辑视图，`openFiles()` 保留为内部 source view。此视图属于用户的导航能力，不会自动扩大任意 Session 的授权。
 
 新建会话、从会话文件夹导入会话均在返回 ID 前完成项目挂载。项目名和分组路径可修改；稳定 ID、物理目录、Session ID 不变。跨项目拖动会话／分组会被拒绝，避免仅移动显示位置却继续访问旧项目文件。“会话”与“文件”入口本身不可重命名或删除。删除项目只删除导航及所属会话，保留实际目录。
 
@@ -283,3 +283,8 @@ Session browser 与项目/家族导航优先使用 `ISessionRepository.listSumma
 新会话复用普通会话的标题栏、欢迎区与底部 ChatInput 布局，不显示独立草稿说明页；标题只读为“新会话”，首次发送后替换为真实会话日期时间标题。
 
 机制/策略隔离、目录和对外端口详见 [项目会话草稿架构](project-session-drafts.md)。
+
+
+## 项目收藏夹
+
+项目卡片顺序为收藏夹、文件、新会话、已有会话。收藏目录、文件和会话后可从收藏夹直接跳转；收藏动作由 vfs-ui 的 `favoriteAction` 端口（`state(node)` 查询 + `toggle(node)` 命令）提供，持久化由 ProjectFavorites 管理。新增 BrowserTarget favorites/favorite，导航路由分别为项目 `/@favorites` 与 `/@favorites/<favoriteId>`。详情见 [项目收藏夹](project-favorites.md)。

@@ -1,6 +1,13 @@
 import { t } from '@itookit/common';
 import { DEFAULT_AGENT_MAX_EXCHANGES, type ChatExecutionMode } from '@itookit/llm-common';
 
+export interface ExecutionModeViewState {
+    mode?: ChatExecutionMode;
+    flow: boolean;
+    loading: boolean;
+    locked?: boolean;
+}
+
 /** UI preferences affect future sends; the host owns execution and authorization. */
 export class ExecutionModeControl {
     private readonly group: HTMLElement;
@@ -9,6 +16,7 @@ export class ExecutionModeControl {
     private mode: ChatExecutionMode = 'chat';
     private flow = false;
     private loading = false;
+    private locked = false;
 
     constructor(container: HTMLElement, onChange: (mode: ChatExecutionMode) => void) {
         this.group = container.querySelector('.llm-input__execution-mode')!;
@@ -25,16 +33,18 @@ export class ExecutionModeControl {
         });
     }
 
-    update(mode: ChatExecutionMode | undefined, flow: boolean, loading: boolean): void {
+    update({ mode, flow, loading, locked = false }: ExecutionModeViewState): void {
         this.mode = mode === 'agent' ? 'agent' : 'chat';
         this.flow = flow;
         this.loading = loading;
+        this.locked = locked;
         this.render();
     }
 
     private render(): void {
         for (const button of this.buttons) {
-            button.disabled = this.loading || this.flow;
+            button.disabled = this.loading || this.flow || this.locked;
+            button.title = this.locked ? t('chatInput.executionMode.locked') : '';
             button.setAttribute('aria-pressed', String(!this.flow && button.dataset.executionMode === this.mode));
         }
         this.hint.textContent = this.flow ? t('chatInput.executionMode.flowHint')

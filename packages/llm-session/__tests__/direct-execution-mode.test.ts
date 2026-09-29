@@ -1,3 +1,5 @@
+import { SessionRepository } from '../src/persistence/session-repository';
+import { resolveSessionExecutionMode } from '../src/session/session-execution-mode';
 import { expect, it, vi } from 'vitest';
 import { Kernel } from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
@@ -122,4 +124,37 @@ it('persists explicit project-draft provenance before emitting the projected not
     expect(writes[0]).toMatchObject({ id: 'submission-a', sessionId: 's', submission: source,
         executions: [{ taskId: 'task-a', role: 'primary' }] });
     expect(events[0]).toMatchObject({ type: 'execution_task_projected', payload: { submission: source, roundId: 'submission-a' } });
+});
+
+it('enforces a persisted mode for sends and regenerations, including callers without overrides', async () => {
+    const engine = { getSessionSettings: vi.fn(async () => ({ executionMode: 'agent', executionModeLocked: true })) };
+    const input = { sessionId: 's', text: 'next', files: [], agentId: 'a' } as TaskInput;
+    expect((await resolveSessionExecutionMode(engine as never, input)).overrides?.executionMode).toBe('agent');
+    await expect(resolveSessionExecutionMode(engine as never, { ...input, overrides: { executionMode: 'chat' } })).rejects.toThrow();
+    const flow = { ...input, overrides: { flowId: 'flow', executionMode: 'chat' as const } };
+    expect(await resolveSessionExecutionMode(engine as never, flow)).toBe(flow);
+});
+
+it('locks mode at admission and leaves rejected first submissions configurable', async () => {
+    const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+    const fs = await manager.openFileSystem('/');
+    const repository = new SessionRepository(fs); await repository.init();
+    try {
+        const sessionId = await repository.createSession('Mode');
+        const coordinator = new SessionRunCoordinator(...[repository, ...Array(7).fill({})] as ConstructorParameters<typeof SessionRunCoordinator>);
+        const internal = coordinator as any;
+        vi.spyOn(coordinator, 'assertCanSubmit').mockResolvedValue(undefined);
+        const resolve = vi.spyOn(internal, 'resolveConfig').mockRejectedValueOnce(new Error('Invalid agent'))
+            .mockResolvedValue({ id: 'a', agentVersion: '1' });
+        vi.spyOn(internal, 'execute').mockResolvedValue(undefined);
+        internal.callbacks = { onStatusChange: vi.fn() };
+        const input = { sessionId, text: 'goal', files: [], agentId: 'a', overrides: { executionMode: 'agent' } } as TaskInput;
+        await expect(coordinator.submit(input, {} as never)).rejects.toThrow('Invalid agent');
+        expect((await repository.getSessionSettings(sessionId)).executionModeLocked).toBe(false);
+        await coordinator.submit(input, {} as never);
+        expect((await repository.getSessionSettings(sessionId))).toMatchObject({ executionMode: 'agent', executionModeLocked: true });
+        internal.active.clear();
+        await expect(coordinator.submit({ ...input, overrides: { executionMode: 'chat' } }, {} as never)).rejects.toThrow();
+        expect(resolve).toHaveBeenCalledTimes(2);
+    } finally { await repository.dispose(); await manager.dispose(); }
 });

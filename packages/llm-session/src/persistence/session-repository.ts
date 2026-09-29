@@ -1,3 +1,4 @@
+import { sessionSettings, mergeSessionSettings } from './session-settings';
 import { SessionRelations, assertSessionAvailable, readSessionMetadata, touchSessionRelations } from './session-relations';
 import { generateUUID } from '@itookit/common';
 import { createFileSystemView, FSError, type IFileSystem, type ISeqFileTransaction } from '@itookit/vfs-core';
@@ -125,10 +126,8 @@ export class SessionRepository implements ISessionRepository {
         const p = this.paths(id);
         return this.fs.meta.seq!.transaction!(async tx => {
             const rows = await tx.getEntries(p.session, ['session', 'settings']);
-            return {
-                manifest: await this.readManifestTx(tx, p, id, rows.session ?? null),
-                settings: { ...DEFAULT_SESSION_SETTINGS, ...JSON.parse(rows.settings ?? '{}') },
-            };
+            const manifest = await this.readManifestTx(tx, p, id, rows.session ?? null);
+            return { manifest, settings: sessionSettings(rows.settings, manifest) };
         });
     }
     /**
@@ -144,7 +143,7 @@ export class SessionRepository implements ISessionRepository {
                 ?? await collectHistoryChain(manifest, roundId => this.readRound(tx, p, roundId));
             return {
                 manifest,
-                settings: { ...DEFAULT_SESSION_SETTINGS, ...JSON.parse(rows.settings ?? '{}') },
+                settings: sessionSettings(rows.settings, manifest),
                 chain,
             };
         });
@@ -384,8 +383,9 @@ export class SessionRepository implements ISessionRepository {
         await this.getManifest(id);
         const path = this.paths(id).session;
         await this.fs.meta.seq!.transaction!(async tx => {
-            const current = JSON.parse(await tx.getEntry(path, 'settings') ?? '{}');
-            await tx.setEntry(path, 'settings', JSON.stringify({ ...current, ...patch, version: '1.0', updatedAt: new Date().toISOString() }));
+            const manifest = await this.readManifestTx(tx, this.paths(id), id);
+            const current = sessionSettings(await tx.getEntry(path, 'settings'), manifest);
+            await tx.setEntry(path, 'settings', JSON.stringify(mergeSessionSettings(current, patch)));
         });
     }
     async readDocument(id: string, name: string): Promise<string | null> {

@@ -50,7 +50,7 @@ it('freezes the send mode before an attachment upload and keeps Flow routing aut
     let uploaded!: (refs: string[]) => void;
     const execute = vi.fn(async () => undefined);
     const context = { getSessionId: () => 's', commands: { execute },
-        chatInput: { setLoading: vi.fn(), restoreInput: vi.fn(), getConfig: () => ({ settings: { executionMode: 'agent' } }) },
+        chatInput: { setConfig: vi.fn(), setLoading: vi.fn(), restoreInput: vi.fn(), getConfig: () => ({ settings: { executionMode: 'agent' } }) },
         historyView: { scrollToBottom: vi.fn() }, errorHandler: { wrap: (run: () => Promise<unknown>) => run() },
         assetService: { uploadFiles: () => new Promise<string[]>(resolve => { uploaded = resolve; }) },
     };
@@ -62,6 +62,7 @@ it('freezes the send mode before an attachment upload and keeps Flow routing aut
         overrides: expect.objectContaining({ executionMode: 'chat' }),
         sendIntent: expect.objectContaining({ execution: { kind: 'agent', agentId: 'default', mode: 'chat' } }),
     }));
+    expect(context.chatInput.setConfig).toHaveBeenCalledWith({ settings: { executionMode: 'chat', executionModeLocked: true } });
     await command.run({ text: 'flow', files: [], overrides: { executionMode: 'chat', flowId: 'review', flowRevision: 3 } });
     expect(execute).toHaveBeenLastCalledWith(SessionCommand.Send, expect.objectContaining({ sendIntent: expect.objectContaining({
         execution: { kind: 'flow', flowId: 'review', revision: 3, parameters: undefined },
@@ -80,4 +81,17 @@ it('uses the selected mode when regenerating an answer', async () => {
     expect(execute).toHaveBeenLastCalledWith(SessionCommand.Regenerate, {
         assistantId: 'answer', options: { overrides: { executionMode: 'chat' } },
     });
+});
+
+it('keeps the accepted mode locked after stopping and restores the lock on reopening', () => {
+    const f = fixture();
+    f.view.setConfig({ settings: { executionMode: 'agent', executionModeLocked: true } });
+    f.view.setLoading(true); f.view.setLoading(false);
+    expect(f.button('chat').disabled).toBe(true);
+    expect(f.button('agent').getAttribute('aria-pressed')).toBe('true');
+    f.button('chat').click();
+    expect(f.view.getConfig().settings.executionMode).toBe('agent');
+    expect(f.button('chat').title).toContain('新建会话');
+    f.view.setConfig({ settings: { executionMode: 'chat', executionModeLocked: false } });
+    expect(f.button('agent').disabled).toBe(false);
 });

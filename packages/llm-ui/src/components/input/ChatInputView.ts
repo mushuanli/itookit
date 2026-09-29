@@ -799,7 +799,8 @@ export class ChatInput implements IChatInputPresenter {
     // ================================================================
 
     private syncExecutionMode(): void {
-        this.executionMode?.update(this.config.settings.executionMode, Boolean(this.config.settings.flowId), this.loading);
+        this.executionMode?.update({ mode: this.config.settings.executionMode, flow: Boolean(this.config.settings.flowId),
+            loading: this.loading, locked: this.config.settings.executionModeLocked });
     }
 
     private syncUIFromConfig(): void {

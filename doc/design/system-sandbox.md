@@ -51,7 +51,7 @@ flowchart TD
 | 系统依赖 | Podman 或 Docker，并需可用镜像 | `bwrap` 与允许相关 namespace 的 Linux 内核 |
 | 程序环境 | 由镜像固定工具及版本，便于复现 | 直接使用宿主基础程序，依赖目录由宿主开放 |
 | 成本 | 需构建/存储镜像；单次命令启动一个容器 | 无镜像管理，直接启动受限进程 |
-| 目录映射 | 已支持宿主目录映射到 `/workspace` 等虚拟路径 | TypeScript 入口保持原生路径；Rust 桌面入口支持虚拟挂载 |
+| 目录映射 | 已支持宿主目录映射到 `/workspace` 等虚拟路径 | TypeScript 入口保持原生路径；Rust 仅 Linux 支持虚拟挂载，macOS 拒绝路径别名 |
 | 资源限制 | 已构造 PID 上限，以及可选 CPU/内存限制参数 | 新包尚无 CPU/内存/PID 限额 |
 | 生命周期 | 还需实测引擎客户端退出后容器及后代确实停止 | 仍需宿主管理进程与退出确认 |
 
@@ -82,7 +82,7 @@ Flow 编辑器若以后允许节点选择策略，应保存版本化策略引用
 5. 关闭或撤销作用域时，先取消并等待全部 Bash/TTY/子进程停止，再释放目录与临时文件。新模块不替代现有 `EffectAdapter.cancel` 的停止确认契约。
 6. 恢复时依据持久身份与**当前仍有效**授权重新取得能力；策略缺失、目录变更、后端不可用时拒绝恢复执行，不能使用旧内存对象或降级原生 shell。
 
-Seatbelt 没有 Linux mount namespace 的目录重映射能力。TypeScript 入口两后端都使用真实绝对路径；Rust 桌面入口在 Linux 继续支持 `source → /workspace` 映射，在 macOS 根据最长匹配挂载解析真实 cwd，并检查符号链接没有越界。macOS Bash 可使用当前目录相对路径或实际原生路径，但脚本中的 `/workspace/...` 字面量不能自动工作；不能通过字符串替换 shell 脚本伪造路径映射。
+Seatbelt 没有 Linux mount namespace 的目录重映射能力。TypeScript 入口两后端都使用真实绝对路径；Rust 桌面入口在 Linux 继续支持 `source → /workspace` 映射，在 macOS 要求 source 与 target 相同，并检查 cwd 的符号链接没有越界。虚拟挂载别名会在启动前被拒绝；macOS 使用 `/workspace` 的项目需要支持命名空间的后端。不能仅改变真实 cwd 或通过字符串替换 shell 脚本伪造路径映射。
 
 Tauri WebView 不运行 Node，因此桌面通过 Cargo path dependency 使用包内 Rust crate；前端无需引入 Node 入口。Rust 从授权句柄重新取得并验证目录和 cwd，网络策略由宿主固定，不接收前端任意 profile/argv。macOS 分支已实现并测试配置生成，但实际策略兼容性和进程清理仍需 macOS 实机验证。
 

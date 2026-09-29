@@ -1,3 +1,4 @@
+import { configureAppCache } from './app-cache';
 import { createHttpSourceProvider } from '@itookit/vfsdriver-http';
 import { initApp, installMobileNavigation, windowSessionLeaseToken, type AppUI } from '@itookit/app-shell';
 import { createApplicationRuntime } from '@itookit/app-core';
@@ -27,10 +28,8 @@ import '@itookit/llm-ui/style.css';
 import '@itookit/app-settings/style.css';
 import './styles/index.css';
 
-// PWA service worker — network-first, non-blocking
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
-}
+// Dev must always load the current workspace source graph.
+void configureAppCache(import.meta.env.DEV).catch(error => console.warn('App cache setup failed', error));
 
 async function main() {
     installMobileNavigation();

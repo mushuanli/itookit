@@ -47,6 +47,9 @@ fn command_for_platform(platform: &str, script: &str, cwd: &str, mounts: &[Mount
     if !matches!(platform, "linux" | "macos") { return Err("Session Bash isolation is not available on this platform".into()); }
     if script.contains('\0') { return Err("Invalid Bash command".into()); }
     let mounts = canonical_mounts(mounts)?;
+    if platform == "macos" && mounts.iter().any(|mount| mount.source != mount.target) {
+        return Err("Virtual mount namespaces require a namespace-capable backend; seatbelt only supports identical host paths".into());
+    }
     let native_cwd = native_cwd(cwd, &mounts)?;
     let policy = runtime_policy()?;
     let mut result = match platform {
