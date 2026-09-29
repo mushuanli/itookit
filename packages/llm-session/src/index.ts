@@ -248,3 +248,5 @@ async function resolveSessionConnection(options: ConversationSystemOptions, sess
         throw new Error(`Connection is disabled: ${connection.id}`);
     return connection?.id;
 }
+
+export { hasCommittedSubmission } from './persistence/submission-receipt';

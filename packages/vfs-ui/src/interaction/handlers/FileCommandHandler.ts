@@ -1,3 +1,4 @@
+import { mutableEntryIds } from '../../utils/fixed-entry';
 import { createMoveOperation } from '../movement';
 /**
  * @file vfs-ui/interaction/handlers/FileCommandHandler.ts
@@ -72,6 +73,8 @@ export class FileCommandHandler {
       }),
 
       this.commandBus.on('file:move', async ({ itemIds, targetId }) => {
+                itemIds = mutableEntryIds(this.store.getState().items, itemIds);
+                if (!itemIds.length) return;
         const move = createMoveOperation<string[], string | null>({
           resolve: (ids, destination) => ({ batches: [{ ids, execute: async paths => {
             await this.service.moveItems({ itemIds: paths, targetId: destination }); return 'completed';

@@ -402,7 +402,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 onUnloadSkill: (id: string) => this.options.sessionSkills!.unload(this.options.sessionId, id),
             } : {}),
             onSend: (text, files, agentId, overrides) =>
-                this.sendCommand.run({ text, files, agentId, overrides }),
+                this.sendWithSubmission({ text, files, agentId, overrides }).then(() => {}),
             onStop: () => this.commandBus.execute(SessionCommand.Abort).catch(error => this.errorHandler.handle(error, 'Stop execution')),
             initialAgents,
             initialConfig: {
@@ -925,7 +925,20 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     setReadOnly(): void { }
-    get commands() { return { rerunSession: () => this.rerunSession() }; }
+    private async sendWithSubmission(message: import('../commands/SendMessageCommand').SendMessageParams): Promise<boolean | undefined> {
+        try {
+            const submission = message.submission ?? await this.options.resolveSubmission?.();
+            return await this.sendCommand.run({ ...message, submission });
+        } catch (error) {
+            this.chatInput.restoreInput(message.text, message.agentId);
+            this.errorHandler.handle(error, 'Resolve submission');
+            return false;
+        }
+    }
+
+    get commands() { return { rerunSession: () => this.rerunSession(),
+        sendMessage: (message: import('../commands/SendMessageCommand').SendMessageParams) => this.sendWithSubmission(message),
+    }; }
 
     private async rerunSession(): Promise<void> {
         if (!this.currentSessionId || this.rerunPending) return;

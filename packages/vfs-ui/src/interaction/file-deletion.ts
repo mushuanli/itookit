@@ -1,10 +1,13 @@
 import type { IDataOperationPort, IStatePort } from '../contracts/ports';
 import { partitionDeletable, READ_ONLY_DELETE_MESSAGE } from '../utils/delete-guard';
+import { mutableEntryIds } from '../utils/fixed-entry';
 import { describeDeleteError } from '../utils/delete-error';
 import { createDeleteOperation } from './deletion';
 
 /** Files use the same deletion pipeline as host-defined virtual groups. */
 export async function deleteFiles(store: IStatePort, service: IDataOperationPort, ids: string[], bulk = false): Promise<void> {
+  ids = mutableEntryIds(store.getState().items, ids);
+  if (!ids.length) return;
   const remove = createDeleteOperation<string[]>({
     resolve: itemIds => {
       const { deletable, blocked } = partitionDeletable(store.getState().items, itemIds);

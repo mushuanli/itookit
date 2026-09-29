@@ -5,6 +5,9 @@
 // Interpolation syntax:   {param}  e.g. '已导入 {count} 个 Skill'
 
 export const zhCN = {
+    'project.draftDiscard': '清空草稿',
+    'project.draftSaveFailed': '草稿保存失败，请保留当前页面并备份输入内容',
+    'project.draftResume': '已打开上次发送的会话，请核对消息后再决定是否发送。',
     'project.largeFile': '文件大小：{size}，超过完整编辑的 32 MiB 上限。',
     'project.unknownSize': '未知',
     'project.largeTextPreview': '仅预览前 256 KiB，未加载全文；此预览只读，不能保存。',
@@ -207,7 +210,7 @@ export const zhCN = {
     'project.openDirectory': '添加本地项目',
     'project.name': '项目名称',
     'project.createFolder': '新建目录',
-    'project.createSession': '新建会话',
+    'project.createSession': '新会话',
     'project.createFile': '新建文件',
     'project.error.name': '请输入有效的项目名称',
     'project.error.nested': '项目下可建立文件或会话目录，请在项目外新建项目',

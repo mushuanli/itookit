@@ -4,6 +4,9 @@
 import type { LocaleStrings } from './zh-CN';
 
 export const en: LocaleStrings = {
+    'project.draftDiscard': 'Clear draft',
+    'project.draftSaveFailed': 'Draft save failed. Keep this page open and copy your input.',
+    'project.draftResume': 'Opened the previous session. Check its messages before sending again.',
     'project.largeFile': 'File size: {size}. Full editing is limited to 32 MiB.',
     'project.unknownSize': 'unknown',
     'project.largeTextPreview': 'Only the first 256 KiB is shown. This is an incomplete, read-only preview and cannot be saved.',

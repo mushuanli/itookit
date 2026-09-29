@@ -24,6 +24,7 @@ src/
 │   └── create-application-runtime.ts 应用运行时装配：VFS → LLM → 会话/Flow → 租约与恢复 → RunCatalog
 ├── configuration/               工具箱资源/分组/目录、模型关联删除与工具授权
 ├── projects/                    项目生命周期、会话组织查询/命令、项目归档与业务目标
+│   └── drafts/                  项目草稿策略 service / 端口 contracts / 事务 store / 数据校验 record-codec
 ├── session/                     Session 语义与数据交换（可依赖 vfs/）
 │   ├── session-browser.ts       浏览器侧导航模型（folder:/tasks 目标解析与投影）
 │   ├── session-bundle.ts        会话导出/导入格式（带版本与校验）

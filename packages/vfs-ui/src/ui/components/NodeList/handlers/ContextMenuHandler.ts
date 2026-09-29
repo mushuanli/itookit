@@ -314,7 +314,7 @@ export class ContextMenuHandler {
     );
 
     // Read-only entries (Task history) cannot be renamed, moved or deleted.
-    return isItemReadOnly(item)
+    return isItemReadOnly(item) || item.metadata.custom._fixedEntry === true
       ? items.filter(entry => !('id' in entry) || !['rename', 'moveTo', 'delete'].includes(String(entry.id)))
       : items;
   }

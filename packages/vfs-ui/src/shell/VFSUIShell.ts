@@ -1,3 +1,4 @@
+import type { DirectoryAction } from '../contracts/options';
 import { SourceAdapter } from '../browser/SourceAdapter';
 import type { VFSListSort } from '../contracts/types';
 // shell/VFSUIShell.ts
@@ -64,7 +65,7 @@ export interface VFSUIShellOptions extends BrowserBaseOptions {
   sort?: VFSListSort;
   defaultExtension?: string;
   fileTypes?: FileTypeDefinition[];
-  directoryAction?: { label: string; visible(path: string): boolean; disabled?(path: string): boolean; run(path: string): Promise<void> };
+  directoryAction?: DirectoryAction;
   activateDirectories?: boolean;
   /** Restore saved selection, but optionally keep a new tree unselected. */
   autoSelectFirst?: boolean;
@@ -350,6 +351,7 @@ export class VFSUIShell {
     for (const path of this.statePort.getState().expandedFolderIds) await this.loadNavigationChildren(path, true);
   }
 
+  refreshNavigationActions(): void { this.navigationList?.refreshDirectoryActionState(); }
   setNavigationTitle(title: string): void { this.navigationList?.setTitle(title); }
   setContentToolbar(options: import('../ui/components/NodeList/toolbar').VFSToolbarOptions): void { this.nodeList.setToolbarOptions(options); }
   resetContentState(): void { this.contentState?.refresh(true); }

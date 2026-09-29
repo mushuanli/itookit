@@ -12,3 +12,5 @@ export type { LLMRequestLog, LLMResponseLog, ILLMLogger } from './ILLMLogger';
 export type { ChatAttachment, ChatSessionSettings, ChatExecutionMode } from './chat';
 export { DEFAULT_SESSION_SETTINGS } from './chat';
 export type { RestoreStatus, RestorableItem } from './types';
+
+export type { SessionSubmission } from './agent/flow';

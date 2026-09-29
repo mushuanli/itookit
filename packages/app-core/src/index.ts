@@ -77,3 +77,5 @@ export { OcrService, type OcrSettings, type OcrConnection } from './configuratio
 export { ProjectRemoteMountService } from './projects/remote-mounts';
 export type { RemoteFileSystemConfig, RemoteFileSystemInput } from './projects/remote-connections';
 export type { ProjectRemoteMount, RemoteFileSourceProvider, RemoteFileConnection, RemoteConnectionStatus } from './projects/remote-mounts';
+
+export type { ProjectDraftComposer, ProjectDraftPromotion } from './projects/drafts/contracts';

@@ -567,7 +567,7 @@ export type RegistryEvent =
     | { type: 'background_task_completed'; payload: { sessionId: string } }
     | {
         type: 'execution_task_projected';
-        payload: { sessionId: string; taskId: string; roundId: string };
+        payload: { sessionId: string; taskId: string; roundId: string; submission?: import('@itookit/common').SendIntent['submission'] };
     }
     /**
      * 后台会话打开了 TTY 交互进程。

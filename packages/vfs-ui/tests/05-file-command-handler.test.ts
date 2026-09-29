@@ -61,6 +61,16 @@ describe('FileCommandHandler — command → engine wiring', () => {
         handler.destroy();
     });
 
+    it('silently ignores fixed project entries in delete and move commands', async () => {
+        const fixed = makeVFSNodeUI({ id: 'files', metadata: { ...makeVFSNodeUI().metadata, custom: { _fixedEntry: true } } });
+        store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items: [fixed], tags: new Map() } });
+        const move = vi.spyOn(service, 'moveItems');
+        await commandBus.execute('file:delete', { itemIds: ['files'] });
+        await commandBus.execute('file:move', { itemIds: ['files'], targetId: '/' });
+        expect(engine.driver.delete).not.toHaveBeenCalled();
+        expect(move).not.toHaveBeenCalled();
+    });
+
     it('file:create command calls engine.createFile()', async () => {
         commandBus.execute('file:create', { type: 'file', title: 'My Chat', parentPath: null });
         await sleep(10); // allow async handler to run

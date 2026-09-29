@@ -27,6 +27,7 @@ export interface ChatInputOptions {
     onSend: (text: string, files: File[], executorId: string, overrides?: ChatOverrides) => Promise<void>;
     onStop: () => void;
     onExecutorChange?: (executorId: string) => void;
+    onDraftChange?: (config: IChatInputConfig, files: File[]) => void;
     onConfigChange?: (config: IChatInputConfig) => void;
     initialAgents?: ExecutorOption[];
     initialConfig?: Partial<IChatInputConfig>;
@@ -436,7 +437,7 @@ export class ChatInput implements IChatInputPresenter {
             onRequestFiles: this.options.onRequestFiles,
             getLoading: () => this.loading,
             getFiles: () => this.files,
-            setFiles: (f) => { this.files = f; },
+            setFiles: (f) => { this.files = f; this.options.onDraftChange?.(this.getConfig(), [...f]); },
             notifyConfigChange: () => this.notifyConfigChange(),
         });
     }
@@ -687,6 +688,10 @@ export class ChatInput implements IChatInputPresenter {
     // ================================================================
     // 发送
     // ================================================================
+
+    restoreDraft(text: string, files: File[], agentId: string): void {
+        this.restoreInput(text, agentId); this.attachmentMgr.addFiles(files);
+    }
 
     private async triggerSend(): Promise<void> {
         const text = this.textarea.value.trim();
@@ -1080,6 +1085,7 @@ export class ChatInput implements IChatInputPresenter {
 
     private notifyConfigChange(): void {
         const config = this.getConfig();
+        this.options.onDraftChange?.(config, [...this.files]);
         const settingsJson = JSON.stringify(config.settings);
         if (settingsJson === this.lastNotifiedSettings) return;
         this.lastNotifiedSettings = settingsJson;

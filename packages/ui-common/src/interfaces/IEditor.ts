@@ -98,6 +98,11 @@ export interface EditorHostContext {
 
 // ✨ [重构] 提升 fs 和 nodeId 为核心配置
 export interface EditorOptions {
+    /** A project draft is separate from Session history until first submission. */
+    sessionDraft?: import('./SessionDraftControls').SessionDraftControls;
+    /** Resolve optional host correlation for a user-initiated submission. */
+    resolveSubmission?(): Promise<import('@itookit/common').SessionSubmission | undefined>;
+
     /** Cancels view construction and preview work, never persistence. */
     signal?: AbortSignal;
     target?: EditorTarget;

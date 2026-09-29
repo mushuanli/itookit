@@ -74,7 +74,8 @@ it('rejects cross-project Session moves and protects project sections', async ()
     await expect(r.browser.fs.driver.move([folderBrowserPath(aFolder) + '/' + id],
         folderBrowserPath(bFolder))).rejects.toMatchObject({ code: 'EACCES' });
     expect((await r.sessionRepository.getManifest(id)).folder).toBe(aFolder);
-    await expect(r.browser.fs.driver.delete([folderBrowserPath(a.path) + '/@files'], { recursive: true })).rejects.toThrow();
+    await r.browser.fs.driver.delete([folderBrowserPath(a.path) + '/@files'], { recursive: true });
+    expect(await r.browser.fs.driver.exists(folderBrowserPath(a.path) + '/@files')).toBe(true);
     await expect(r.browser.fs.driver.rename(folderBrowserPath(aFolder), 'Hidden')).rejects.toThrow();
 });
 
@@ -138,4 +139,22 @@ it('adopts the legacy personal project by label and retains its identity after a
     expect((await r.projects.personal()).path).toBe('/Renamed');
     expect(JSON.parse(await root.driver.readContent('/etc/personal-project.json', { encoding: 'utf-8' })).id)
         .toBe(personal.project.id);
+});
+
+it('ignores move and delete of the fixed Files entry while leaving its contents writable', async () => {
+    const r = await setup();
+    const project = await r.projects.create('Fixed entries');
+    const prefix = folderBrowserPath(project.path), files = prefix + '/@files';
+    await r.browser.fs.driver.createFile({ parentPath: files, name: 'keep.txt', content: 'keep' });
+    expect((await r.browser.fs.driver.getNode(files))?.metadata._fixedEntry).toBe(true);
+    await r.browser.fs.driver.delete([files], { recursive: true });
+    await r.browser.fs.driver.move([files], '/');
+    expect(await r.browser.fs.driver.exists(files)).toBe(true);
+    expect(await r.browser.fs.driver.readContent(files + '/keep.txt', { encoding: 'utf-8' })).toBe('keep');
+    await r.browser.fs.driver.delete([files + '/keep.txt']);
+    expect(await r.browser.fs.driver.exists(files + '/keep.txt')).toBe(false);
+    await r.browser.fs.driver.rename(prefix, 'Renamed fixed');
+    expect(await r.browser.fs.driver.exists(folderBrowserPath('/Renamed fixed') + '/@files')).toBe(true);
+    await r.browser.fs.driver.delete([folderBrowserPath('/Renamed fixed')], { recursive: true });
+    expect((await r.projects.list()).some(item => item.project.id === project.project.id)).toBe(false);
 });

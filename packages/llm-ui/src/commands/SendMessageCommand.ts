@@ -16,12 +16,13 @@ export interface SendMessageParams {
     overrides?: ChatOverrides;
     origin?: SessionOrigin;
     historyPolicy?: HistoryPolicy;
+    submission?: import('@itookit/common').SendIntent['submission'];
 }
 
-export class SendMessageCommand extends Command<SendMessageParams> {
+export class SendMessageCommand extends Command<SendMessageParams, boolean> {
     protected name = 'Send Message';
 
-    protected async execute({ text, files, agentId, overrides, origin, historyPolicy }: SendMessageParams): Promise<void> {
+    protected async execute({ text, files, agentId, overrides, origin, historyPolicy, submission }: SendMessageParams): Promise<boolean> {
         overrides = { ...overrides,
             executionMode: overrides?.executionMode ?? this.ctx.chatInput.getConfig?.().settings?.executionMode ?? 'chat',
             ...(overrides?.flowParameters ? { flowParameters: structuredClone(overrides.flowParameters) } : {}),
@@ -46,13 +47,13 @@ export class SendMessageCommand extends Command<SendMessageParams> {
                     Toast.error(uploadErr.message || 'Failed to upload files');
                     this.ctx.chatInput.restoreInput(savedText, savedAgentId);
                     this.ctx.chatInput.setLoading(false);
-                    return;
+                    return false;
                 }
             }
 
             if (!finalText.trim()) {
                 this.ctx.chatInput.setLoading(false);
-                return;
+                return false;
             }
 
             await this.ctx.commands.execute(SessionCommand.Send, {
@@ -64,6 +65,7 @@ export class SendMessageCommand extends Command<SendMessageParams> {
                 historyPolicy,
                 sendIntent: {
                     ...createAgentSendIntent(agentId || 'default'),
+                    submission,
                     branch: {
                         mode: overrides?.branchMode ?? 'continue',
                         baseRoundId: overrides?.baseRoundId,
@@ -80,6 +82,7 @@ export class SendMessageCommand extends Command<SendMessageParams> {
                         : { kind: 'agent', agentId: agentId || 'default', mode: overrides.executionMode },
                 },
             });
+            return true;
         } catch (error: any) {
             // A rejected transport response does not prove the host rejected the send.
             // Preserve persisted rounds; only the host can reconcile accepted execution.
@@ -92,6 +95,7 @@ export class SendMessageCommand extends Command<SendMessageParams> {
             }
 
             this.ctx.chatInput.setLoading(false);
+            return false;
         }
     }
 

@@ -372,7 +372,7 @@ function assistantParent(state: SessionState): string | undefined {
 function resolveRoundId(input: TaskInput): string {
     return input.roundTarget?.mode === 'update-existing'
         ? input.roundTarget.targetRoundId
-        : input.roundTarget?.roundId ?? ulid();
+        : input.roundTarget?.roundId ?? input.sendIntent?.submission?.id ?? ulid();
 }
 
 function applyOverrides(

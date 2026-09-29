@@ -315,6 +315,7 @@ export class ConversationRunCoordinator {
                 sessionId: execution.task.sessionId,
                 taskId,
                 roundId: execution.roundId,
+                ...(execution.task.input.sendIntent?.submission ? { submission: execution.task.input.sendIntent.submission } : {}),
             },
         });
     }
@@ -612,6 +613,7 @@ function conversationRound(
     const temporary = execution.task.input.sendIntent?.retention.mode === 'temporary';
     return {
         id: execution.roundId,
+        submission: execution.task.input.sendIntent?.submission,
         sessionId: execution.task.sessionId,
         historyParentIds: parents,
         exposure: temporary ? 'internal' : 'public',

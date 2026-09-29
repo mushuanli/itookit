@@ -39,7 +39,9 @@ export abstract class BaseNodeItem {
     this.element.classList.toggle('vfs-node-item--unavailable', disabled);
     this.element.setAttribute('aria-disabled', String(disabled));
     this.element.inert = disabled;
-    if (disabled) this.element.draggable = false;
+    const fixed = this.item.metadata.custom._fixedEntry === true;
+    this.element.dataset.fixedEntry = String(fixed);
+    if (disabled || fixed) this.element.draggable = false;
   }
 
   protected shouldRerender(oldItem: VFSNodeUI, newItem: VFSNodeUI): boolean {

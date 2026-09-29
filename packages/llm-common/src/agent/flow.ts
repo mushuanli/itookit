@@ -3,7 +3,11 @@ import type { ChatExecutionMode } from '../chat';
 
 export type FlowNodeId = string;
 
+/** Opaque host correlation; the conversation layer does not interpret source policy. */
+export interface SessionSubmission { id: string; source: { kind: string; ownerId: string; id: string } }
+
 export interface SendIntent {
+    submission?: SessionSubmission;
     branch: {
         mode: 'continue' | 'fork';
         baseRoundId?: string;

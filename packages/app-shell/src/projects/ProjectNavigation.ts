@@ -1,4 +1,4 @@
-import { t } from '@itookit/common';
+import { t, FILE_BROWSER_ICONS } from '@itookit/common';
 import { folderBrowserPath, folderPathFromBrowserPath, resolveBrowserTarget, type ProjectFolder, type ProjectNavigationSnapshot, type ProjectService } from '@itookit/app-core';
 import type { VFSToolbarContext, VFSColumnsOptions, VFSNodeUI, VFSUIShell } from '@itookit/vfs-ui';
 
@@ -14,6 +14,7 @@ export class ProjectNavigation {
     readonly options: VFSColumnsOptions;
     private project?: ProjectFolder;
     private path = '/';
+    private draftActive = false;
     private session?: string;
     private family?: string;
     private contentScope?: string;
@@ -35,7 +36,7 @@ export class ProjectNavigation {
             navigationChildren: node => node.metadata.custom.projectId ? [node.id + '/folder:%40sessions'] : [],
             navigationLeaf: node => ['session', 'project-files'].includes(resolveBrowserTarget(node.id).kind),
             navigationCompareItems: (a, b) => fileFirst(a, b),
-            navigationAction: { label: t('project.createSession'), visible: path => this.projectPaths.has(path), disabled: path => this.offlinePaths.has(path),
+            navigationAction: { label: t('project.createSession'), icon: FILE_BROWSER_ICONS.newSession, active: path => this.draftActive && path === folderBrowserPath(this.project?.path), placement: 'after-first', visible: path => this.projectPaths.has(path), disabled: path => this.offlinePaths.has(path),
                 run: async path => { await this.actions.createSession(path); } },
             contentLeaf: node => resolveBrowserTarget(node.id).kind === 'session',
             contentCompareItems: (a, b) => this.family ? this.compareFamily(a, b) : undefined,
@@ -79,7 +80,8 @@ export class ProjectNavigation {
         });
     }
     cancelPending(): void { ++this.revision; }
-    async sync(path: string, reveal = false, project?: ProjectFolder): Promise<void> {
+    async sync(path: string, reveal = false, project?: ProjectFolder, draft = false): Promise<void> {
+        this.draftActive = draft;
         const revision = ++this.revision;
         const snapshot = await this.projects.sessions.navigation({ includeSessions: resolveBrowserTarget(path).kind !== 'project-files' });
         if (revision !== this.revision) return;
@@ -104,6 +106,7 @@ export class ProjectNavigation {
         const files = target.kind === 'project-files';
         if (files && reveal) this.hiddenScope = undefined;
         await this.updateContent(manifest, members.length, files, reveal, revision);
+        this.ui()?.refreshNavigationActions();
     }
     private async updateContent(manifest: import('@itookit/llm-session').SessionSummary | undefined, count: number, files: boolean, reveal: boolean, revision: number): Promise<void> {
         const project = this.project;

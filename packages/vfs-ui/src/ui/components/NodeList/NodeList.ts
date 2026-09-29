@@ -1,3 +1,4 @@
+import type { DirectoryAction } from '../../../contracts/options';
 import { ActionRunner } from '../../../interaction/ActionRunner';
 import type { VFSListSort } from '../../../contracts/types';
 import { toolbarHTML, type VFSToolbarOptions, type VFSToolbarAction } from './toolbar';
@@ -44,7 +45,7 @@ interface NodeListOptions extends BaseComponentDeps {
   instanceId: string;
   onError?: (error: unknown) => void;
   engine?: any;
-  directoryAction?: { label: string; visible(path: string): boolean; disabled?(path: string): boolean; run(path: string): Promise<void> };
+  directoryAction?: DirectoryAction;
   activateDirectories?: boolean;
   primaryAction?: { label: string; run(): Promise<void> };
   exportDirectories?: boolean;
@@ -515,14 +516,30 @@ export class NodeList extends BaseComponent<NodeListState> {
       for (const row of this.bodyEl.querySelectorAll<HTMLElement>('[data-item-type="directory"]')) {
         const path = row.dataset.itemId!;
         if (!action.visible(path) || row.querySelector(':scope > .vfs-node-item__main-row > .vfs-directory-action')) continue;
-        const button = document.createElement('button'); button.type = 'button'; button.className = 'vfs-directory-action'; button.textContent = action.label;
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'vfs-directory-action';
+        if (action.icon) {
+          const icon = document.createElement('span'); icon.className = 'vfs-directory-action__icon';
+          icon.setAttribute('aria-hidden', 'true'); icon.innerHTML = action.icon; button.append(icon);
+        }
+        const label = document.createElement('span'); label.textContent = action.label; button.append(label);
+        button.dataset.directoryAction = path;
+        button.draggable = false;
+        for (const type of ['mousedown', 'pointerdown', 'keydown', 'contextmenu', 'dragstart']) {
+          button.addEventListener(type, event => {
+            event.stopPropagation();
+            if (type === 'contextmenu' || type === 'dragstart') event.preventDefault();
+          });
+        }
         button.disabled = action.disabled?.(path) ?? false;
         button.onclick = event => { event.stopPropagation(); if (action.disabled?.(path)) return; button.disabled = true;
           void action.run(path).catch(error => { console.error('Directory action failed', error); })
             .finally(() => { button.disabled = action.disabled?.(path) ?? false; }); };
-        row.querySelector(row.classList.contains('vfs-directory-item--card') ? ':scope > .vfs-directory-item__children' : ':scope > .vfs-node-item__main-row')?.append(button);
+        const container = row.querySelector(row.classList.contains('vfs-directory-item--card') ? ':scope > .vfs-directory-item__children' : ':scope > .vfs-node-item__main-row');
+        const first = action.placement === 'after-first' ? container?.querySelector(':scope > [data-item-id]') : undefined;
+        if (first) first.after(button); else container?.append(button);
       }
     }
+    this.refreshDirectoryActionState();
     const creatorInput = this.bodyEl.querySelector<HTMLInputElement>(
       '.vfs-node-list__item-creator-input'
     );
@@ -532,6 +549,22 @@ export class NodeList extends BaseComponent<NodeListState> {
         creatorInput.value = this.fileCreation?.title;
         creatorInput.select();
       }
+    }
+  }
+
+  public refreshDirectoryActionState(): void {
+    const buttons = this.bodyEl.querySelectorAll<HTMLButtonElement>('[data-directory-action]');
+    const active = [...buttons].find(button => this.directoryAction?.active?.(button.dataset.directoryAction!));
+    if (active) {
+      const state = this.store.getState();
+      if (state.activeId) this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: null } });
+      if (state.selectedItemIds.size) this.store.dispatch({ type: 'ITEM_SELECTION_CLEAR' });
+      for (const node of this.bodyEl.querySelectorAll('.is-active, .is-selected')) node.classList.remove('is-active', 'is-selected');
+    }
+    for (const button of buttons) {
+      const selected = button === active;
+      button.classList.toggle('is-active', selected);
+      if (selected) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
     }
   }
 

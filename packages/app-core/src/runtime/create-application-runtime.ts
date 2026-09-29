@@ -1,3 +1,4 @@
+import { attachProjectDraftRecovery } from './project-draft-recovery';
 import { ProjectRemoteMountService, type RemoteFileSourceProvider } from '../projects/remote-mounts';
 import { createFileSystemView } from '@itookit/vfs-core';
 import { ModelConfigurationCommands } from '../configuration/model-commands';
@@ -274,6 +275,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
                 .catch(error => console.warn(`[Shell] Session ${event.payload.sessionId} recovery failed; writes remain blocked`, error));
         });
         cleanupFns.push(unsubscribeSessionLease);
+        cleanupFns.push(await attachProjectDraftRecovery(projects.drafts, sessionManager));
 
         // Seed the default essay-review workflow so users have a runnable example.
         await traceBoot('seedDefaultFlows', () => seedDefaultFlows(new FlowDefinitionStore(flowEngine, kernel.dagPlugins)));

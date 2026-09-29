@@ -23,7 +23,7 @@ it('creates project Sessions from the selected project and edits its files in th
     await owner.fs.driver.createFile({ parentPath: '/', name: 'notes.md', content: 'research notes' }); await owner.dispose();
     const kernel = { onChanged: () => () => {}, async *listSessions() {} };
     const sidebar = document.createElement('div'), main = document.createElement('div'); document.body.append(sidebar, main);
-    const chat = vi.fn(async (element: HTMLElement) => { element.textContent = 'chat'; return { destroy: vi.fn() }; });
+    const chat = vi.fn(async (element: HTMLElement, _options: any) => { element.textContent = 'chat'; return { destroy: vi.fn() }; });
     const file = vi.fn(async (element: HTMLElement, options: any) => { element.textContent = 'file'; return {
         destroy: vi.fn(), setTitle: vi.fn(), updateNodeId: (path: string) => { options.target.path = path; },
     }; });
@@ -40,8 +40,42 @@ it('creates project Sessions from the selected project and edits its files in th
         expect(sidebar.querySelector('.vfs-columns__navigation')?.textContent).not.toContain('notes.md');
         expect(sidebar.querySelector('.vfs-directory-item--card')).not.toBeNull();
         expect(sidebar.querySelector('[data-mode]')).toBeNull();
-        const session = await workbench.createResource();
+        const beforeDraft = (await repository.listSummaries()).length;
+        await workbench.startSessionDraft(projectPath);
+        expect((await repository.listSummaries()).length).toBe(beforeDraft);
+        expect(chat.mock.calls.at(-1)![1].sessionDraft).toBeDefined();
+        const newSession = sidebar.querySelector<HTMLButtonElement>('.vfs-directory-action[aria-current="page"]')!;
+        expect(newSession.textContent).toBe('新会话');
+        expect(newSession.querySelector('svg')).not.toBeNull();
+        newSession.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
+        expect((await projects.list()).some(item => item.project.id === other.project.id)).toBe(true);
+        await chat.mock.calls.at(-1)![1].sessionDraft.save('persisted composer');
+        await workbench.openResource(projectPath);
+        expect((await repository.listSummaries()).length).toBe(beforeDraft);
+        await workbench.restoreResource(`draft:${other.project.id}`);
+        expect(chat.mock.calls.at(-1)![1].sessionDraft.initialData).toBe('persisted composer');
+        const submittedDraft = chat.mock.calls.at(-1)![1].sessionDraft;
+        const materialized = await submittedDraft.materialize();
+        const session = (await repository.listSummaries()).find(item => item.folder === other.path + '/@sessions')!.id;
+        expect((await repository.getManifest(session)).title).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}$/);
+        const filesRow = sidebar.querySelector(`[data-item-id="${projectPath}/@files"]`)!;
+        expect(filesRow.nextElementSibling?.textContent).toBe('新会话');
         expect((await repository.getManifest(session)).folder).toBe(other.path + '/@sessions');
+        await workbench.startSessionDraft(projectPath);
+        expect((await chat.mock.calls.at(-1)![1].sessionDraft.materialize()).resumeOnly).toBe(true);
+        expect((await repository.listSummaries()).length).toBe(beforeDraft + 1);
+        const source = materialized.submission;
+        expect(source).toMatchObject({ source: { kind: 'project-draft', ownerId: other.project.id } });
+        await repository.writeDocument(session, `round-${source.id}.json`, JSON.stringify({
+            id: source.id, sessionId: session, submission: source, executions: [{ taskId: 'first-task', role: 'primary' }],
+        }));
+        await repository.updateManifest(session, { rootRoundId: source.id, currentHead: source.id, branches: { main: source.id } });
+        const selectedBeforePromotion = workbench.getActiveResourceId();
+        await projects.drafts.reconcile(other.project.id);
+        expect(workbench.getActiveResourceId()).toBe(selectedBeforePromotion);
+        await workbench.startSessionDraft(projectPath);
+        expect(chat.mock.calls.at(-1)![1].sessionDraft).toMatchObject({ initialData: '' });
+        expect((await repository.listSummaries()).length).toBe(beforeDraft + 1);
         expect(sidebar.querySelector(`[data-item-id="${folderBrowserPath(other.path + '/@sessions')}/${session}"]`)).not.toBeNull();
         await workbench.openResource(projectPath + '/@files/notes.md');
         expect(file.mock.calls.at(-1)?.[1].initialContent).toBe('research notes');
@@ -145,7 +179,7 @@ it('restores a bookmark inside an unreachable remote project without aborting bo
         await workbench.start();
         await expect(workbench.restoreResource(folderBrowserPath(remote.path))).resolves.toBeUndefined();
         expect(main.inert).not.toBe(true);
-        const create = Array.from(sidebar.querySelectorAll<HTMLButtonElement>('.vfs-directory-action')).find(button => button.textContent === '新建会话');
+        const create = Array.from(sidebar.querySelectorAll<HTMLButtonElement>('.vfs-directory-action')).find(button => button.textContent === '新会话');
         expect(create?.disabled).toBe(true);
         await expect(workbench.createResource({ parentPath: folderBrowserPath(remote.path) })).rejects.toThrow();
         await workbench.openResource(folderBrowserPath(remote.path) + '/@files');

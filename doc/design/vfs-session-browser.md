@@ -259,3 +259,27 @@ Session browser 与项目/家族导航优先使用 `ISessionRepository.listSumma
 工作区经可选 `WorkspaceController.setVisible` 接收 nav 可见性变化。隐藏期间停止视图专用刷新与后续读取，返回时刷新目录并恢复尚未完成的目标；Kernel 后台任务照常执行。项目工作台的新资源选择立即使旧加载失效，中间排队目标不执行，已经开始的不可取消 I/O 在后台收尾并延迟释放上下文。通用文件视图的过期加载不再更新当前编辑器。
 
 隐藏时调用编辑器的可选 `flushPendingSave`，切换资源时等待旧编辑器完成保存。MDX 保存失败会拒绝销毁，保留原编辑内容及读写能力供重试；取消读取不取消保存。此处保留的是内存中的编辑器，尚未增加崩溃恢复草稿。
+
+### 项目内的新会话草稿
+
+项目卡片的“新会话”按钮位于“文件”入口之后。点击只打开复用 ChatInput 的项目草稿，不创建 Session；未发送的草稿不会出现在会话列表。每个项目使用 MindOS VFS 内 `/var/lib/projects/<projectId>/draft.seq` 的 `draft` 记录，保存文字、Agent、聊天选项与附件引用；真实附件字节独立存放在 `/var/lib/projects/<projectId>/draft-attachments/<draftId>/<attachmentId>`。项目重命名不影响草稿身份；Web 与 Tauri 共用 VFS 存储，不访问宿主系统 `/var`。草稿路由 `draft:<projectId>` 支持刷新后恢复，项目内再次点击“新会话”也会恢复。
+
+输入及选项、附件变更立即排队保存，切换页面等待保存完成；自动保存正常时保持普通空会话界面，失败时显示提示；尚未保存时浏览器离开提示作为辅助保护。已提交存储的草稿可恢复；强制终止发生在异步提交之前仍可能丢失最后一次输入，不承诺同步磁盘落盘。CAS 拒绝旧窗口覆盖新草稿；保存失败保留输入、提示备份，不继续发送。
+
+首次发送走项目草稿转正用例。每个项目的 `draft.seq` 中 `draft` 记录含 `version/id/state/data`，当前记录的 `id` 即项目的当前草稿指针：
+
+- `draft`：可编辑，未创建真实 Session。
+- `submitting`：已保存预留 `sessionId`、`submissionId` 与日期时间标题，随后幂等创建该 Session 并提交首条消息。队列接收成功不代表持久接受，不清空或替换草稿。
+- `promoted`：保存在 `promotion/<draftId>` 回执中，包含原草稿、Session、提交 ID 与下一份草稿 ID；同一事务将当前 `draft` 换成新的空白 `draft` 记录。旧编辑器的 CAS 游标不能覆盖新草稿。
+
+提交显式携带 `SendIntent.submission = { id, source: { kind: 'project-draft', ownerId: projectId, id: draftId } }`；首条 Round 使用 `submissionId` 作为 ID 并保存相同来源。只有准确匹配的 Round、execution 引用和已提交历史索引持久化后，`execution_task_projected` 才驱动项目服务核对并转正。普通创建、导入、CLI、子会话和 Flow 创建均不携带该来源，不会补建草稿。对已预留 Session 的人工重试会解析其当前草稿来源；转正后后续消息不再携带旧来源。
+
+`ProjectDraftService` 在提交事务完成后发布 `project.draftPromoted`（含 `projectId/draftId/sessionId/submissionId/nextDraftId`）。UI 仅刷新导航，不执行补建、不切换到新草稿、不抢走当前正式会话的焦点；固定“新会话”入口继续位于“文件”下方。刷新或重启后服务扫描持久记录恢复漏掉的转正，打开项目草稿时也先核对；重复事件、多窗口恢复仅生成一个后继草稿。通知不是持久真相，也不承诺跨进程实时广播。
+
+失败或结果未知时保留原草稿与提交身份，不自动重放消息；重开关联草稿后提交仅打开原 Session 供用户核对。普通编辑器内明确重试可沿用尚未被接受的提交身份。用户可在标题栏更多菜单“清空草稿”解除未决关联，已有真实 Session 不被删除。旧格式草稿首次读取时迁移；旧版只有 Session ID、没有提交 ID 的记录不能推断其接受结果，继续保留人工核对行为。断线项目仍禁止新会话；原有 Session 继续可查看。
+
+项目的“文件”引用与“新会话”操作是固定入口，生命周期跟随项目。“文件”入口标记 `_fixedEntry`，单项与批量 move/delete 忽略该引用，底层投影同样防护；不影响入口内实际文件的正常移动和删除。“新会话”不是文件节点，键盘、拖动和菜单事件不冒泡触发所属项目的操作。
+
+新会话复用普通会话的标题栏、欢迎区与底部 ChatInput 布局，不显示独立草稿说明页；标题只读为“新会话”，首次发送后替换为真实会话日期时间标题。
+
+机制/策略隔离、目录和对外端口详见 [项目会话草稿架构](project-session-drafts.md)。

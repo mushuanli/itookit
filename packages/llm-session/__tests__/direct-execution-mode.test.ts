@@ -106,3 +106,20 @@ it.each(['agent', 'chat'] as const)('resolves configured MCP profiles only for %
         expect(policy.toolIds).toEqual([]);
     } finally { kernel.dispose(); await kernel.waitIdle(); await manager.dispose(); }
 });
+
+it('persists explicit project-draft provenance before emitting the projected notification', async () => {
+    const source = { id: 'submission-a', source: { kind: 'project-draft', ownerId: 'p', id: 'draft-a' } };
+    const events: unknown[] = [], writes: unknown[] = [];
+    const coordinator = new ConversationRunCoordinator({ eventBus: { emitGlobal: (event: unknown) => {
+        expect(writes).toHaveLength(1); events.push(event);
+    } } } as never);
+    const execution = { roundId: source.id, contextFiles: [],
+        task: { sessionId: 's', input: { text: 'hello', sendIntent: { submission: source, retention: { mode: 'persistent' }, execution: { kind: 'agent', agentId: 'default' } } } },
+        log: { readRound: async () => null, appendExpected: async (_ref: string, round: unknown) => { writes.push(round); } },
+    };
+    await (coordinator as any).startRound(execution, { branchRef: 'main', branchHead: null }, 'task-a');
+    (coordinator as any).projectRun(execution, 'task-a');
+    expect(writes[0]).toMatchObject({ id: 'submission-a', sessionId: 's', submission: source,
+        executions: [{ taskId: 'task-a', role: 'primary' }] });
+    expect(events[0]).toMatchObject({ type: 'execution_task_projected', payload: { submission: source, roundId: 'submission-a' } });
+});

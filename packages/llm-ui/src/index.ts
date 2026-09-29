@@ -1,3 +1,4 @@
+import { SessionDraftEditor } from './shell/drafts/SessionDraftEditor';
 import { normalizeEditorOptions } from '@itookit/ui-common';
 // @file: llm-ui/index.ts
 
@@ -89,6 +90,10 @@ export const createLLMFactory = (
 
     return async (container: HTMLElement, options: EditorOptions) => {
         options = normalizeEditorOptions(options);
+        if (options.sessionDraft) {
+            const draft = new SessionDraftEditor(container, agentService, options, deps.ocr);
+            await draft.init(container); return draft;
+        }
         let pendingCreations = pendingByContainer.get(container);
         if (!pendingCreations) { pendingCreations = new Map(); pendingByContainer.set(container, pendingCreations); }
         if (options.target?.kind !== 'session') throw new Error('Chat editor requires a Session target');

@@ -41,6 +41,7 @@ export function fileTypeIcon(name: string, directory = false): string {
 
 /** Small navigation controls share the file browser's line weight and dimensions. */
 export const FILE_BROWSER_ICONS = {
+    newSession: svg('<path d="M21 11a8 8 0 0 1-8 8H7l-4 3V7a4 4 0 0 1 4-4h6"/><path d="M19 2v8m-4-4h8M7 10h5m-5 4h8"/>', 'new-session'),
     root: svg('<path d="M3 7h18v13H3zM3 7V4h6l3 3M8 12h8m-8 4h5"/>', 'navigation'),
     up: svg('<path d="m6 10 6-6 6 6M12 4v16"/>', 'navigation'),
     browse: svg('<circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/>', 'navigation'),

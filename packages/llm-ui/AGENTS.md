@@ -64,3 +64,5 @@ Flow Session 标题栏「流程输出」挂接当前 Session 的持久 Run，显
 Skill 面板区分指令加载与 Agent 工具授权，配置入口通过 Agent 的真实资源路径导航；Flow 模式导航到节点配置。授权计数表示配置声明，不能替代运行时目录权限和工具审批。见 [能力配置与执行](../../doc/design/tool-skill-mcp-capabilities.md)。
 
 ChatInput 设置按对话、OCR、高级分组；高级项默认折叠。Skills 和授权管理不嵌入设置，显式 `/skills` 打开独立管理器。OCR 只选择连接并提供当前识别提示词编辑入口。
+
+项目新会话 UI 位于 `src/shell/drafts/`：编辑器只消费 ui-common 的 `SessionDraftControls`，输入序列化与保存队列独立。materialize 返回明确的编辑器/提交标识/恢复行为，不能修改宿主 options 传递状态；项目转正策略、持久化和接受判定不进入 UI。

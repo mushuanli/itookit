@@ -22,6 +22,7 @@ export class DragDropHandler {
 
   handleDragStart = (event: DragEvent): void => {
     const itemEl = (event.target as Element).closest<HTMLElement>('[data-item-id]');
+    if (itemEl?.dataset.fixedEntry === 'true') { event.preventDefault(); return; }
     if (!itemEl || !event.dataTransfer) return;
 
     const itemId = itemEl.dataset.itemId!;

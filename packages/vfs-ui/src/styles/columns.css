@@ -33,7 +33,7 @@
 .vfs-directory-item--card > .vfs-directory-item__children { position: relative; padding: 6px 6px 6px 32px; margin: 0; border: 0; border-top: 1px solid var(--mm-border-color, #e5e7eb); background: var(--mm-bg-color, #fff); }
 .vfs-directory-item--card > .vfs-directory-item__children::before { content: ''; position: absolute; left: 27px; top: 10px; bottom: 10px; width: 1px; background: var(--mm-border-color, #e5e7eb); }
 .vfs-directory-item--card > .vfs-directory-item__children > .vfs-node-item > .vfs-node-item__main-row > .vfs-node-item__content { margin: 2px 0; border-radius: 6px; }
-.vfs-directory-item--card > .vfs-directory-item__children > .vfs-directory-action { display: block; width: 100%; padding: 9px 12px; text-align: left; border: 0; background: transparent; color: var(--primary-color, #4f46e5); cursor: pointer; }
+.vfs-directory-item--card > .vfs-directory-item__children > .vfs-directory-action { display: flex; align-items: center; box-sizing: border-box; width: 100%; min-height: 36px; margin: 0; padding: var(--spacing-2) var(--spacing-3) var(--spacing-2) 24px; text-align: left; border: 0; border-left: 3px solid transparent; border-radius: 6px; background: transparent; color: var(--text-primary, #334155); font: inherit; font-weight: 500; line-height: 20px; cursor: pointer; }
 .vfs-directory-item__description { display: block; font-size: 11px; color: var(--text-secondary, #64748b); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vfs-directory-item__header:focus-visible { outline: 2px solid var(--primary-color, #6366f1); outline-offset: -2px; }
 .vfs-columns .vfs-directory-item__title-container { flex-direction: column; align-items: flex-start; gap: 2px; }
@@ -43,3 +43,9 @@
 .vfs-directory-item__menu { flex: 0 0 28px; align-self: center; height: 28px; margin-right: 6px; border: 0; border-radius: 5px; background: transparent; color: var(--text-secondary, #64748b); font-size: 20px; cursor: pointer; }
 .vfs-directory-item__menu:hover { background: var(--vfs-active-bg, #e8edff); }
 .vfs-directory-item__menu:focus-visible { outline: 2px solid var(--primary-color, #6366f1); }
+
+.vfs-directory-action__icon { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex-shrink: 0; margin-right: var(--spacing-2); color: var(--primary-color, #4f46e5); }
+.vfs-directory-action__icon svg { width: 18px; height: 18px; }
+.vfs-directory-item--card > .vfs-directory-item__children > .vfs-directory-action:hover:not(:disabled) { background: var(--mm-sidebar-bg, #f1f5f9); }
+
+.vfs-directory-item--card > .vfs-directory-item__children > .vfs-directory-action.is-active { background: var(--vfs-active-bg, #e8edff); color: var(--primary-color, #4f46e5); border-left-color: currentColor; }

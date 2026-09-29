@@ -221,7 +221,13 @@ class BrowserBackend implements IStorageBackend {
             const folder = folders.find(item => item.path === folderPath);
             return folder ? this.folderNode(folder) : null;
         }
-        if (target.kind === 'project-files') return this.statFiles(path, target);
+        if (target.kind === 'project-files') {
+            if (target.path === '/') {
+                const project = await this.deps.projects?.forFolder(target.folder);
+                return project ? this.fileEntry(path, target.folder) : null;
+            }
+            return this.statFiles(path, target);
+        }
         let manifest;
         try { manifest = await this.deps.repository.getManifest(target.sessionId); }
         catch (error) { if (error instanceof FSError && error.code === 'ENOENT') return null; throw error; }
@@ -299,7 +305,7 @@ class BrowserBackend implements IStorageBackend {
     private async fileEntry(path: string, folder: string | null): Promise<FSNode> {
         const project = await this.deps.projects?.forFolder(folder);
         const offline = !!project && !!this.deps.projects?.remoteMounts?.projectOffline(project.project.id);
-        return { ...this.node(path, t('project.files'), true), metadata: { _disabled: offline, _readOnly: offline,
+        return { ...this.node(path, t('project.files'), true), metadata: { _fixedEntry: true, _disabled: offline, _readOnly: offline,
             ...(offline ? { navigationDescription: t('remote.projectOffline') } : {}) } };
     }
     private async assertAvailable(path: string): Promise<void> {
@@ -373,6 +379,8 @@ class BrowserBackend implements IStorageBackend {
         throw new FSError('EROFS', 'Only Session folders and Session files are writable');
     }
     async delete(path: string): Promise<void> {
+        const entry = resolveBrowserTarget(path);
+        if (entry.kind === 'project-files' && entry.path === '/') return;
         await this.assertAvailable(path);
         const target = resolveBrowserTarget(path);
         if (target.kind === 'folder') {
@@ -399,6 +407,8 @@ class BrowserBackend implements IStorageBackend {
         throw new FSError('EROFS', 'Tasks are read-only');
     }
     async rename(from: string, to: string): Promise<void> {
+        const entry = resolveBrowserTarget(from);
+        if (entry.kind === 'project-files' && entry.path === '/') return;
         await this.assertAvailable(from); await this.assertAvailable(parentBrowserPath(to));
         const targetPath = to.startsWith('/') ? to : `${parentBrowserPath(from)}/${to}`;
         const source = resolveBrowserTarget(from);

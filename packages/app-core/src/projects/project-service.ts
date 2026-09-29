@@ -1,3 +1,5 @@
+import { ProjectDraftStore } from './drafts/store';
+import { ProjectDraftService } from './drafts/service';
 import type { ProjectRemoteMountService } from './remote-mounts';
 import { ProjectSessions } from './project-sessions';
 import { randomUUID, t, translatedValues } from '@itookit/common';
@@ -15,8 +17,12 @@ export class ProjectService {
     private personalPending?: Promise<ProjectFolder>;
     private remoteCreation: Promise<unknown> = Promise.resolve();
     readonly sessions: ProjectSessions;
+    readonly drafts: ProjectDraftService;
     constructor(private readonly root: IFileSystem, private readonly repository: ISessionRepository,
-        private readonly directories: DirectoryMountService, private readonly files: SessionFilesService) { this.sessions = new ProjectSessions(repository); }
+        private readonly directories: DirectoryMountService, private readonly files: SessionFilesService) {
+        this.sessions = new ProjectSessions(repository);
+        this.drafts = new ProjectDraftService(id => new ProjectDraftStore(root, id), repository, async () => (await this.list()).map(item => item.project.id));
+    }
 
     get canSelectDirectory(): boolean { return this.directories.canSelectHost; }
     chooseDirectory() { return this.directories.chooseDirectory(); }
@@ -165,6 +171,7 @@ export class ProjectService {
         return parent;
     }
     async sessionFolder(project: ProjectFolder): Promise<string> {
+        await this.drafts.ensure(project.project.id);
         const path = project.path + '/@sessions';
         await this.repository.createFolder(path);
         return path;

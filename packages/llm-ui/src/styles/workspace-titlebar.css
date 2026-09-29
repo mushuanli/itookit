@@ -405,3 +405,5 @@
 .llm-workspace-titlebar__primary:empty { display: none; }
 .llm-workspace-titlebar__primary .llm-workspace-titlebar__btn { flex-shrink: 0; }
 .llm-branch-indicator-bar, .llm-workspace-status { flex-shrink: 0; }
+
+.llm-workspace-status[hidden] { display: none; }
