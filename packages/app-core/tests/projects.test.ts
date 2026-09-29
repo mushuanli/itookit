@@ -158,3 +158,31 @@ it('ignores move and delete of the fixed Files entry while leaving its contents 
     await r.browser.fs.driver.delete([folderBrowserPath('/Renamed fixed')], { recursive: true });
     expect((await r.projects.list()).some(item => item.project.id === project.project.id)).toBe(false);
 });
+
+it('keeps favorites aligned with committed file moves, subtree deletion and Session changes', async () => {
+    const r = await setup(), project = (await r.projects.current())!;
+    const favorites = r.projects.favorites, id = project.project.id;
+    let owner = await r.projects.openWorkspace(project.path);
+    await owner.fs.driver.createFile({ parentPath: '/workspace/docs', name: 'note.md', content: 'note', recursive: true });
+    await owner.fs.driver.createDirectory({ parentPath: '/workspace', name: 'archive' });
+    await favorites.toggle(id, { kind: 'file', path: '/workspace/docs', nodeType: 'directory' }, 'docs');
+    await favorites.toggle(id, { kind: 'file', path: '/workspace/docs/note.md', nodeType: 'file' }, 'note');
+    await owner.fs.driver.rename('/workspace/docs', 'renamed');
+    await owner.dispose();
+    expect((await favorites.list(id)).map(item => item.target)).toEqual([
+        { kind: 'file', path: '/workspace/renamed', nodeType: 'directory' },
+        { kind: 'file', path: '/workspace/renamed/note.md', nodeType: 'file' },
+    ]);
+    owner = await r.projects.openWorkspace(project.path);
+    await owner.fs.driver.move(['/workspace/renamed'], '/workspace/archive'); await owner.dispose();
+    expect((await favorites.list(id))[1].target).toMatchObject({ path: '/workspace/archive/renamed/note.md' });
+    owner = await r.projects.openWorkspace(project.path);
+    await owner.fs.driver.delete(['/workspace/archive'], { recursive: true }); await owner.dispose();
+    expect(await favorites.list(id)).toEqual([]);
+    const session = await r.sessionRepository.createSession('Old title', await r.projects.sessionFolder(project));
+    await favorites.toggle(id, { kind: 'session', sessionId: session }, 'Old title');
+    await r.sessionRepository.updateManifest(session, { title: 'New title' });
+    expect((await favorites.list(id))[0].title).toBe('New title');
+    await r.sessionRepository.deleteSession(session);
+    expect(await favorites.list(id)).toEqual([]);
+});

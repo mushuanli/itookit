@@ -5,6 +5,11 @@
 // Interpolation syntax:   {param}  e.g. '已导入 {count} 个 Skill'
 
 export const zhCN = {
+    'project.favorites': '收藏夹',
+    'project.favoriteSession': '会话',
+    'remote.enableExecution': '启用远程命令',
+    'remote.disableExecution': '禁用远程命令',
+    'remote.executionUnavailable': '该远程文件系统尚未启用命令执行。',
     'vfs.favorites.add': '收藏',
     'vfs.favorites.remove': '取消收藏',
     'vfs.action.confirmQuickDelete': '再次点击删除',

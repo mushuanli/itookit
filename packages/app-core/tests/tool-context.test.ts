@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createVFS, MemoryBackend, type IFileSystem } from '@itookit/vfs-core';
+import { createVFS, createFileSystemView, MemoryBackend, type IFileSystem } from '@itookit/vfs-core';
 import { createVFSToolContext } from '../src/vfs/tool-context';
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -75,5 +75,29 @@ describe('createVFSToolContext.stat', () => {
 
         expect(await context.stat?.('child.yml')).toBe('file');
         expect(await context.stat?.('/work/child.yml')).toBe('file');
+    });
+});
+
+
+describe('workspace mount namespace', () => {
+    it('resolves sibling paths while preserving mount permissions and source confinement', async () => {
+        const source = await openFs();
+        await source.driver.createFile({ name: 'main.txt', parentPath: '/project', recursive: true, content: 'project' });
+        await source.driver.createFile({ name: 'guide.txt', parentPath: '/reference', recursive: true, content: 'reference' });
+        await source.driver.createFile({ name: 'secret', parentPath: '/', content: 'private' });
+        const fs = createFileSystemView({ viewId: 'test-workspace', mounts: [
+            { mountId: 'workspace', at: '/workspace', fs: source, root: '/project', access: 'rw' },
+            { mountId: 'reference', at: '/reference', fs: source, root: '/reference', access: 'ro' },
+        ] });
+        cleanup.push(() => fs.dispose());
+        const tools = createVFSToolContext({ fs, cwd: '/workspace' });
+        expect(await tools.readFile('./main.txt')).toBe('project');
+        expect(await tools.readFile('../reference/guide.txt')).toBe(await tools.readFile('/reference/guide.txt'));
+        await tools.writeFile('./main.txt', 'updated');
+        expect(await source.driver.readContent('/project/main.txt', { encoding: 'utf-8' })).toBe('updated');
+        await expect(tools.writeFile('../reference/guide.txt', 'denied')).rejects.toThrow();
+        await expect(tools.readFile('../../secret')).rejects.toThrow();
+        await expect(tools.readFile('file:///secret')).rejects.toThrow();
+        expect(await source.driver.readContent('/reference/guide.txt', { encoding: 'utf-8' })).toBe('reference');
     });
 });

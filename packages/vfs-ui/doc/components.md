@@ -133,7 +133,7 @@ VFSNodeUI 是高级文件视图的展示模型，保留原 metadata/content 字�
 
 - `handlers/RowMutationPort.ts`：行内删除和拖拽的命令适配器；执行时重新解析节点，拒绝失效目标，明确宿主删除与普通文件删除的路由。
 - `DirectoryActions.ts`：目录按钮的 DOM、锚点、激活展示与进行中状态；通过 `ActionRunner` 执行并报告错误，刷新列表不会重新开放仍在执行的按钮。
-- `utils/row-policy.ts` 的 `allowsRowAction`：单项/批量内置操作的统一权限判断。宿主菜单可隐藏或替换呈现，但不能重新开放只读或固定条目的禁用内置操作。
+- `utils/row-policy.ts` 的 `allowsRowAction`：单项/批量内置操作的统一权限判断。宿主菜单可隐藏或替换呈现；未提供执行回调的内置命令不能绕过只读或固定条目策略。显式 `onClick` 是宿主生命周期端口（例如删除只读工具箱投影所代表的资源），由宿主授权并执行，不回退到通用文件命令。
 - `ContextMenuHandler`：菜单呈现和调度，在执行前读取最新节点和菜单配置；底层资源权限仍由 VFS 校验。
 - `ColumnState.commands()`：投影列的命令转发必须返回原命令的 Promise，使上层执行器能够等待完成、合并重复动作及报告失败。
 

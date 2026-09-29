@@ -144,6 +144,10 @@ it('shares named connections across distinct remote roots and reuses the same pr
         await reloaded.init(); expect(reloaded.findRemoteProject(connection, '/docs/a')).toBe(a.project.id); await reloaded.dispose();
         const browser = await createSessionBrowser({ repository: runtime.sessionRepository, files: runtime.sessionFiles, kernel: runtime.kernel.kernel, projects: runtime.projects });
         try {
+            const projectEntries = await browser.fs.driver.getChildren(folderBrowserPath(a.path));
+            expect(projectEntries.find(node => node.name === '@files')?.metadata._readOnly).toBe(true);
+            expect((await browser.fs.driver.getChildren(folderBrowserPath(a.path) + '/@files')).every(node => node.metadata._readOnly === true)).toBe(true);
+            expect((await browser.fs.driver.getNode(folderBrowserPath(a.path)))?.metadata._readOnly).toBe(false);
             await browser.fs.driver.delete([folderBrowserPath(b.path)], { recursive: true });
             expect(remote.findRemoteProject(connection, '/docs/b')).toBeUndefined();
             const recreated = await runtime.projects.createRemote('B again', null, connection, '/docs/b');

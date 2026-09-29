@@ -1,4 +1,4 @@
-import { folderBrowserPath, folderPathFromBrowserPath, resolveBrowserTarget, type ProjectTarget, type ProjectService } from '@itookit/app-core';
+import { projectRelativePath, folderBrowserPath, folderPathFromBrowserPath, resolveBrowserTarget, type ProjectTarget, type ProjectService } from '@itookit/app-core';
 
 /** Sidebar encoding stops at the presentation boundary. */
 export async function archiveTarget(path: string, projects: ProjectService): Promise<ProjectTarget> {
@@ -7,7 +7,7 @@ export async function archiveTarget(path: string, projects: ProjectService): Pro
     if (target.kind === 'project-files') {
         const project = await projects.forFolder(target.folder);
         if (!project) throw new Error('Project not found');
-        return { kind: 'file', projectId: project.project.id, path: target.path };
+        return { kind: 'file', projectId: project.project.id, path: projectRelativePath(target.path) };
     }
     if (target.kind === 'folder') {
         const folder = folderPathFromBrowserPath(path), project = await projects.forFolder(folder);

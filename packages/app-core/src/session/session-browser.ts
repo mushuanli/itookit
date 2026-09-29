@@ -1,91 +1,31 @@
+import { FOLDER_SEGMENT_PREFIX, isFolderSegment, isFileTarget, filesBrowserPrefix, parentBrowserPath, browserName,
+    resolveBrowserTarget, browserTargetFolder, folderBrowserPath, folderPathFromBrowserPath, type FileTarget, type BrowserTarget } from './browser-routes';
+export { resolveBrowserTarget, browserTargetFolder, folderBrowserPath, folderPathFromBrowserPath } from './browser-routes';
+export type { BrowserTarget } from './browser-routes';
+import { WORKSPACE_PATH, projectRelativePath } from '../vfs/workspace-namespace';
 import { sessionFamilyRoots } from '../projects/session-family';
-import { createFileSystemSource, FSError, normalizeVirtualPath, type FSNode, type IStorageBackend, type IFileSystem } from '@itookit/vfs-core';
-import { t, ENTITY_ICONS } from '@itookit/common';
+import { createFileSystemSource, FSError, type FSNode, type IStorageBackend, type IFileSystem } from '@itookit/vfs-core';
+import { t, ENTITY_ICONS, ACTION_ICONS, fileTypeIcon } from '@itookit/common';
 import type { ISessionRepository, SessionFolder } from '@itookit/llm-session';
 import type { EventEnvelope, Kernel, TaskRecord } from '@itookit/durable-kernel';
 import { taskStat } from '@itookit/durable-kernel';
 import type { SessionFilesService } from '../vfs/session-files';
 import { exportSessionBundle, importSessionBundle, isSessionBundle } from './session-bundle';
+import type { ProjectRemoteMount } from '../projects/remote-mounts';
 import type { ProjectService } from '../projects/project-service';
 import { SessionLifecycleService } from './session-lifecycle';
 
-export type BrowserTarget =
-    | { kind: 'folder'; path: string }
-    | { kind: 'project-files'; folder: string; path: string }
-    | { kind: 'session'; sessionId: string }
-    | { kind: 'tasks'; sessionId: string }
-    | { kind: 'task'; sessionId: string; taskId: string }
-    | { kind: 'files'; sessionId: string; path: string };
+/**
+ * Project-owned state a file listing or file projection needs. Resolved once per call,
+ * never per node: the project's remote grants plus an optional favorite lookup
+ * (project file paths only).
+ */
+interface FileProjection {
+    mounts: readonly ProjectRemoteMount[];
+    offline: boolean;
+    favorite(path: string, type: 'file' | 'directory'): boolean;
+}
 
-type FileTarget = Extract<BrowserTarget, { kind: 'files' | 'project-files' }>;
-function isFileTarget(target: BrowserTarget): target is FileTarget { return target.kind === 'files' || target.kind === 'project-files'; }
-
-const FOLDER_SEGMENT_PREFIX = 'folder:';
-
-function isFolderSegment(segment: string): boolean {
-    return segment.startsWith(FOLDER_SEGMENT_PREFIX) && segment.length > FOLDER_SEGMENT_PREFIX.length;
-}
-export function folderBrowserPath(folder: string | null | undefined): string {
-    if (!folder || folder === '/') return '';
-    return '/' + folder.split('/').filter(Boolean).map(segment => FOLDER_SEGMENT_PREFIX + encodeURIComponent(segment)).join('/');
-}
-function browserFolderPath(path: string): string | null {
-    const segments = normalizeVirtualPath(path).slice(1).split('/').filter(Boolean);
-    const prefix: string[] = [];
-    for (const segment of segments) {
-        if (!isFolderSegment(segment)) break;
-        prefix.push(segment);
-    }
-    return prefix.length ? '/' + prefix.join('/') : null;
-}
-export function folderPathFromBrowserPath(path: string): string | null {
-    const prefix = browserFolderPath(path);
-    if (!prefix) return null;
-    return '/' + prefix.slice(1).split('/').filter(Boolean).map(segment => decodeURIComponent(segment.slice(FOLDER_SEGMENT_PREFIX.length))).join('/');
-}
-function sessionBrowserPrefix(path: string): string {
-    const segments = normalizeVirtualPath(path).slice(1).split('/').filter(Boolean);
-    let index = 0;
-    while (index < segments.length && isFolderSegment(segments[index])) index++;
-    return '/' + segments.slice(0, index + 1).join('/');
-}
-function filesBrowserPrefix(path: string): string {
-    const target = resolveBrowserTarget(path);
-    return target.kind === 'project-files' ? `${folderBrowserPath(target.folder)}/@files` : `${sessionBrowserPrefix(path)}/files`;
-}
-function parentBrowserPath(path: string): string {
-    const normalized = normalizeVirtualPath(path);
-    const index = normalized.lastIndexOf('/');
-    return index <= 0 ? '/' : normalized.slice(0, index);
-}
-function browserName(path: string): string {
-    const segment = normalizeVirtualPath(path).split('/').filter(Boolean).pop() ?? '';
-    return isFolderSegment(segment) ? decodeURIComponent(segment.slice(FOLDER_SEGMENT_PREFIX.length)) : segment;
-}
-export function resolveBrowserTarget(path: string): BrowserTarget {
-    const normalized = normalizeVirtualPath(path);
-    if (normalized === '/') return { kind: 'folder', path: '/' };
-    const segments = normalized.slice(1).split('/').filter(Boolean);
-    let index = 0;
-    while (index < segments.length && isFolderSegment(segments[index])) index++;
-    const folderPrefix = '/' + segments.slice(0, index).join('/');
-    if (index === segments.length) return { kind: 'folder', path: folderPrefix };
-    if (segments[index] === '@files' && index > 0) return { kind: 'project-files',
-        folder: folderPathFromBrowserPath(folderPrefix)!, path: '/' + segments.slice(index + 1).join('/') };
-    const sessionId = segments[index];
-    if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) throw new FSError('EINVAL', 'Invalid Session browser path');
-    const area = segments[index + 1];
-    const rest = segments.slice(index + 2);
-    if (!area) return { kind: 'session', sessionId };
-    if (area === 'files') {
-        const filePath = '/' + rest.join('/');
-        return { kind: 'files', sessionId, path: filePath };
-    }
-    if (area === 'tasks' && !rest.length) return { kind: 'tasks', sessionId };
-    if (area === 'tasks' && rest.length === 1 && rest[0] === '@more') return { kind: 'tasks', sessionId };
-    if (area === 'tasks' && rest.length === 1 && /^[a-zA-Z0-9_-]+$/.test(rest[0])) return { kind: 'task', sessionId, taskId: rest[0] };
-    throw new FSError('ENOENT', 'Session browser entry not found');
-}
 export function taskSummary(task: TaskRecord) {
     // `control.acknowledged` is false while a cancel is still waiting for the external stop to
     // be confirmed, so an observer can tell "requested" apart from "really stopped".
@@ -159,15 +99,44 @@ class BrowserBackend implements IStorageBackend {
     private async withFiles<T>(target: FileTarget, fn: (fs: import('@itookit/vfs-core').IFileSystem) => Promise<T>): Promise<T> {
         if (target.kind === 'project-files') {
             if (!this.deps.projects) throw new FSError('ENOENT', 'Projects unavailable');
-            const owner = await this.deps.projects.openFiles(target.folder);
+            const owner = await this.deps.projects.openWorkspace(target.folder);
             try { return await fn(owner.fs); } finally { await owner.dispose(); }
         }
         const owner = await this.deps.files.acquireFiles(target.sessionId);
         try { return await fn(owner.context.fs); } finally { await owner.release(); }
     }
-    private async mapped(fs: import('@itookit/vfs-core').IFileSystem, node: FSNode, prefix: string): Promise<FSNode> {
+    /**
+     * Project-owned state a file listing needs. Resolved once per listing: the project,
+     * its remote grants and — for project file paths — the favorite lookup. Favorites are
+     * listed first so the cache-backed query and Session title reconciliation are current.
+     */
+    private async fileProjection(folder: string | null, withFavorites: boolean): Promise<FileProjection | undefined> {
+        const projects = this.deps.projects;
+        if (!projects) return undefined;
+        const project = await projects.forFolder(folder);
+        if (!project) return undefined;
+        const id = project.project.id;
+        const projection: FileProjection = { mounts: projects.remoteMounts?.list(id) ?? [],
+            offline: !!projects.remoteMounts?.projectOffline(id), favorite: () => false };
+        if (!withFavorites) return projection;
+        await projects.favorites.list(id);
+        return { ...projection, favorite: (path, type) => projects.favorites.has(id, { kind: 'file', path, nodeType: type }) };
+    }
+    /** Folder that owns a Session or project file listing. */
+    private async filesFolder(target: FileTarget): Promise<string | null> {
+        if (target.kind === 'project-files') return target.folder;
+        return (await this.deps.repository.getManifest(target.sessionId)).folder ?? null;
+    }
+    /** Favorite state only exists for project file paths, never for Session-owned files. */
+    private projectProjection(target: FileTarget): Promise<FileProjection | undefined> {
+        return target.kind === 'project-files' ? this.fileProjection(target.folder, true) : Promise.resolve(undefined);
+    }
+    private async mapped(fs: import('@itookit/vfs-core').IFileSystem, node: FSNode, prefix: string, projection?: FileProjection): Promise<FSNode> {
         const readOnly = node.metadata?._readOnly === true || (await fs.capabilitiesAt(node.path)).readonly;
-        return { ...node, ...(node.type === 'file' && node.assetDirPath ? { assetDirPath: prefix + node.assetDirPath } : {}), path: prefix + (node.path === '/' ? '' : node.path), parentPath: node.path === '/' ? prefix : prefix + (node.parentPath === '/' ? '' : node.parentPath ?? ''), metadata: { ...node.metadata, _showAll: true, _fileDetails: true, _readOnly: readOnly,
+        const routePath = (path: string) => prefix.endsWith('/@files') ? projectRelativePath(path) : path;
+        const favorite = !!projection?.favorite(node.path, node.type === 'directory' ? 'directory' : 'file');
+        const path = routePath(node.path), parent = node.parentPath ? routePath(node.parentPath) : '/';
+        return { ...node, ...(node.type === 'file' && node.assetDirPath ? { assetDirPath: prefix + routePath(node.assetDirPath) } : {}), path: prefix + (path === '/' ? '' : path), parentPath: path === '/' ? prefix : prefix + (parent === '/' ? '' : parent), metadata: { ...node.metadata, _favorite: favorite, _showAll: true, _fileDetails: true, _readOnly: readOnly,
             ...(node.metadata?.unavailable ? { _disabled: true, navigationDescription: t('remote.state.offline') } : {}) } };
     }
     private sessionBrowserPath(id: string, folder: string | null | undefined): string {
@@ -175,7 +144,7 @@ class BrowserBackend implements IStorageBackend {
     }
     private sessionNode(manifest: { id: string; title: string; createdAt: number; updatedAt: number; folder?: string | null; parentSessionId?: string | null }): FSNode {
         return { ...this.node(this.sessionBrowserPath(manifest.id, manifest.folder), manifest.title, true, manifest.updatedAt),
-            createdAt: manifest.createdAt, icon: ENTITY_ICONS.chat, metadata: { title: manifest.title, _showAll: true, _fileDetails: false, parentSessionId: manifest.parentSessionId ?? null } };
+            createdAt: manifest.createdAt, icon: ENTITY_ICONS.chat, metadata: { title: manifest.title, _favorite: this.deps.projects?.favorites.hasSession(manifest.id), _showAll: true, _fileDetails: false, parentSessionId: manifest.parentSessionId ?? null } };
     }
     private sessionNodes(sessions: import('@itookit/llm-session').SessionSummary[], folder: string | null): FSNode[] {
         const roots = sessionFamilyRoots(sessions);
@@ -223,8 +192,10 @@ class BrowserBackend implements IStorageBackend {
             const folder = folders.find(item => item.path === folderPath);
             return folder ? this.folderNode(folder) : null;
         }
+        if (target.kind === 'favorites') return this.favoritesEntry(path);
+        if (target.kind === 'favorite') return (await this.favoriteNodes(parentBrowserPath(path), target.folder)).find(node => node.path === path) ?? null;
         if (target.kind === 'project-files') {
-            if (target.path === '/') {
+            if (target.path === WORKSPACE_PATH) {
                 const project = await this.deps.projects?.forFolder(target.folder);
                 return project ? this.fileEntry(path, target.folder) : null;
             }
@@ -241,14 +212,15 @@ class BrowserBackend implements IStorageBackend {
         }
         return this.statFiles(path, target);
     }
-    private statFiles(path: string, target: FileTarget): Promise<FSNode | null> {
+    private async statFiles(path: string, target: FileTarget): Promise<FSNode | null> {
         const prefix = filesBrowserPrefix(path);
+        const projection = await this.projectProjection(target);
         return this.withFiles(target, async fs => {
             if (target.path === '/') return this.node(path, t('project.files'), true, 0, (await fs.capabilitiesAt('/')).readonly);
             const node = await fs.driver.getNode(target.path);
             if (!node) return null;
             const hidden = this.deps.filterDisplayedFiles && !(await this.deps.filterDisplayedFiles(fs, [node])).length;
-            return this.mapped(fs, { ...node, metadata: { ...node.metadata, _hiddenInBrowser: !!hidden } }, prefix);
+            return this.mapped(fs, { ...node, metadata: { ...node.metadata, _hiddenInBrowser: !!hidden } }, prefix, projection);
         });
     }
     async list(path: string): Promise<FSNode[]> {
@@ -269,10 +241,12 @@ class BrowserBackend implements IStorageBackend {
             return [
                 ...folders.filter(folder => folder.parentPath === folderPath).map(folder => this.folderNode(folder)),
                 ...(this.deps.projects && folders.find(folder => folder.path === folderPath)?.project
-                    ? [await this.fileEntry(path + '/@files', folderPath)] : []),
+                    ? [await this.fileEntry(path + '/@files', folderPath), this.favoritesEntry(path + '/@favorites')] : []),
                 ...this.sessionNodes(sessions, folderPath),
             ];
         }
+        if (target.kind === 'favorites') return this.favoriteNodes(path, target.folder);
+        if (target.kind === 'favorite') return [];
         if (target.kind === 'project-files') return this.listFiles(path, target);
         await this.deps.repository.getManifest(target.sessionId);
         if (target.kind === 'session') return [this.node(path + '/tasks', 'tasks', true, 0, true), this.node(path + '/files', 'files', true, 0, true)];
@@ -291,43 +265,61 @@ class BrowserBackend implements IStorageBackend {
     }
     private async listFiles(path: string, target: FileTarget): Promise<FSNode[]> {
         const prefix = filesBrowserPrefix(path);
+        const projection = await this.fileProjection(await this.filesFolder(target), target.kind === 'project-files');
         const nodes = await this.withFiles(target, async fs => {
             const raw = await fs.driver.getChildren(target.path);
             const visible = this.deps.filterDisplayedFiles ? await this.deps.filterDisplayedFiles(fs, raw) : raw;
-            return Promise.all(visible.map(node => this.mapped(fs, node, prefix)));
+            return Promise.all(visible.map(node => this.mapped(fs, node, prefix, projection)));
         });
-        const project = this.deps.projects && await this.deps.projects.forFolder(target.kind === 'project-files'
-            ? target.folder : (await this.deps.repository.getManifest(target.sessionId)).folder);
-        const remote = this.deps.projects?.remoteMounts;
-        const mounts = project && remote ? remote.list(project.project.id) : [];
-        const offline = !!project && !!remote?.projectOffline(project.project.id);
-        return nodes.map(node => {
-            const relative = node.path.slice(prefix.length).replace(target.kind === 'files' ? /^\/workspace(?=\/|$)/ : /^$/, '');
-            const mount = mounts.find(item => relative === item.at || relative.startsWith(item.at + '/'));
-            if (!mount) return offline ? { ...node, metadata: { ...node.metadata, _disabled: true, _readOnly: true } } : node;
-            const status = remote!.status(mount.mountId);
-            return { ...node, ...(relative === mount.at ? { icon: ENTITY_ICONS.remoteProject } : {}),
-                metadata: { ...node.metadata, remoteMountId: mount.mountId, _disabled: offline || status === 'offline', _readOnly: offline || node.metadata._readOnly,
-                    navigationDescription: relative === mount.at ? t(`remote.state.${status}`) : node.metadata.navigationDescription } };
-        });
+        return nodes.map(node => this.withMountStatus(node, prefix, target, projection));
     }
-    private async fileEntry(path: string, folder: string | null): Promise<FSNode> {
+    /** Annotate a listed row with the remote grant that owns it, if any. */
+    private withMountStatus(node: FSNode, prefix: string, target: FileTarget, projection?: FileProjection): FSNode {
+        const remote = this.deps.projects?.remoteMounts, offline = !!projection?.offline;
+        const relative = node.path.slice(prefix.length).replace(target.kind === 'files' ? /^\/workspace(?=\/|$)/ : /^$/, '');
+        const mount = remote && projection?.mounts.find(item => relative === item.at || relative.startsWith(item.at + '/'));
+        if (!mount || !remote) return offline ? { ...node, metadata: { ...node.metadata, _disabled: true, _readOnly: true } } : node;
+        const status = remote.status(mount.mountId);
+        return { ...node, ...(relative === mount.at ? { icon: ENTITY_ICONS.remoteProject } : {}),
+            metadata: { ...node.metadata, remoteMountId: mount.mountId, _disabled: offline || status === 'offline', _readOnly: offline || node.metadata._readOnly,
+                navigationDescription: relative === mount.at ? t(`remote.state.${status}`) : node.metadata.navigationDescription } };
+    }
+    private favoritesEntry(path: string): FSNode {
+        return { ...this.node(path, t('project.favorites'), true), icon: ACTION_ICONS.favorite,
+            metadata: { title: t('project.favorites'), _fixedEntry: true, _readOnly: true, _showAll: true } };
+    }
+    private async favoriteNodes(path: string, folder: string): Promise<FSNode[]> {
         const project = await this.deps.projects?.forFolder(folder);
-        const offline = !!project && !!this.deps.projects?.remoteMounts?.projectOffline(project.project.id);
-        return { ...this.node(path, t('project.files'), true), metadata: { _fixedEntry: true, _disabled: offline, _readOnly: offline,
+        if (!project || !this.deps.projects) return [];
+        const offline = this.deps.projects.remoteMounts?.projectOffline(project.project.id);
+        const items = await this.deps.projects.favorites.list(project.project.id);
+        return items.map(item => ({ ...this.node(`${path}/${item.id}`, item.title, false),
+            icon: item.target.kind === 'session' ? ENTITY_ICONS.chat : fileTypeIcon(item.target.path, item.target.nodeType === 'directory'),
+            metadata: { title: item.title, _fixedEntry: true, _readOnly: true, _favorite: true, _showAll: true, _fileDetails: false,
+                _disabled: item.target.kind === 'file' && !!offline, favoriteId: item.id, favoriteProjectId: project.project.id,
+                navigationDescription: item.target.kind === 'file' ? item.target.path : t('project.favoriteSession') } }));
+    }
+    /** The fixed `Files` entry: its own read-only state and favorite flag, not a listing. */
+    private async fileEntry(path: string, folder: string | null): Promise<FSNode> {
+        const projection = await this.fileProjection(folder, true);
+        const offline = !!projection?.offline;
+        const readOnly = offline || !!folder && !!await this.deps.projects?.workspaceReadOnly(folder);
+        return { ...this.node(path, t('project.files'), true), metadata: { title: t('project.files'),
+            _favorite: projection?.favorite(WORKSPACE_PATH, 'directory') ?? false, _fixedEntry: true, _disabled: offline, _readOnly: readOnly,
             ...(offline ? { navigationDescription: t('remote.projectOffline') } : {}) } };
     }
     private async assertAvailable(path: string): Promise<void> {
         if (!this.deps.projects?.remoteMounts) return;
         const target = resolveBrowserTarget(path);
-        const folder = target.kind === 'project-files' ? target.folder : target.kind === 'folder'
-            ? folderPathFromBrowserPath(path) : (await this.deps.repository.getManifest(target.sessionId)).folder;
+        const folder = browserTargetFolder(target, path,
+            'sessionId' in target ? (await this.deps.repository.getManifest(target.sessionId)).folder : undefined);
         const project = await this.deps.projects.forFolder(folder);
         if (project && this.deps.projects.remoteMounts.projectOffline(project.project.id)) throw new FSError('EACCES', 'Remote project unavailable');
     }
     async read(path: string): Promise<Uint8Array> {
         const target = resolveBrowserTarget(path);
         if (isFileTarget(target)) await this.assertAvailable(path);
+        if (target.kind === 'favorite' || target.kind === 'favorites') throw new FSError('EISDIR', 'Open favorites through navigation');
         if (target.kind === 'folder') throw new FSError('EISDIR', 'Open this folder using its browser target');
         if (target.kind === 'session') return this.sessionBundle(target.sessionId);
         if (isFileTarget(target)) return this.withFiles(target, async fs => new Uint8Array(await fs.driver.readContent(target.path, { encoding: 'binary' })));
@@ -348,10 +340,10 @@ class BrowserBackend implements IStorageBackend {
         }
         const target = resolveBrowserTarget(path);
         if (isFileTarget(target)) {
-            const prefix = filesBrowserPrefix(path);
+            const prefix = filesBrowserPrefix(path), projection = await this.projectProjection(target);
             return this.withFiles(target, async fs => {
                 const node = await fs.driver.createDirectory({ parentPath: parentBrowserPath(target.path), name: browserName(target.path) });
-                return this.mapped(fs, node, prefix);
+                return this.mapped(fs, node, prefix, projection);
             });
         }
         throw new FSError('EROFS', 'Use the Session file context for this path');
@@ -372,24 +364,24 @@ class BrowserBackend implements IStorageBackend {
         }
         const target = resolveBrowserTarget(path);
         if (isFileTarget(target)) {
-            const prefix = filesBrowserPrefix(path);
+            const prefix = filesBrowserPrefix(path), projection = await this.projectProjection(target);
             const buffer = content.buffer.slice(content.byteOffset, content.byteOffset + content.byteLength) as ArrayBuffer;
             return this.withFiles(target, async fs => {
                 if (await fs.driver.exists(target.path)) {
                     await fs.driver.writeContent(target.path, buffer);
                     const node = await fs.driver.getNode(target.path);
                     if (!node) throw new FSError('EIO', 'Session file disappeared after write');
-                    return this.mapped(fs, node, prefix);
+                    return this.mapped(fs, node, prefix, projection);
                 }
                 const node = await fs.driver.createFile({ parentPath: parentBrowserPath(target.path), name: browserName(target.path), content: buffer });
-                return this.mapped(fs, node, prefix);
+                return this.mapped(fs, node, prefix, projection);
             });
         }
         throw new FSError('EROFS', 'Only Session folders and Session files are writable');
     }
     async delete(path: string): Promise<void> {
         const entry = resolveBrowserTarget(path);
-        if (entry.kind === 'project-files' && entry.path === '/') return;
+        if (entry.kind === 'project-files' && entry.path === WORKSPACE_PATH) return;
         await this.assertAvailable(path);
         const target = resolveBrowserTarget(path);
         if (target.kind === 'folder') {
@@ -409,7 +401,7 @@ class BrowserBackend implements IStorageBackend {
             return;
         }
         if (isFileTarget(target)) {
-            if (target.path === '/') throw new FSError('EACCES', 'Cannot delete a file root');
+            if (target.path === '/' || target.kind === 'project-files' && target.path === WORKSPACE_PATH) throw new FSError('EACCES', 'Cannot delete a file root');
             await this.withFiles(target, fs => fs.driver.delete([target.path], { recursive: true }));
             return;
         }
@@ -417,7 +409,7 @@ class BrowserBackend implements IStorageBackend {
     }
     async rename(from: string, to: string): Promise<void> {
         const entry = resolveBrowserTarget(from);
-        if (entry.kind === 'project-files' && entry.path === '/') return;
+        if (entry.kind === 'project-files' && entry.path === WORKSPACE_PATH) return;
         await this.assertAvailable(from); await this.assertAvailable(parentBrowserPath(to));
         const targetPath = to.startsWith('/') ? to : `${parentBrowserPath(from)}/${to}`;
         const source = resolveBrowserTarget(from);

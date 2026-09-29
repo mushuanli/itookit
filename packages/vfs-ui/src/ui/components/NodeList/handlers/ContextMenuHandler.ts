@@ -93,7 +93,7 @@ export class ContextMenuHandler {
     const defaults = this.getBulkContextMenuItems(selected.length);
     const items = this.contextMenuConfig?.bulkItems?.(selected, defaults) ?? defaults;
     if (selected.length !== ids.length || !selected.length) return [];
-    return items.filter(entry => entry.type === 'separator' || selected.every(node =>
+    return items.filter(entry => entry.type === 'separator' || entry.onClick || selected.every(node =>
       allowsRowAction(entry.id, this.store.getState().readOnly, node)));
   }
   allows(action: string, item: VFSNodeUI | null = null): boolean {
@@ -375,7 +375,7 @@ export class ContextMenuHandler {
           .items(item, defaultItems)
           .filter(m => {
             if (m.type === 'separator') return true;
-            return allowsRowAction(m.id, this.store.getState().readOnly, item) && !(m.hidden && m.hidden(item));
+            return (m.onClick || allowsRowAction(m.id, this.store.getState().readOnly, item)) && !(m.hidden && m.hidden(item));
           });
       } catch (e) {
         console.error('Error executing custom contextMenu.items:', e);

@@ -21,7 +21,8 @@ src/
 ├── core/
 │   └── Workbench.ts          ← 通用工作区控制器
 ├── lifecycle/            ← 可替换视图读取与订阅释放机制（不含业务策略）
-├── projects/             ← createProjectModule、SessionWorkbench、项目导航与归档目标适配
+├── projects/             ← createProjectModule、SessionWorkbench、project-favorites（收藏端口适配）、
+│                            项目导航（ProjectFileView 文件列策略）与归档目标适配
 ├── toolbox/              ← 工具箱模块入口、分类/分组显示、编辑器装配
 ├── configuration/        ← 删除影响确认（调用 app-core 的共享命令）
 ├── navigation/           ← URL 适配与移动端切换
@@ -62,6 +63,8 @@ const factory = factories[strategyType] ?? defaultEditorFactory;
 ## Conventions
 
 - `initApp()` 是唯一 UI 装配点 — VFS/LLM/Kernel 由 `app-core` 的 `createApplicationRuntime()` 装配，编辑器/AI 菜单/LLM 设置编辑器经 `AppOptions.ui` 注入
+- 项目收藏与远程执行只做端口适配：`project-favorites.ts` 把 `resolveBrowserTarget` 路由翻译成 `ProjectFavorites` 命令，执行菜单只调用 `ProjectExecutionService`；绑定隔离要求来自 app-core 的 `REMOTE_EXECUTION_ISOLATION`，UI 不再内联策略字面量。
+- 文件列跟随策略用 `ProjectFileView`（`preserve` 保持当前内容列，`directory` 固定到该路径）表达，`SessionWorkbench.openResource` 只解析一次路由并交给 `ProjectNavigation.sync`；收藏行解析在 `openFavorite` 内完成。
 - 项目与工具箱分别通过 `createProjectModule` / `createToolboxModule` 装配，返回统一 WorkspaceModule；bootstrap 只消费工作区能力，不用具体工作台类做 instanceof 判断。模块销毁同时释放目录投影和事件订阅，动态移除与应用退出共用一次释放。
 - `loadWorkspace()` 包含去重 — 并发加载同一工作区共享同一个 Promise (`pendingLoads`)
 - 路由基于 hash URL (`#/<slug>/<resourceId>`)，由 `history.pushState/replaceState` 写入，监听 `popstate` + `NAVIGATION_EVENTS.NAVIGATE`
@@ -70,3 +73,5 @@ const factory = factories[strategyType] ?? defaultEditorFactory;
 运行: `pnpm --filter @itookit/app-shell test`（vitest，另有 `test:watch`）
 
 Files 页 Memory 管理使用固定 Session controls；冲突保留草稿并支持比较最新版本后显式重提。memory-sharing-dialog 经宿主 controls 管理资源、授权与审计，不从 UI 直接修改 SeqFile。
+
+- 项目导航的纯列表展示策略位于 `projects/navigation-policy.ts`；远程执行菜单位于 `projects/execution-menu.ts`，只调用领域服务。异步收藏解析/远程探测属于导航请求，过期结果不得覆盖新的页面。

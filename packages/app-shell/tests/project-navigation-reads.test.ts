@@ -66,10 +66,11 @@ it('opens project files before blocked navigation and discards stale navigation 
         fileFactory: factory as never, directoryMounts: mounts, projects: projects });
     try {
         await workbench.start();
-        expect(openFiles).not.toHaveBeenCalled();
+        // Inspect root capabilities for the fixed Files entry without enumerating its children.
+        expect(openFiles).toHaveBeenCalledTimes(1);
         const startup = await projects.current();
         expect(startup).toBeDefined();
-        expect(sync).toHaveBeenCalledWith(folderBrowserPath(startup!.path), false, expect.objectContaining({ path: startup!.path }));
+        expect(sync).toHaveBeenCalledWith(folderBrowserPath(startup!.path), { project: expect.objectContaining({ path: startup!.path }) });
         const owner = await projects.openFiles(startup!.path);
         await owner.fs.driver.createFile({ parentPath: '/', name: 'notes.md', content: 'body before navigation' });
         await owner.dispose();
@@ -92,6 +93,23 @@ it('opens project files before blocked navigation and discards stale navigation 
         await sync.mock.results[1]!.value;
         expect(workbench.getActiveResourceId()).toBe(folderBrowserPath(startup!.path));
         expect(sidebar.querySelector('.vfs-columns')?.getAttribute('data-content-visible')).toBe('false');
+        await projects.favorites.toggle(startup!.project.id, { kind: 'file', path: '/workspace/notes.md', nodeType: 'file' }, 'Notes');
+        const favorite = (await projects.favorites.list(startup!.project.id))[0];
+        let releaseFavorite!: () => void, started!: () => void;
+        const favoriteReady = new Promise<void>(resolve => { started = resolve; });
+        const gate = new Promise<void>(resolve => { releaseFavorite = resolve; });
+        const listFavorites = projects.favorites.list.bind(projects.favorites);
+        const listSpy = vi.spyOn(projects.favorites, 'list').mockImplementationOnce(async id => {
+            started(); await gate; return listFavorites(id);
+        });
+        const favoriteOpen = workbench.openResource(startupPath + '/@favorites/' + favorite.id);
+        try {
+            await favoriteReady;
+            await workbench.openResource('/');
+        } finally { releaseFavorite(); }
+        await favoriteOpen; listSpy.mockRestore();
+        expect(workbench.getActiveResourceId()).toBe('/');
+
     } finally {
         releaseNavigation();
         await workbench.destroy(); await mounts.dispose(); await files.dispose(); await repository.dispose(); await manager.dispose();

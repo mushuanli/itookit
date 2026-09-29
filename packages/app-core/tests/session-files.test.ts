@@ -113,7 +113,7 @@ describe('Session file contexts', () => {
         expect(await a.vfs.readFile('same.md')).toBe('A');
         expect(await b.vfs.readFile('same.md')).toBe('B');
         await expect(a.vfs.readFile('/missing/same.md')).rejects.toMatchObject({ code: 'ENOENT' });
-        await expect(a.vfs.readFile('../b/same.md')).rejects.toThrow('Invalid virtual');
+        await expect(a.vfs.readFile('../b/same.md')).rejects.toMatchObject({ code: 'ENOENT' });
         await expect(b.vfs.writeFile('same.md', 'bad')).rejects.toMatchObject({ code: 'EROFS' });
         await expect(service.configure('a', { mounts: mount('/b'), cwd: '/workspace' }, 0)).rejects.toMatchObject({ code: 'ECONFLICT' });
         await service.dispose();

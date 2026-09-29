@@ -4,23 +4,26 @@ import type { RemoteFileConnection, ProjectRemoteMount } from '../remote-mounts'
 /** Structural support is separate from project grants and connection health. */
 export interface ExecutionCapabilities {
     serverId: string | null;
+    processEpoch?: string;
+    pathModel?: 'none' | 'host-mapped' | 'virtual-root';
     process: { exec: boolean };
     terminal: { pty: boolean };
     executionModel: 'none' | 'trusted-cooperative-host' | 'sandbox';
     workspaceConsistency: 'none' | 'cooperative' | 'isolated';
     readOnlyEnforcement: 'none' | 'best-effort' | 'kernel-enforced';
 }
-export interface ProjectExecutionBinding {
-    version: 1;
+interface ExecutionBindingIdentity {
     connectionId: string;
     serverId: string;
     requiredIsolation: 'trusted-cooperative-host' | 'sandbox';
     authorizationRevision: string;
-    mode: 'managed-copy';
 }
+export type ProjectExecutionBinding = ExecutionBindingIdentity & (
+    { version: 1; mode: 'managed-copy' } | { version: 2; mode: 'directory' }
+);
 export type ProjectExecutionContext = Awaited<ReturnType<NonNullable<KernelAdaptersRuntimeOptions['fileContextForSession']>>>;
 export interface ProjectExecutionProvider {
-    /** Return one consistent file/process workspace; never attach processes to the original project view. */
+    /** Return file and process access to the same authorized directory namespace. */
     acquire(input: {
         projectId: string; sessionId: string; scopeId?: string;
         binding: ProjectExecutionBinding;

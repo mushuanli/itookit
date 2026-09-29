@@ -5,10 +5,10 @@ import { createVFSFileDiscoverySource, discoverFiles, normalizeVirtualPath, path
 export function createVFSToolContext(context: FileSystemContext): ToolVFSContext {
     const revisions = new Map<string, string | undefined>();
     const resolve = (path: string) => {
-        if (/[\\\0]/.test(path) || /^[a-z][a-z0-9+.-]*:/i.test(path) || path.split('/').includes('..')) {
+        if (/[\\\0]/.test(path) || /^[a-z][a-z0-9+.-]*:/i.test(path)) {
             throw new Error('Invalid virtual file path');
         }
-        return normalizeVirtualPath(path.startsWith('/') ? path : `${context.cwd}/${path}`);
+        return normalizeVirtualPath(pathUtils.normalize(path.startsWith('/') ? path : `${context.cwd}/${path}`));
     };
     const walkFiles: NonNullable<ToolVFSContext['walkFiles']> = async function* (path, options) {
         const source = createVFSFileDiscoverySource(context.fs, options);

@@ -1,3 +1,4 @@
+import { WORKSPACE_PATH } from './workspace-namespace';
 import { FSError, createFileSystemView, normalizeVirtualPath, type IFileSystem, type FileSystemSourceOwner } from '@itookit/vfs-core';
 import { t } from '@itookit/common';
 import type { SessionFilesService, SessionMountRecord } from './session-files';
@@ -96,7 +97,7 @@ export class DirectoryMountService {
             if (!home) throw new Error(t('mount.error.setHomeFirst'));
             const path = this.preferences.external[home.sourceId];
             if (path) await this.connect(home.sourceId, path);
-            return this.mount(sessionId, home, 'rw', '/workspace', true);
+            return this.mount(sessionId, home, 'rw', WORKSPACE_PATH, true);
         });
     }
     addDirectory(sessionId: string, directory: string, access: 'ro' | 'rw' = 'rw', at?: string, asCwd = false): Promise<string> {
@@ -104,7 +105,7 @@ export class DirectoryMountService {
     }
     /** Explicitly replace the primary workspace grant, retaining unrelated mounts. */
     setWorkspace(sessionId: string, directory: string, access: 'ro' | 'rw' = 'rw'): Promise<string> {
-        return this.serial(async () => this.mount(sessionId, await this.resolve(directory), access, '/workspace', true, true));
+        return this.serial(async () => this.mount(sessionId, await this.resolve(directory), access, WORKSPACE_PATH, true, true));
     }
     remove(sessionId: string, mountId: string): Promise<void> {
         return this.serial(async () => {
@@ -158,13 +159,13 @@ export class DirectoryMountService {
         previous: Awaited<ReturnType<SessionFilesService['inspect']>>): Promise<void> {
         const directory = await this.fixedWorkspace(sessionId);
         if (directory !== undefined) {
-            const primary = next.mounts.find(m => m.at === '/workspace');
-            const old = previous?.mounts.find(m => m.at === '/workspace');
+            const primary = next.mounts.find(m => m.at === WORKSPACE_PATH);
+            const old = previous?.mounts.find(m => m.at === WORKSPACE_PATH);
             const expected = directory === '~' ? '/home/admin' : directory.startsWith('~/') ? '/home/admin/' + directory.slice(2) : directory;
             const internal = expected === '/home/admin' || expected.startsWith('/home/admin/');
             const label = internal ? normalizeVirtualPath(expected) : expected.replace(/^host:/, '');
             if (!primary || (primary.sourceId === 'admin-home') !== internal || this.describe(primary) !== label
-                || next.cwd !== '/workspace' || primary.access !== (old?.access ?? 'rw')) {
+                || next.cwd !== WORKSPACE_PATH || primary.access !== (old?.access ?? 'rw')) {
                 throw new FSError('EACCES', t('mount.error.fixedWorkspace'));
             }
         }

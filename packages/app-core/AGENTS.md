@@ -24,13 +24,17 @@ src/
 │   └── create-application-runtime.ts 应用运行时装配：VFS → LLM → 会话/Flow → 租约与恢复 → RunCatalog
 ├── configuration/               工具箱资源/分组/目录、模型关联删除与工具授权
 ├── projects/                    项目生命周期、会话组织查询/命令、项目归档与业务目标
-│   └── drafts/                  项目草稿策略 service / 端口 contracts / 事务 store / 数据校验 record-codec
+│   ├── drafts/                  项目草稿策略 service / 端口 contracts / 事务 store / 数据校验 record-codec
+│   ├── favorites/               项目收藏：contracts 端口 / policy 纯函数 / store SeqFile 事务 /
+│   │                             service 同项目串行 / lifecycle 提交事件适配 / routes 收藏解析
+│   └── execution/               remote-provider 适配共享文件+进程端口，policy 集中授权与隔离校验
 ├── session/                     Session 语义与数据交换（可依赖 vfs/）
-│   ├── session-browser.ts       浏览器侧导航模型（folder:/tasks 目标解析与投影）
+│   ├── browser-routes.ts        纯路由解析与目标归属（无 repository/Kernel/VFS I/O）
+│   ├── session-browser.ts       浏览器侧数据投影与 VFS 适配
 │   ├── session-bundle.ts        会话导出/导入格式（带版本与校验）
 │   ├── session-lifecycle.ts     Session 删除顺序与有界等待（含 closeSession 调用本身的上界）
 │   ├── session-route.ts         路由解析
-│   └── workspace-paths.ts       /home/admin/<name> 工作区路径
+│   └── workspace-paths.ts       /home/admin/<name> 数据根工作区路径
 ├── vfs/                         Session 文件与挂载域服务（VFS 视图/后端）
 │   ├── session-files.ts         Session 命名空间（revision CAS + per-session 串行队列）
 │   ├── directory-mounts.ts      宿主目录挂载（DirectorySourceProvider 端口）
@@ -39,6 +43,7 @@ src/
 │   ├── workspace-process-context.ts 同一授权 revision 的隔离文件视图与原生进程挂载获取/清理
 │   ├── errors.ts                结构化错误（宿主本地化；本包不写用户文案）
 │   ├── tool-context.ts          工具可见 VFS 上下文（readFile/writeFile/listFiles/stat）
+│   ├── workspace-namespace.ts   项目工作区规范命名空间（/workspace 与相对路径换算）
 │   └── unavailable-directory.ts 挂载源缺失时的占位目录
 ├── kernel/
 │   ├── session-lease.ts         Session 单写者租约（CAS + fencingToken，默认 TTL 60s）
@@ -65,7 +70,11 @@ const kernel = await createKernelRuntime({ systemFS, llmDriver, storageResolver,
 
 ## 约束
 
-- `projects/execution` 将 contracts（存储/来源/工作区端口）、policy（身份、授权摘要和隔离能力校验）、service（生命周期编排）、store（seqfile CAS）分开。执行 provider 必须提供同一工作区的文件和进程能力；未绑定执行目标的远程项目不得回退到宿主 Shell。
+- 工具路径相对 cwd 做 POSIX 解析（支持 `../reference`），再交给挂载视图授权；项目编辑器以 `/workspace` 为规范根（`vfs/workspace-namespace.ts` 是唯一换算点），source view 和导航路由只用于内部操作/展示。`openFiles()` 是 source view，`openWorkspace()` 才是编辑器/执行的规范视图。
+- 浏览器投影不得逐节点回查目录catalog：`session-browser` 每次列目录解析一次 `FileProjection`（项目、远端授权、收藏查询）；浏览器目标归属文件夹统一走 `browserTargetFolder`，Session 归属只认 manifest。
+- `projects/execution` 新建 v2 directory 绑定；v1 managed-copy 必须显式重新绑定后才能执行。只读目录要求进程侧内核强制权限。
+- `projects/execution` 将 contracts（存储/来源/工作区端口）、policy（身份、授权摘要、隔离能力与远程进程命名空间校验）、service（生命周期编排）、store（seqfile CAS）、remote-provider（端口适配与 acquire/release 顺序）分开。执行 provider 必须提供同一工作区的文件和进程能力；未绑定执行目标的远程项目不得回退到宿主 Shell。`REMOTE_EXECUTION_ISOLATION` 是 bind 的隔离要求唯一来源。
+- 收藏读取会校准 Session 标题与成员（`ProjectFavorites.list`），因此 `list()` 可能发布一次变更通知；`has`/`hasSession` 只读缓存，调用方需先 `list`。`FavoriteUpdate` 必须保持纯函数（store 可能调用多次）。
 
 - Session 与 Kernel 的所有写入都必须先持有 Session 租约（`SessionLeaseStore`）；拒租只让该 Session 保持只读，不影响其他 Session。该「只读」由 `createApplicationRuntime` 注入的写入门强制（`ensureWritable` → `recovery.acquireLater` → `initializeConversationSystem.canWriteSession` → `SessionManager.sendMessage`），被拒的 Session 会在追加 round 前报 `Session is owned by another host`。
 - `ApplicationKernelPlatform.configure(kernel, services)` 在 Session 恢复扫描前等待完成；`services` 提供已初始化的 `sessionFiles`/`directoryMounts`，宿主可据此绑定工作区工厂。
@@ -78,7 +87,7 @@ const kernel = await createKernelRuntime({ systemFS, llmDriver, storageResolver,
 ## 运行
 
 ```bash
-pnpm --filter @itookit/app-core test        # vitest：目前 15 文件 / 64 用例
+pnpm --filter @itookit/app-core test        # vitest：目前 39 文件 / 215 用例
 pnpm --filter @itookit/app-core typecheck
 ```
 
@@ -93,3 +102,7 @@ pnpm --filter @itookit/app-core typecheck
 | [VFS Session 挂载访问边界](../../doc/design/vfs-session-mount-access.md) | 命名空间、挂载与授权语义 |
 | [Session 浏览](../../doc/design/vfs-session-browser.md) | `session-browser` 的路由与投影契约 |
 | [MindOS profile](../../doc/mindos-profile.md) | 数据根与 Session 租约规则 |
+
+- 项目收藏位于 `projects/favorites/`：contracts 定义存储/变更端口，policy 无 I/O，store 封装 SeqFile 事务，service 串行化同项目读写，lifecycle 适配 VFS 提交事件；UI 跳转展示策略留在 app-shell。
+
+- `browser-routes.ts` 是路由语义唯一来源；显式的 Session manifest `folder: null` 表示根目录，不回退到陈旧路由前缀。远程 provider 的实例方法必须保留 receiver，不能取出后无绑定调用。

@@ -21,7 +21,8 @@ it('creates project Sessions from the selected project and edits its files in th
     const projectPath = folderBrowserPath(other.path);
     const owner = await projects.openFiles(other.path);
     await owner.fs.driver.createFile({ parentPath: '/', name: 'notes.md', content: 'research notes' }); await owner.dispose();
-    const kernel = { onChanged: () => () => {}, async *listSessions() {} };
+    const kernel = { onChanged: () => () => {}, async *listSessions() {},
+        closeSession: vi.fn(async () => {}), sessionStat: vi.fn(async () => ({ phase: 'closed' })), removeSession: vi.fn(async () => {}) };
     const sidebar = document.createElement('div'), main = document.createElement('div'); document.body.append(sidebar, main);
     const chat = vi.fn(async (element: HTMLElement, _options: any) => { element.textContent = 'chat'; return { destroy: vi.fn() }; });
     const file = vi.fn(async (element: HTMLElement, options: any) => { element.textContent = 'file'; return {
@@ -47,6 +48,10 @@ it('creates project Sessions from the selected project and edits its files in th
         const newSession = sidebar.querySelector<HTMLButtonElement>('.vfs-directory-action[aria-current="page"]')!;
         expect(newSession.textContent).toBe('新会话');
         expect(newSession.querySelector('svg')).not.toBeNull();
+        const projectChildren = sidebar.querySelector(`[data-item-id="${projectPath}"] > .vfs-directory-item__children`)!;
+        const rows = [...projectChildren.children].filter(row => row.hasAttribute('data-item-id') || row.classList.contains('vfs-directory-action'));
+        expect(rows.slice(0, 3).map(row => row.getAttribute('data-item-id') ?? 'new-session'))
+            .toEqual([projectPath + '/@favorites', projectPath + '/@files', 'new-session']);
         newSession.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
         expect((await projects.list()).some(item => item.project.id === other.project.id)).toBe(true);
         await chat.mock.calls.at(-1)![1].sessionDraft.save('persisted composer');
@@ -60,6 +65,18 @@ it('creates project Sessions from the selected project and edits its files in th
         expect((await repository.getManifest(session)).title).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}$/);
         const filesRow = sidebar.querySelector(`[data-item-id="${projectPath}/@files"]`)!;
         expect(filesRow.nextElementSibling?.textContent).toBe('新会话');
+        expect(sidebar.querySelector(`[data-item-id="${projectPath}/@favorites"]`)?.textContent).toContain('收藏夹');
+        for (const rowPath of [projectPath + '/@files', folderBrowserPath(other.path + '/@sessions') + '/' + session]) {
+            const star = () => sidebar.querySelector<HTMLButtonElement>(`[data-item-id="${rowPath}"] [data-action="favorite-toggle"]`)!;
+            expect(star().getAttribute('aria-label')).toBe('收藏');
+            star().click();
+            await vi.waitFor(async () => expect(await projects.favorites.list(other.project.id)).toHaveLength(1));
+            await vi.waitFor(() => expect(star().getAttribute('aria-pressed')).toBe('true'));
+            expect(star().getAttribute('aria-label')).toBe('取消收藏');
+            star().click();
+            await vi.waitFor(async () => expect(await projects.favorites.list(other.project.id)).toHaveLength(0));
+            await vi.waitFor(() => expect(star().getAttribute('aria-pressed')).toBe('false'));
+        }
         expect((await repository.getManifest(session)).folder).toBe(other.path + '/@sessions');
         await workbench.startSessionDraft(projectPath);
         expect((await chat.mock.calls.at(-1)![1].sessionDraft.materialize()).resumeOnly).toBe(true);
@@ -85,19 +102,50 @@ it('creates project Sessions from the selected project and edits its files in th
         expect(sidebar.querySelector('.vfs-columns__content')?.textContent).toContain('notes.md');
         expect(file.mock.calls.at(-1)?.[1].title).toBe('notes');
         expect(sidebar.querySelector('.vfs-columns__content')?.textContent).not.toContain('新会话');
-        await file.mock.calls.at(-1)![1].hostContext.saveContent('/notes.md', 'edited in workbench');
+        await file.mock.calls.at(-1)![1].hostContext.saveContent('/workspace/notes.md', 'edited in workbench');
         const context = await files.acquire(session);
         expect(await context.vfs.readFile('notes.md')).toBe('edited in workbench'); await context.release();
         const options = file.mock.calls.at(-1)![1];
-        const quote = { path: '/notes.md', content: 'selected', selection: true };
+        const quote = { path: '/workspace/notes.md', content: 'selected', selection: true };
         await options.hostContext.chatFromFile(quote);
         expect(chatFromFile).toHaveBeenCalledWith(quote, { projectFolder: other.path });
-        await options.files.fs.driver.rename('/notes.md', 'renamed.txt');
-        await vi.waitFor(() => expect(options.target.path).toBe('/renamed.txt'));
+        await options.files.fs.driver.rename('/workspace/notes.md', 'renamed.txt');
+        await vi.waitFor(() => expect(options.target.path).toBe('/workspace/renamed.txt'));
         expect(workbench.getActiveResourceId()).toBe(projectPath + '/@files/renamed.txt');
         await options.hostContext.saveContent(options.target.path, 'saved after rename');
-        expect(await options.files.fs.driver.readContent('/renamed.txt', { encoding: 'utf-8' })).toBe('saved after rename');
-        expect(await options.files.fs.driver.exists('/notes.md')).toBe(false);
+        expect(await options.files.fs.driver.readContent('/workspace/renamed.txt', { encoding: 'utf-8' })).toBe('saved after rename');
+        expect(await options.files.fs.driver.exists('/workspace/notes.md')).toBe(false);
+
+        await vi.waitFor(() => expect(sidebar.querySelector(`[data-item-id="${projectPath}/@files/renamed.txt"]`)).not.toBeNull());
+        const fileRow = () => sidebar.querySelector(`[data-item-id="${projectPath}/@files/renamed.txt"]`)!;
+        const favoriteButton = fileRow().querySelector<HTMLButtonElement>('[data-action="favorite-toggle"]')!;
+        expect(favoriteButton.getAttribute('aria-label')).toBe('收藏');
+        expect(favoriteButton.getAttribute('aria-pressed')).toBe('false');
+        const routeBeforeFavorite = workbench.getActiveResourceId();
+        favoriteButton.click();
+        await vi.waitFor(() => expect(fileRow().querySelector('[data-action="favorite-toggle"]')?.getAttribute('aria-pressed')).toBe('true'));
+        expect(workbench.getActiveResourceId()).toBe(routeBeforeFavorite);
+        fileRow().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+        expect([...document.querySelectorAll('[data-action="favorite-toggle"]')].some(item => item.textContent?.includes('取消收藏'))).toBe(true);
+        document.body.click();
+        await vi.waitFor(async () => expect(await projects.favorites.list(other.project.id)).toHaveLength(1));
+        const favorite = (await projects.favorites.list(other.project.id))[0];
+        await workbench.openResource(projectPath + '/@favorites');
+        expect(main.textContent).toContain('收藏夹');
+        await workbench.openResource(projectPath + '/@favorites/' + favorite.id);
+        expect(workbench.getActiveResourceId()).toBe(projectPath + '/@files/renamed.txt');
+        expect(file.mock.calls.at(-1)![1].target.path).toBe('/workspace/renamed.txt');
+        await vi.waitFor(() => expect(sidebar.querySelector('.vfs-columns')?.getAttribute('data-content-visible')).toBe('false'));
+        const directoryOwner = await projects.openWorkspace(other.path);
+        await directoryOwner.fs.driver.createFile({ parentPath: '/workspace/bookmarked', name: 'inside.txt', content: 'inside', recursive: true });
+        await directoryOwner.dispose();
+        await projects.favorites.toggle(other.project.id, { kind: 'file', path: '/workspace/bookmarked', nodeType: 'directory' }, 'bookmarked');
+        const directoryFavorite = (await projects.favorites.list(other.project.id)).find(item => item.target.kind === 'file' && item.target.nodeType === 'directory')!;
+        await workbench.openResource(projectPath + '/@favorites/' + directoryFavorite.id);
+
+        await vi.waitFor(() => expect(sidebar.querySelector('.vfs-columns')?.getAttribute('data-content-visible')).toBe('true'));
+        await vi.waitFor(() => expect(sidebar.querySelector('.vfs-columns__content')?.textContent).toContain('inside.txt'));
+        expect(sidebar.querySelector('.vfs-columns__content')?.textContent).not.toContain('renamed.txt');
         const another = await workbench.createResource();
         expect((await repository.getManifest(another)).folder).toBe(other.path + '/@sessions');
         await repository.createFolder(other.path + '/@sessions/Planning');
@@ -142,6 +190,17 @@ it('creates project Sessions from the selected project and edits its files in th
         await workbench.createChild(newRoot);
         expect(localSearch.value).toBe('');
         expect(content.querySelectorAll('[data-item-type="directory"]')).toHaveLength(2);
+        const sessionRow = () => nav.querySelector<HTMLElement>(`[data-item-id="${itemPath(nested)}"]`)!;
+        const activeBeforeDelete = workbench.getActiveResourceId();
+        expect(nav.querySelector(`[data-item-id="${projectPath}/@files"] [data-action="delete-init"]`)).toBeNull();
+        sessionRow().querySelector<HTMLButtonElement>('[data-action="delete-init"]')!.click();
+        expect(workbench.getActiveResourceId()).toBe(activeBeforeDelete);
+        expect((await repository.listSummaries()).some(item => item.id === nested)).toBe(true);
+        sessionRow().querySelector<HTMLButtonElement>('[data-action="delete-direct"]')!.click();
+        await vi.waitFor(async () => expect((await repository.listSummaries()).some(item => item.id === nested)).toBe(false));
+        expect((await repository.listSummaries()).some(item => item.id === child)).toBe(true);
+        await vi.waitFor(() => expect(sessionRow()).toBeNull());
+
 
 
 

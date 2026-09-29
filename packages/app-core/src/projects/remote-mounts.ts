@@ -1,4 +1,4 @@
-import type { ExecutionCapabilities } from './execution/contracts';
+import type { ExecutionCapabilities, ProjectExecutionContext } from './execution/contracts';
 import { RemoteMountStore, type RemoteMountCatalog as Catalog } from './remote-mount-store';
 import { randomUUID } from '@itookit/common';
 import { checkOperation, createFileSystemView, FSError, normalizeVirtualPath, operationScope,
@@ -7,7 +7,22 @@ import { createUnavailableDirectory } from '../vfs/unavailable-directory';
 import { normalizeConnection, remoteProjectPath, type RemoteFileSystemConfig, type RemoteFileSystemInput } from './remote-connections';
 
 export interface RemoteFileConnection { endpoint: string; alias: string; credentialRef: string; username?: string; }
+
+/** One directory grant as the execution node must expose it to a process. */
+export interface RemoteProcessMount { alias: string; path: string; at: string; access: 'ro' | 'rw' }
+/** Process request for one already-authorized workspace namespace (`serverId` + `epoch`). */
+export interface RemoteProcessRequest {
+    serverId: string;
+    epoch: string;
+    cwd: string;
+    mounts: readonly RemoteProcessMount[];
+}
+export interface RemoteProcessHandle { nativeShell: NonNullable<ProjectExecutionContext['nativeShell']>; release(): Promise<void> }
+
 export interface RemoteFileSourceProvider {
+    /** Optional process capability of the same node that serves files. */
+    process?(connection: Omit<RemoteFileConnection, 'alias'>, request: RemoteProcessRequest): Promise<RemoteProcessHandle>;
+
     capabilities?(connection: Omit<RemoteFileConnection, 'alias'>, options?: OperationOptions): Promise<ExecutionCapabilities>;
     clearCredential?(reference: string): void;
     setCredential(reference: string, secret: string): void | (() => void);

@@ -4,6 +4,11 @@
 import type { LocaleStrings } from './zh-CN';
 
 export const en: LocaleStrings = {
+    'project.favorites': 'Favorites',
+    'project.favoriteSession': 'Session',
+    'remote.enableExecution': 'Enable remote commands',
+    'remote.disableExecution': 'Disable remote commands',
+    'remote.executionUnavailable': 'Command execution is not enabled on this remote file system.',
     'vfs.favorites.add': 'Add to favorites',
     'vfs.favorites.remove': 'Remove from favorites',
     'vfs.action.confirmQuickDelete': 'Click again to delete',

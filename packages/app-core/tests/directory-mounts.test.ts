@@ -154,7 +154,9 @@ it('replaces the workspace without moving data, preserves reference mounts and r
     expect(await current.vfs.readFile('a.md')).toBe('second');
     expect(await current.vfs.readFile('/reference/secret.md')).toBe('unmounted');
     await expect(current.vfs.writeFile('/reference/secret.md', 'changed')).rejects.toMatchObject({ code: 'EROFS' });
-    for (const path of ['../notes/secret.md', '/workspace/../reference/secret.md', 'host:/home/admin/notes/secret.md', '/home/admin/notes/secret.md']) {
+    expect(await current.vfs.readFile('../reference/secret.md')).toBe('unmounted');
+    expect(await current.vfs.readFile('/workspace/../reference/secret.md')).toBe('unmounted');
+    for (const path of ['../notes/secret.md', 'host:/home/admin/notes/secret.md', '/home/admin/notes/secret.md']) {
         await expect(current.vfs.readFile(path)).rejects.toBeDefined();
     }
     await expect(old.fs.driver.readContent('/workspace/a.md')).rejects.toMatchObject({ code: 'EACCES' });

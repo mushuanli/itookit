@@ -18,12 +18,12 @@ interface OpenedProjectFile { editor?: IEditor; context: FileSystemContextOwner;
 
 export async function openProjectFileEditor(projects: ProjectService, target: { folder: string; path: string },
     load: ViewLoad, options: ProjectFileOptions): Promise<OpenedProjectFile | undefined> {
-    let owner: Awaited<ReturnType<ProjectService['openFiles']>> | undefined;
+    let owner: Awaited<ReturnType<ProjectService['openWorkspace']>> | undefined;
     let editor: IEditor | undefined;
     let mount: HTMLElement | undefined;
     let previewCleanup: (() => void) | undefined;
     try {
-        const source = await load.read(async () => owner = await traceBoot('projectFile.source', () => projects.openFiles(target.folder)));
+        const source = await load.read(async () => owner = await traceBoot('projectFile.source', () => projects.openWorkspace(target.folder)));
         const context: FileSystemContextOwner = { context: { fs: source.fs, cwd: target.path.slice(0, target.path.lastIndexOf('/')) || '/' }, release: () => source.dispose() };
         const driver = source.fs.driver;
         const node = await load.read(() => traceBoot('projectFile.type', () => driver.getNode(target.path, { signal: load.signal })));

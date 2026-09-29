@@ -14,8 +14,8 @@ export class ProjectExecutionService {
         const current = await this.store.read(projectId), mounts = this.remote.list(projectId);
         const revision = executionGrantRevision(mounts, target.connectionId);
         const capabilities = await this.remote.executionCapabilities(target.connectionId);
-        const binding: ProjectExecutionBinding = { ...target, version: 1, mode: 'managed-copy', authorizationRevision: revision };
-        requireExecutionCapabilities(binding, capabilities);
+        const binding: ProjectExecutionBinding = { ...target, version: 2, mode: 'directory', authorizationRevision: revision };
+        requireExecutionCapabilities(binding, capabilities, mounts);
         await this.beforeChange(projectId);
         if (executionGrantRevision(this.remote.list(projectId), target.connectionId) !== revision) throw executionGrantChanged();
         await this.store.write(projectId, current.raw, binding);
@@ -30,9 +30,11 @@ export class ProjectExecutionService {
     async acquire(projectId: string, sessionId: string, scopeId?: string) {
         const current = await this.store.read(projectId);
         if (!current.binding) return undefined;
-        const binding = current.binding, mounts = this.remote.list(projectId);
+        const binding = current.binding;
+        if (binding.version !== 2) throw new FSError('ECAPABILITY', 'Legacy copy execution requires explicit rebinding to directory execution');
+        const mounts = this.remote.list(projectId);
         if (executionGrantRevision(mounts, binding.connectionId) !== binding.authorizationRevision) throw executionGrantChanged();
-        requireExecutionCapabilities(binding, await this.remote.executionCapabilities(binding.connectionId));
+        requireExecutionCapabilities(binding, await this.remote.executionCapabilities(binding.connectionId), mounts);
         if (!this.provider) throw new FSError('ECAPABILITY', 'Remote execution provider is unavailable');
         const connection = this.remote.connection(binding.connectionId);
         const context = await this.provider.acquire({ projectId, sessionId, scopeId, binding, mounts, connection });

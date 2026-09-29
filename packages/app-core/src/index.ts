@@ -12,8 +12,10 @@ export { ProjectService, type ProjectFolder } from './projects/project-service';
 export { acquireSessionProcessContext } from './vfs/session-process-context';
 export type { SessionProcessFactory, SessionProcessMount } from './vfs/session-process-context';
 export { acquireWorkspaceProcessContext, type WorkspaceProcessSource } from './vfs/workspace-process-context';
-export { createSessionBrowser, folderBrowserPath, folderPathFromBrowserPath, resolveBrowserTarget, taskSummary, taskKeyEvent } from './session/session-browser';
-export type { BrowserTarget, SessionBrowserDependencies } from './session/session-browser';
+export { createSessionBrowser, taskSummary, taskKeyEvent } from './session/session-browser';
+export { folderBrowserPath, folderPathFromBrowserPath, resolveBrowserTarget, browserTargetFolder } from './session/browser-routes';
+export type { BrowserTarget } from './session/browser-routes';
+export type { SessionBrowserDependencies } from './session/session-browser';
 export { SessionLifecycleService } from './session/session-lifecycle';
 export type { SessionLifecycleDependencies, SessionLifecycleOptions } from './session/session-lifecycle';
 export { exportSessionBundle, importSessionBundle, isSessionBundle, parseSessionBundle,
@@ -81,4 +83,15 @@ export type { ProjectRemoteMount, RemoteFileSourceProvider, RemoteFileConnection
 export type { ProjectDraftComposer, ProjectDraftPromotion } from './projects/drafts/contracts';
 
 export { ProjectExecutionService } from './projects/execution/service';
+export { REMOTE_EXECUTION_ISOLATION } from './projects/execution/policy';
 export type { ExecutionCapabilities, ProjectExecutionBinding, ProjectExecutionProvider, ProjectExecutionTarget, ProjectExecutionContext } from './projects/execution/contracts';
+
+export { WORKSPACE_PATH, workspacePath, projectRelativePath } from './vfs/workspace-namespace';
+
+export { ProjectExecutionStore } from './projects/execution/store';
+export { createRemoteExecutionProvider } from './projects/execution/remote-provider';
+
+export { ProjectFavorites, SeqProjectFavoriteStore } from './projects/favorites';
+export type { ProjectFavorite, ProjectFavoriteTarget, ProjectFavoriteStore } from './projects/favorites';
+
+export { resolveProjectFavorite } from './projects/favorites/routes';

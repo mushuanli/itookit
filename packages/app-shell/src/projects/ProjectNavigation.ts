@@ -1,5 +1,6 @@
+import { fileFirst, projectItems } from './navigation-policy';
 import { t, FILE_BROWSER_ICONS } from '@itookit/common';
-import { folderBrowserPath, folderPathFromBrowserPath, resolveBrowserTarget, type ProjectFolder, type ProjectNavigationSnapshot, type ProjectService } from '@itookit/app-core';
+import { browserTargetFolder, folderBrowserPath, resolveBrowserTarget, type ProjectFolder, type ProjectNavigationSnapshot, type ProjectService } from '@itookit/app-core';
 import type { VFSToolbarContext, VFSColumnsOptions, VFSNodeUI, VFSUIShell } from '@itookit/vfs-ui';
 
 interface Actions {
@@ -9,12 +10,27 @@ interface Actions {
     contentChanged(visible: boolean, family: boolean): void;
 }
 
+/** How the content column follows a file opened inside a project. */
+export type ProjectFileView = 'preserve' | 'directory';
+
+export interface ProjectNavigationOptions {
+    reveal?: boolean;
+    project?: ProjectFolder;
+    draft?: boolean;
+    /** `preserve` keeps the current content column; `directory` pins it to this path. */
+    fileView?: ProjectFileView;
+}
+
 /** Project semantics stay in the host; both panes use the generic VFS browser. */
 export class ProjectNavigation {
     readonly options: VFSColumnsOptions;
     private project?: ProjectFolder;
     private path = '/';
     private draftActive = false;
+    /** Content root pinned by the last `fileView: 'directory'` request. */
+    private fileContentRoot?: string;
+    /** A file open must not reset the content column to the project file root. */
+    private keepFileContent = false;
     private session?: string;
     private family?: string;
     private contentScope?: string;
@@ -34,9 +50,9 @@ export class ProjectNavigation {
             navigationCard: node => !!node.metadata.custom.projectId,
             navigationDirectoryPreview: node => node.metadata.custom.projectId ? 6 : undefined,
             navigationChildren: node => node.metadata.custom.projectId ? [node.id + '/folder:%40sessions'] : [],
-            navigationLeaf: node => ['session', 'project-files'].includes(resolveBrowserTarget(node.id).kind),
+            navigationLeaf: node => ['session', 'project-files', 'favorite'].includes(resolveBrowserTarget(node.id).kind),
             navigationCompareItems: (a, b) => fileFirst(a, b),
-            navigationAction: { label: t('project.createSession'), icon: FILE_BROWSER_ICONS.newSession, active: path => this.draftActive && path === folderBrowserPath(this.project?.path), placement: 'after-first', visible: path => this.projectPaths.has(path), disabled: path => this.offlinePaths.has(path),
+            navigationAction: { label: t('project.createSession'), icon: FILE_BROWSER_ICONS.newSession, active: path => this.draftActive && path === folderBrowserPath(this.project?.path), afterChildId: path => path + '/@files', visible: path => this.projectPaths.has(path), disabled: path => this.offlinePaths.has(path),
                 run: async path => { await this.actions.createSession(path); } },
             contentLeaf: node => resolveBrowserTarget(node.id).kind === 'session',
             contentCompareItems: (a, b) => this.family ? this.compareFamily(a, b) : undefined,
@@ -80,10 +96,18 @@ export class ProjectNavigation {
         });
     }
     cancelPending(): void { ++this.revision; }
-    async sync(path: string, reveal = false, project?: ProjectFolder, draft = false): Promise<void> {
+    async sync(path: string, options: ProjectNavigationOptions = {}): Promise<void> {
+        const { reveal = false, project, draft = false, fileView } = options;
+        const target = resolveBrowserTarget(path);
+        this.path = path;
+        this.session = 'sessionId' in target ? target.sessionId : undefined;
+        this.keepFileContent = fileView === 'preserve';
+        if (fileView === 'directory') this.fileContentRoot = path;
+        // A pinned root only survives while we stay inside it.
+        else if (this.fileContentRoot && path !== this.fileContentRoot && !path.startsWith(this.fileContentRoot + '/')) this.fileContentRoot = undefined;
         this.draftActive = draft;
         const revision = ++this.revision;
-        const snapshot = await this.projects.sessions.navigation({ includeSessions: resolveBrowserTarget(path).kind !== 'project-files' });
+        const snapshot = await this.projects.sessions.navigation({ includeSessions: target.kind !== 'project-files' });
         if (revision !== this.revision) return;
         await this.apply(snapshot, path, reveal, revision, project);
     }
@@ -92,7 +116,7 @@ export class ProjectNavigation {
         resolved?: ProjectFolder): Promise<void> {
         const target = resolveBrowserTarget(path);
         const manifest = 'sessionId' in target ? snapshot.sessions.find(item => item.id === target.sessionId) : undefined;
-        const folder = manifest?.folder ?? folderPathFromBrowserPath(path);
+        const folder = browserTargetFolder(target, path, manifest?.folder);
         const project = resolved ?? await this.projects.forFolder(folder, snapshot.folders);
         const projects = await this.projects.list(snapshot.folders);
         if (revision !== this.revision) return;
@@ -100,6 +124,7 @@ export class ProjectNavigation {
         this.projectPaths = new Set(projects.map(item => folderBrowserPath(item.path)));
         this.offlinePaths = new Set(projects.filter(item => this.projects.remoteMounts?.projectOffline(item.project.id)).map(item => folderBrowserPath(item.path)));
         this.options.navigationAction!.visible = path => this.projectPaths.has(path);
+        // `sync` records the requested path eagerly; after the snapshot the resolved path wins.
         this.project = project; this.path = path; this.session = manifest?.id;
         this.family = manifest ? snapshot.roots.get(manifest.id) : undefined;
         const members = this.family ? snapshot.sessions.filter(item => snapshot.roots.get(item.id) === this.family) : [];
@@ -110,6 +135,7 @@ export class ProjectNavigation {
     }
     private async updateContent(manifest: import('@itookit/llm-session').SessionSummary | undefined, count: number, files: boolean, reveal: boolean, revision: number): Promise<void> {
         const project = this.project;
+        if (files && this.keepFileContent) return;
         const scope = this.family ?? (files ? folderBrowserPath(project?.path) + '/@files' : undefined);
         if (scope !== this.contentScope) this.ui()?.resetContentState();
         this.contentScope = scope;
@@ -118,7 +144,7 @@ export class ProjectNavigation {
         this.contentToolbar(files);
         if (project) await this.ui()?.expandPath(folderBrowserPath(project.path));
         if (revision !== this.revision) return;
-        const root = files && project ? folderBrowserPath(project.path) + '/@files' : manifest ? folderBrowserPath(manifest.folder) || '/' : null;
+        const root = files && project ? this.fileContentRoot ?? folderBrowserPath(project.path) + '/@files' : manifest ? folderBrowserPath(manifest.folder) || '/' : null;
         const title = this.family ? t('project.familyCount', { count }) : project?.name ?? t('project.files');
         await this.ui()?.setContentRoot(root, title, reveal && visible);
         if (revision !== this.revision) return;
@@ -153,29 +179,4 @@ export class ProjectNavigation {
         await this.apply(snapshot, path, false, revision);
     }
     currentProject(): ProjectFolder | undefined { return this.project; }
-}
-
-function fileFirst(a: VFSNodeUI, b: VFSNodeUI): number | undefined {
-    const files = (item: VFSNodeUI) => resolveBrowserTarget(item.id).kind === 'project-files';
-    if (files(a) !== files(b)) return files(a) ? -1 : 1;
-    const session = (item: VFSNodeUI) => resolveBrowserTarget(item.id).kind === 'session';
-    if (session(a) && session(b)) return (new Date(b.metadata.lastModified).getTime() - new Date(a.metadata.lastModified).getTime()) || a.id.localeCompare(b.id);
-    return undefined;
-}
-function projectItems(items: VFSNodeUI[], query = ''): VFSNodeUI[] {
-    return items.flatMap(item => {
-        const kind = resolveBrowserTarget(item.id).kind;
-        if (kind === 'session') {
-            if (!query.trim() && item.metadata.custom.familyRoot && item.metadata.custom.familyRoot !== item.id.split('/').pop()) return [];
-            const count = item.metadata.custom.familyRoot === item.id.split('/').pop() ? Number(item.metadata.custom.familyCount ?? 1) - 1 : 0;
-            return [{ ...item, children: undefined, metadata: { ...item.metadata,
-                title: item.metadata.title + (count ? ` (${count})` : ''),
-                custom: { ...item.metadata.custom, navigationDescription: query.trim() && item.metadata.custom.parentTitle
-                    ? t('project.parentSession', { name: String(item.metadata.custom.parentTitle) }) : '' } } }];
-        }
-        if (kind === 'project-files') return [{ ...item, children: undefined }];
-        if (kind !== 'folder') return [];
-        if (folderPathFromBrowserPath(item.id)?.endsWith('/@sessions')) return projectItems(item.children ?? [], query);
-        return [{ ...item, children: item.children && projectItems(item.children, query) }];
-    });
 }

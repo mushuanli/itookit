@@ -52,7 +52,7 @@ const WRITE_ACTIONS = new Set(['create-in-folder-session', 'create-in-folder-fol
 const ENTRY_ACTIONS = new Set(['rename', 'moveTo', 'delete']);
 const BULK_ACTIONS: Record<string, string> = { 'bulk-delete': 'delete', 'bulk-move': 'moveTo', 'bulk-edit-tags': 'edit-tags' };
 
-/** Host menus may customize presentation, but cannot re-enable a blocked built-in mutation. */
+/** Policy for built-in resource commands; explicit host callbacks own their authorization. */
 export function allowsRowAction(action: string, viewReadOnly: boolean, node: VFSNodeUI): boolean {
   const policy = resolveRowPolicy(viewReadOnly, node);
   const mutation = BULK_ACTIONS[action] ?? action;

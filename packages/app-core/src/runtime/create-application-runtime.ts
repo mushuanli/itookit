@@ -1,3 +1,4 @@
+import { createRemoteExecutionProvider } from '../projects/execution/remote-provider';
 import { ProjectExecutionService } from '../projects/execution/service';
 import { ProjectExecutionStore } from '../projects/execution/store';
 import type { ProjectExecutionProvider } from '../projects/execution/contracts';
@@ -160,7 +161,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
             projects.execution = new ProjectExecutionService(new ProjectExecutionStore(systemFS), remote,
                 async projectId => { await projects.get(projectId); for (const id of await affected(projectId)) await remoteGuard(id); },
                 async projectId => { for (const id of await affected(projectId)) { await sessionFiles.invalidate(id); await mountChanged(id); } },
-                options.projectExecutionProvider);
+                options.projectExecutionProvider ?? createRemoteExecutionProvider(sessionFiles, options.remoteSourceProvider));
             sourceCleanupFns.push(() => remote.dispose());
             sessionFiles.workspaceComposer = async (id, mount) => {
                 const project = await projects.forFolder((await sessionRepository.getManifest(id)).folder);
@@ -190,7 +191,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
             },
             configureSession: options.kernelPlatform?.configureSession,
             scopeForEffect: options.kernelPlatform?.scopeForEffect,
-            fileContextForScope: options.kernelPlatform?.fileContextForScope || options.projectExecutionProvider ? async (id, scopeId) => {
+            fileContextForScope: options.kernelPlatform?.fileContextForScope || options.projectExecutionProvider || options.remoteSourceProvider?.process ? async (id, scopeId) => {
                 const project = await projects.forFolder((await sessionRepository.getManifest(id)).folder);
                 const execution = project && await projects.execution?.acquire(project.project.id, id, scopeId);
                 if (execution) return execution;

@@ -1,10 +1,13 @@
+import { trackFavoriteFiles } from './favorites/lifecycle';
+import { ProjectFavorites, SeqProjectFavoriteStore } from './favorites';
+import { WORKSPACE_PATH } from '../vfs/workspace-namespace';
 import type { ProjectExecutionService } from './execution/service';
 import { ProjectDraftStore } from './drafts/store';
 import { ProjectDraftService } from './drafts/service';
 import type { ProjectRemoteMountService } from './remote-mounts';
 import { ProjectSessions } from './project-sessions';
 import { randomUUID, t, translatedValues } from '@itookit/common';
-import { FSError, normalizeVirtualPath, type IFileSystem, type OperationOptions } from '@itookit/vfs-core';
+import { FSError, createFileSystemView, normalizeVirtualPath, type IFileSystem, type OperationOptions } from '@itookit/vfs-core';
 import type { ISessionRepository, SessionFolder } from '@itookit/llm-session';
 import type { DirectoryMountService } from '../vfs/directory-mounts';
 import type { SessionFilesService } from '../vfs/session-files';
@@ -20,9 +23,16 @@ export class ProjectService {
     private remoteCreation: Promise<unknown> = Promise.resolve();
     readonly sessions: ProjectSessions;
     readonly drafts: ProjectDraftService;
+    readonly favorites: ProjectFavorites;
     constructor(private readonly root: IFileSystem, private readonly repository: ISessionRepository,
         private readonly directories: DirectoryMountService, private readonly files: SessionFilesService) {
         this.sessions = new ProjectSessions(repository);
+        this.favorites = new ProjectFavorites(new SeqProjectFavoriteStore(root), async projectId => {
+            const [sessions, folders] = await Promise.all([(repository.listSummaries?.() ?? repository.list()), repository.listFolders()]);
+            const project = folders.find(folder => folder.project?.id === projectId);
+            return new Map(sessions.filter(session => project && (session.folder === project.path || session.folder?.startsWith(project.path + '/')))
+                .map(session => [session.id, session.title]));
+        });
         this.drafts = new ProjectDraftService(id => new ProjectDraftStore(root, id), repository, async () => (await this.list()).map(item => item.project.id));
     }
 
@@ -183,6 +193,27 @@ export class ProjectService {
         if (!project) throw new FSError('ENOENT', 'Project not found');
         const owner = await this.directories.openDirectory(project.project.directory);
         return this.remoteMounts ? this.remoteMounts.compose(project.project.id, owner) : owner;
+    }
+    /**
+     * Root capability of a project source view. The browser projection uses it for the
+     * fixed Files entry without opening the canonical workspace view or its subscriptions.
+     */
+    async workspaceReadOnly(folder: string): Promise<boolean> {
+        const source = await this.openFiles(folder);
+        try { return (await source.fs.capabilitiesAt('/')).readonly; } finally { await source.dispose(); }
+    }
+    /** The editor and tools share canonical project paths; openFiles remains a source view. */
+    async openWorkspace(folder: string) {
+        const project = await this.forFolder(folder);
+        if (!project || project.path !== folder) throw new FSError('ENOENT', 'Project not found');
+        const source = await this.openFiles(folder);
+        try {
+            const fs = createFileSystemView({ viewId: `project-workspace:${source.fs.viewId}`, mounts: [
+                { mountId: 'workspace', at: WORKSPACE_PATH, fs: source.fs, access: 'rw' },
+            ] });
+            const stop = trackFavoriteFiles(this.favorites, project.project.id, fs);
+            return { fs, async dispose() { try { await stop(); } finally { try { await fs.dispose(); } finally { await source.dispose(); } } } };
+        } catch (error) { await source.dispose(); throw error; }
     }
     async assertMove(from: string | null, to: string | null, projectRoot = false): Promise<void> {
         const [source, target] = await Promise.all([this.forFolder(from), this.forFolder(to)]);

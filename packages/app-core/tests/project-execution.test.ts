@@ -24,7 +24,7 @@ it('persists an explicit target and supplies the same context for Session and sc
         await f.service.bind('p', f.target);
         expect((await new ProjectExecutionStore(f.fs).read('p')).binding).toMatchObject(f.target);
         await f.service.acquire('p', 'session', 'scope');
-        expect(f.acquire).toHaveBeenCalledWith(expect.objectContaining({ scopeId: 'scope', binding: expect.objectContaining({ mode: 'managed-copy' }) }));
+        expect(f.acquire).toHaveBeenCalledWith(expect.objectContaining({ scopeId: 'scope', binding: expect.objectContaining({ version: 2, mode: 'directory' }) }));
         await f.service.clear('p'); expect(await f.service.get('p')).toBeNull();
     } finally { await f.manager.dispose(); }
 });
@@ -69,5 +69,29 @@ it('uses CAS without overwriting a binding saved by another caller', async () =>
         const stale = await f.store.read('p'); await f.service.clear('p');
         await expect(f.store.write('p', stale.raw, stale.binding)).rejects.toMatchObject({ code: 'ECONFLICT' });
         expect(await f.service.get('p')).toBeNull();
+    } finally { await f.manager.dispose(); }
+});
+
+it('requires explicit rebinding before an old copy binding can execute directories', async () => {
+    const f = await fixture();
+    try {
+        await f.service.bind('p', f.target);
+        const current = await f.store.read('p');
+        await f.store.write('p', current.raw, { ...current.binding!, version: 1, mode: 'managed-copy' });
+        await expect(f.service.acquire('p', 's')).rejects.toMatchObject({ code: 'ECAPABILITY' });
+        expect(f.acquire).not.toHaveBeenCalled();
+        await f.service.bind('p', f.target);
+        await f.service.acquire('p', 's');
+        expect(f.acquire).toHaveBeenCalledOnce();
+    } finally { await f.manager.dispose(); }
+});
+
+it('refuses process access when read-only grants cannot be enforced', async () => {
+    const f = await fixture();
+    try {
+        f.mounts.push({ ...f.mounts[0], mountId: 'reference', at: '/reference', access: 'ro' as never });
+        await expect(f.service.bind('p', f.target)).rejects.toMatchObject({ code: 'ECAPABILITY' });
+        expect(await f.service.get('p')).toBeNull();
+        expect(f.acquire).not.toHaveBeenCalled();
     } finally { await f.manager.dispose(); }
 });
