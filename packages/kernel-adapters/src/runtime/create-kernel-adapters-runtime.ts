@@ -1,4 +1,6 @@
 import { MCPToolAdapter } from '../tool/mcp-tools';
+import { t } from '@itookit/common';
+import { FSError } from '@itookit/vfs-core';
 import { createSkillToolHandlers } from '../skill/tool-handlers';
 import { coordinateSkillEffect, runSessionSkillOperation, invalidateSessionSkillOperations, reopenSessionSkillOperations, closeSessionSkillOperations } from '../skill/operation-queue';
 import { restoreLoadedSkills } from '../skill/restore-loaded-skills';
@@ -114,6 +116,7 @@ export async function createKernelAdaptersRuntime(options: KernelAdaptersRuntime
 }
 
 interface KernelAdaptersScope extends SessionCapabilityScope {
+    processContext: { cwd?: string; shellAttached: boolean };
     toolDriver: ToolDeviceDriver;
     skillDriver: SkillDeviceDriver;
     ttySessions?: TTYSessionManager;
@@ -322,7 +325,7 @@ class KernelAdaptersSessionRegistry implements SessionCapabilityRegistry {
             if (files && this.options.skillSourceForSession) await skillDriver.getService().setCwd(files.cwd);
         }
         catch (error) { return cleanupAfterFailure(error, [() => files?.release(), () => toolDriver.dispose(), () => skillDriver.dispose()]); }
-        const scope = createScope(toolDriver, skillDriver, ttySessions);
+        const scope = createScope(toolDriver, skillDriver, { cwd: files?.cwd, shellAttached: !!nativeShell }, ttySessions);
         scope.resolveMCPToolIds = profiles => mcp.resolveProfiles(profiles);
         scope.prepareTools = ids => mcp.prepare(scope.toolService, ids);
         const dispose = scope.dispose.bind(scope);
@@ -356,9 +359,11 @@ async function cleanupAfterFailure(cause: unknown, steps: Array<() => Promise<un
 function createScope(
     toolDriver: ToolDeviceDriver,
     skillDriver: SkillDeviceDriver,
+    processContext: KernelAdaptersScope['processContext'],
     ttySessions?: TTYSessionManager,
 ): KernelAdaptersScope {
     return {
+        processContext,
         toolDriver,
         skillDriver,
         ttySessions,
@@ -411,7 +416,15 @@ function createEffects(
             await persistLoadedSkill({ skillId, success: true, toolIds: [], snapshot: service.getSkillSnapshot?.(skillId) }, context);
             return snapshot;
         }, context => skills(context), effectTools),
-        new BashEffectAdapter(context => runSessionSkillOperation(registry, context.sessionId, () => tools(context))),
+        new BashEffectAdapter(context => runSessionSkillOperation(registry, context.sessionId, async () => {
+            const scope = await registry.getForContext(context);
+            if (!scope.processContext.shellAttached) {
+                console.error('[process.context] No execution backend', { sessionId: context.sessionId,
+                    taskId: context.taskId, ...scope.processContext });
+                throw new FSError('ECAPABILITY', t('chatInput.command.unavailable'), 'process.exec', scope.processContext.cwd);
+            }
+            return scope.toolService;
+        })),
         new SkillLoadEffectAdapter(skills, persistLoadedSkill),
         new SkillUnloadEffectAdapter(async context => (await registry.getForEffect(context)).skillService),
     ];

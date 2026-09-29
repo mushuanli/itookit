@@ -29,6 +29,15 @@ export class BashEffectAdapter implements EffectAdapter<BashEffectRequest, ToolI
     }
 
     private async run(request: BashEffectRequest, context: EffectExecutionContext): Promise<ToolInvokeResult> {
+        try { return await this.invoke(request, context); }
+        catch (error) {
+            console.error('[process.exec] Execution failed', { sessionId: context.sessionId, taskId: context.taskId,
+                effectId: context.effectId, cwd: request.cwd, cancelled: context.abortSignal.aborted }, error);
+            throw error;
+        }
+    }
+
+    private async invoke(request: BashEffectRequest, context: EffectExecutionContext): Promise<ToolInvokeResult> {
         assertEffectGrant(context, request.resourceHandleId, 'process');
         if (!request.command.trim()) throw new Error('Process command is required');
         const service = await resolveCapability(this.service, context);

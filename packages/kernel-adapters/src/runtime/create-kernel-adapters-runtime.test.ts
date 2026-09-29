@@ -18,6 +18,28 @@ import { buildSkillPromptContext } from '../skill/prompt-context';
 import { ApprovedEffectProgram } from '../programs/approved-effect-program';
 
 describe('createKernelAdaptersRuntime', () => {
+    it.each([false, true])('distinguishes file-only sessions from attached process backends (%s)', async attached => {
+        const exec = vi.fn(async () => ({ stdout: 'ok', stderr: '', code: 0 }));
+        const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver,
+            fileContextForSession: async () => ({ cwd: '/workspace',
+                vfs: { readFile: async () => '', writeFile: async () => {}, listFiles: async () => [] },
+                nativeShell: attached ? { capabilities: { ripgrep: false, fd: false }, exec } : undefined,
+                release: async () => {} }),
+        });
+        try {
+            const effects: EffectAdapter[] = []; runtime.plugin.install(registration(effects));
+            const ctx = context(sessionState());
+            ctx.grants = [{ ...ctx.grants[0], handleId: 'process-handle', resource: { ...ctx.grants[0].resource, kind: 'process' } }];
+            const result = effects.find(effect => effect.kind === 'process.exec')!.execute({ resourceHandleId: 'process-handle', command: 'ls' }, ctx);
+            if (attached) { expect(await result).toMatchObject({ success: true }); expect(exec).toHaveBeenCalled(); }
+            else {
+                await expect(result).rejects.toMatchObject({ code: 'ECAPABILITY', operation: 'process.exec', path: '/workspace' });
+                expect(exec).not.toHaveBeenCalled();
+                expect(log).toHaveBeenCalledWith('[process.context] No execution backend', expect.objectContaining({ cwd: '/workspace', shellAttached: false }));
+            }
+        } finally { await runtime.dispose(); log.mockRestore(); }
+    });
     it('routes real tool Effects to independent Run files and shells and tombstones closed scopes', async () => {
         const opened: string[] = [], released: string[] = [];
         const files = async (id: string) => {

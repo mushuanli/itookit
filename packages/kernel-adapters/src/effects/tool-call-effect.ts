@@ -52,6 +52,17 @@ export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectReques
 
     private async run(request: ToolCallEffectRequest, context: EffectExecutionContext,
         admitOutput?: import('@itookit/common').ToolInvokeRequest['admitOutput']): Promise<ToolInvokeResult> {
+        try { return await this.invoke(request, context, admitOutput); }
+        catch (error) {
+            console.error('[tool.call] Execution failed', { sessionId: context.sessionId, taskId: context.taskId,
+                effectId: context.effectId, toolId: request.toolId, cwd: request.cwd,
+                cancelled: context.abortSignal.aborted }, error);
+            throw error;
+        }
+    }
+
+    private async invoke(request: ToolCallEffectRequest, context: EffectExecutionContext,
+        admitOutput?: import('@itookit/common').ToolInvokeRequest['admitOutput']): Promise<ToolInvokeResult> {
         assertEffectGrant(context, request.resourceHandleId, 'tool');
         const service = await (typeof this.service === 'function' ? this.service(context, request) : this.service);
         const bound = this.effectTools.find(tool => tool.meta.id === request.toolId);
