@@ -14,9 +14,9 @@ export class SelectionHandler {
     itemId: string,
     event: MouseEvent,
     visibleItemIds: string[],
-    isReadOnly: boolean
+    readOnly: boolean
   ): void {
-    if (isReadOnly && (event.metaKey || event.ctrlKey || event.shiftKey)) return;
+    if (readOnly && (event.metaKey || event.ctrlKey || event.shiftKey)) return;
 
     let mode: 'toggle' | 'replace' = 'replace';
     let ids: string[] = [itemId];

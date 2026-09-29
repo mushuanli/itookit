@@ -18,11 +18,16 @@ export class ItemActionHandler {
     this.confirmDeleteId = id;
   }
 
+  /**
+   * `readOnly` is the effective row policy (view + node) and only guards
+   * mutations; selection semantics stay with the caller's view state.
+   */
   handleItemClick(
     event: MouseEvent,
     itemEl: HTMLElement,
-    isReadOnly: boolean,
-    onRender: () => void
+    readOnly: boolean,
+    onRender: () => void,
+    selectionReadOnly = readOnly
   ): { handled: boolean; shouldSelect: boolean; shouldNavigate: boolean } {
     const itemId = itemEl.dataset.itemId!;
     const itemType = itemEl.dataset.itemType;
@@ -37,6 +42,7 @@ export class ItemActionHandler {
 
     if (action === 'delete-init') {
       event.stopPropagation();
+      if (readOnly) return { handled: true, shouldSelect: false, shouldNavigate: false };
       this.confirmDeleteId = itemId;
       onRender();
       return { handled: true, shouldSelect: false, shouldNavigate: false };
@@ -44,8 +50,11 @@ export class ItemActionHandler {
 
     if (action === 'delete-direct') {
       event.stopPropagation();
+      // The second click only fires inside the row that asked for confirmation.
+      if (readOnly || this.confirmDeleteId !== itemId) return { handled: true, shouldSelect: false, shouldNavigate: false };
       this.confirmDeleteId = null;
-      this.commandBus.execute('file:delete', { itemIds: [itemId] });
+      onRender();
+      void Promise.resolve(this.commandBus.execute('file:delete', { itemIds: [itemId] })).catch(() => {});
       return { handled: true, shouldSelect: false, shouldNavigate: false };
     }
 
@@ -73,7 +82,7 @@ export class ItemActionHandler {
     }
 
     if (action === 'toggle-selection') {
-      if (isReadOnly) {
+      if (selectionReadOnly) {
         return { handled: true, shouldSelect: false, shouldNavigate: false };
       }
       event.stopPropagation();
@@ -81,7 +90,7 @@ export class ItemActionHandler {
     }
 
     const isModifierClick = event.metaKey || event.ctrlKey || event.shiftKey;
-    const shouldSelect = action !== 'select-only' && !isReadOnly;
+    const shouldSelect = action !== 'select-only' && !selectionReadOnly;
     const shouldNavigate =
       action !== 'select-only' &&
       !isModifierClick &&
@@ -91,11 +100,11 @@ export class ItemActionHandler {
   }
 
   handleEmptyAreaClick(
-    isReadOnly: boolean,
+    readOnly: boolean,
     selectedCount: number,
     onRender: () => void
   ): void {
-    if (isReadOnly) return;
+    if (readOnly) return;
     if (selectedCount > 0) {
       this.commandBus.execute('selection:clear', undefined as any);
       if (this.confirmDeleteId) {

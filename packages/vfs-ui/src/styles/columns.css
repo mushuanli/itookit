@@ -32,6 +32,8 @@
 .vfs-directory-item--card > .vfs-node-item__main-row .vfs-directory-item__title { font-weight: 600; }
 .vfs-directory-item--card > .vfs-directory-item__children { position: relative; padding: 6px 6px 6px 32px; margin: 0; border: 0; border-top: 1px solid var(--mm-border-color, #e5e7eb); background: var(--mm-bg-color, #fff); }
 .vfs-directory-item--card > .vfs-directory-item__children::before { content: ''; position: absolute; left: 27px; top: 10px; bottom: 10px; width: 1px; background: var(--mm-border-color, #e5e7eb); }
+/* Card children share one inset, including actions without a main-row wrapper. */
+.vfs-directory-item--card > .vfs-directory-item__children > .vfs-node-item > .vfs-node-item__main-row { padding-inline: 0; }
 .vfs-directory-item--card > .vfs-directory-item__children > .vfs-node-item > .vfs-node-item__main-row > .vfs-node-item__content { margin: 2px 0; border-radius: 6px; }
 .vfs-directory-item--card > .vfs-directory-item__children > .vfs-directory-action { display: flex; align-items: center; box-sizing: border-box; width: 100%; min-height: 36px; margin: 0; padding: var(--spacing-2) var(--spacing-3) var(--spacing-2) 24px; text-align: left; border: 0; border-left: 3px solid transparent; border-radius: 6px; background: transparent; color: var(--text-primary, #334155); font: inherit; font-weight: 500; line-height: 20px; cursor: pointer; }
 .vfs-directory-item__description { display: block; font-size: 11px; color: var(--text-secondary, #64748b); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -46,6 +48,10 @@
 
 .vfs-directory-action__icon { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex-shrink: 0; margin-right: var(--spacing-2); color: var(--primary-color, #4f46e5); }
 .vfs-directory-action__icon svg { width: 18px; height: 18px; }
+/* Directory rows put row actions beside the header instead of the action stack. */
+.vfs-directory-item__header ~ .vfs-node-item__delete-btn,
+.vfs-directory-item__header ~ .vfs-node-item__favorite-btn { flex-shrink: 0; margin-inline: 4px 6px; }
+.vfs-directory-item__header ~ .vfs-node-item__delete-btn { opacity: 1; }
 .vfs-directory-item--card > .vfs-directory-item__children > .vfs-directory-action:hover:not(:disabled) { background: var(--mm-sidebar-bg, #f1f5f9); }
 
 .vfs-directory-item--card > .vfs-directory-item__children > .vfs-directory-action.is-active { background: var(--vfs-active-bg, #e8edff); color: var(--primary-color, #4f46e5); border-left-color: currentColor; }

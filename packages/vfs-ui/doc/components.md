@@ -85,15 +85,28 @@ await move({ selection: selectedResourceIds, destination: targetId }, signal);
 | listItems、cardDirectory、listHeader | 宿主投影、抽屉外观、附加筛选条 |
 | sort、compareItems | 固定排序及宿主排序；选择条目不会改变固定排序 |
 | contextMenu、toolbarOptions | 文件工作台已有菜单与工具栏扩展 |
+| favoriteAction、onQuickDelete | 宿主行级动作：收藏状态/切换与虚拟条目的删除执行 |
 | columns | 项目工作台的双列布局配置；省略时单列 |
 | persistence、scopeId | 是否持久化及实例命名空间；旧文件工作台默认保留持久化 |
 | onError | 操作错误报告 |
+
+`favoriteAction` 是宿主持久化的收藏端口：`state(node)` 在渲染期查询（返回 `undefined` 隐藏控件，必须无副作用），`toggle(node)` 在用户激活后执行。`onQuickDelete(node)` 只对声明 `presentation.quickDelete` 的条目生效，未提供时回退到普通文件删除。
+
+### 行级写入策略
+
+策略与机制分离：`utils/row-policy.ts` 是唯一的策略来源，`resolveRowPolicy(viewReadOnly, node)` 产出 `RowPolicy`（`readOnly` / `fixed` / `inlineDelete` / `hostOwnedDelete`）。renderer、`BaseNodeItem`、右键菜单、拖拽门禁与行处理器只消费该结果；DOM 侧的数据属性名由 `ROW_FLAGS` 统一发布，避免渲染与拖拽各自硬编码。
+
+规则：只读来自视图级 `readOnly` 或节点 `_readOnly`；`_fixedEntry` 的宿主条目没有行内删除，删除管线本身也会跳过它们；文件始终有行内删除，虚拟目录通过 `presentation.quickDelete` 显式开启，并因此把删除交给 `onQuickDelete`（未提供时回退 `file:delete`）。`resolveColumnReadOnly` 让只读的内容根（离线挂载、历史树）整列只读——注意这同时关闭该列的排序与批量选择，宿主需要排序时应提供 `compareItems`。
+
+右键菜单的收藏项进入默认菜单后再交给宿主 `contextMenu.items` 过滤，因此宿主菜单策略仍是唯一权威；收藏读写宿主元数据而非资源本身，只读条目同样可以收藏。选择属于视图级语义，行级只读只限制修改（拖拽、删除、重命名、移动）。
 
 Shell 提供 `getNode/updateNodeMetadata/setQuery/setSelection/setExpanded/getSnapshot`，宿主不再访问 store.dispatch。getSnapshot 仅返回冻结的 activeId/query/selectedIds/expandedIds，不暴露内部 Store、可变 Set 或缓存。
 
 `selectPath` 定位并激活；`expandPath` 仅展开。自定义 source 根据 parentId 寻找祖先，标准文件 adapter 处理路径。后台刷新保留当前选择与已展开分支。
 
 双列使用 `setContentRoot/getContentRoot/setContentVisible/showColumn` 控制右列和窄屏显示。每列独立搜索和选择，节点保留原身份；上层决定项目、文件入口和会话家族如何投影。`backLabel` 由宿主决定，缺省为通用“返回”。
+
+`columns.navigationAction` 是固定导航动作：除 `label/icon/visible/disabled/active/run` 外，`afterChildId(parentPath)` 返回同级子条目的资源 ID，使动作固定在该子条目之后（缺省或未命中时追加到末尾）；`placement: 'after-first'` 保持原有语义。
 
 ## 展示信息
 
@@ -115,3 +128,13 @@ VFSNodeUI 是高级文件视图的展示模型，保留原 metadata/content 字�
 - `src/shell/VFSUIShell.ts`、`Assembler.ts`：文件工作台装配。
 - `src/interaction/ActionRunner.ts`、`CommandBus.ts`：异步执行。
 - `src/services/VFSStore.ts`、`StatePersistence.ts`：状态与快照。
+
+### 行操作的内部边界
+
+- `handlers/RowMutationPort.ts`：行内删除和拖拽的命令适配器；执行时重新解析节点，拒绝失效目标，明确宿主删除与普通文件删除的路由。
+- `DirectoryActions.ts`：目录按钮的 DOM、锚点、激活展示与进行中状态；通过 `ActionRunner` 执行并报告错误，刷新列表不会重新开放仍在执行的按钮。
+- `utils/row-policy.ts` 的 `allowsRowAction`：单项/批量内置操作的统一权限判断。宿主菜单可隐藏或替换呈现，但不能重新开放只读或固定条目的禁用内置操作。
+- `ContextMenuHandler`：菜单呈现和调度，在执行前读取最新节点和菜单配置；底层资源权限仍由 VFS 校验。
+- `ColumnState.commands()`：投影列的命令转发必须返回原命令的 Promise，使上层执行器能够等待完成、合并重复动作及报告失败。
+
+渲染器在任意行策略变化时重建节点，而非只监听只读变化；资源 ID 按数据比较，避免把文件名当作 CSS 选择器解释。

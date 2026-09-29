@@ -5,6 +5,9 @@
 // Interpolation syntax:   {param}  e.g. '已导入 {count} 个 Skill'
 
 export const zhCN = {
+    'vfs.favorites.add': '收藏',
+    'vfs.favorites.remove': '取消收藏',
+    'vfs.action.confirmQuickDelete': '再次点击删除',
     'project.draftDiscard': '清空草稿',
     'project.draftSaveFailed': '草稿保存失败，请保留当前页面并备份输入内容',
     'project.draftResume': '已打开上次发送的会话，请核对消息后再决定是否发送。',

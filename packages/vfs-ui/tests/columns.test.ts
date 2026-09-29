@@ -95,3 +95,26 @@ it('follows a renamed content root and removes deleted entries from both views',
         expect(f.container.querySelector('[data-item-id="/teams/renamed"]')).toBeNull();
     } finally { await f.destroy(); }
 });
+
+it('updates file-pane mutations with root permissions while leaving navigation and export available', async () => {
+    const f = await fixture();
+    try {
+        await f.fs.driver.updateMetadata('/teams/one', { _readOnly: true });
+        await f.ui.refresh();
+        await f.ui.setContentRoot('/teams/one', 'One');
+        const content = f.container.querySelector('.vfs-columns__content')!;
+        const button = (action: string) => content.querySelector<HTMLButtonElement>(`[data-action="${action}"]`)!;
+        for (const action of ['create-file', 'create-directory', 'import']) expect(button(action).disabled).toBe(true);
+        expect(button('export').disabled).toBe(false);
+        expect(content.querySelector('[data-action="delete-init"]')).toBeNull();
+        const file = content.querySelector<HTMLElement>('[data-item-id="/teams/one/notes.md"]')!;
+        expect(file.draggable).toBe(false);
+        file.querySelector<HTMLElement>('[data-action="select-and-open"]')!.click();
+        expect(f.ui.getActiveSession()?.id).toBe('/teams/one/notes.md');
+        await f.fs.driver.updateMetadata('/teams/one', { _readOnly: false });
+        await f.ui.refresh();
+        await vi.waitFor(() => expect(button('create-file').disabled).toBe(false));
+        expect(content.querySelector('[data-action="delete-init"]')).not.toBeNull();
+        expect(content.querySelector<HTMLElement>('[data-item-id="/teams/one/notes.md"]')!.draggable).toBe(true);
+    } finally { await f.destroy(); }
+});

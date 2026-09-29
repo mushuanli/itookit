@@ -23,6 +23,8 @@ export interface ParseResult {
 // --- Core UI Data Model ---
 
 export interface NodePresentation {
+  /** Opt a virtual directory into the standard two-step delete control. */
+  quickDelete?: boolean;
   fileDetails?: boolean;
   subtitle?: string;
   badges?: readonly string[];
@@ -113,3 +115,14 @@ export type { TagEditorOptions, TagEditorFactory } from '@itookit/ui-common';
 export type MenuItem = import('@itookit/ui-common').MenuItem<VFSNodeUI>;
 export type ContextMenuBuilder = import('@itookit/ui-common').ContextMenuBuilder<VFSNodeUI>;
 export type ContextMenuConfig = import('@itookit/ui-common').ContextMenuConfig<VFSNodeUI>;
+
+/**
+ * Host-owned favorites. The browser only renders the state and dispatches the
+ * toggle, so hosts stay the single owner of favorite persistence.
+ */
+export interface FavoriteAction {
+  /** Render-time state; `undefined` hides the control for this row. Must stay pure. */
+  state(node: VFSNodeUI): boolean | undefined;
+  /** Toggle the favorite after the user activates the control. */
+  toggle(node: VFSNodeUI): Promise<void>;
+}

@@ -9,12 +9,13 @@ import type {
 } from '../../../../contracts/ports';
 import type {
     VFSNodeUI,
+    FavoriteAction,
     ContextMenuConfig,
     MenuItem,
 } from '../../../../contracts/types';
 import { createContextMenuHTML } from '../templates';
-import { escapeHTML } from '@itookit/common';
-import { isItemReadOnly } from '../../../../utils/helpers';
+import { escapeHTML, ACTION_ICONS, t } from '@itookit/common';
+import { resolveRowPolicy, allowsRowAction } from '../../../../utils/row-policy';
 
 export interface ContextMenuCallbacks {
   showTagEditor: (options: {
@@ -38,6 +39,7 @@ export class ContextMenuHandler {
     private readonly createFileLabel: string = 'File',
     private readonly tagsEnabled: boolean = true,
     private readonly runner: ActionRunner = new ActionRunner(),
+    private readonly favoriteAction?: FavoriteAction,
   ) {}
 
   show(event: MouseEvent, itemEl: HTMLElement): void {
@@ -54,12 +56,8 @@ export class ContextMenuHandler {
     let contextItem: VFSNodeUI | null = null;
 
     if (selectedItemIds.size > 1 && isTargetSelected) {
-      menuItems = this.getBulkContextMenuItems(selectedItemIds.size);
-      const selected = [...selectedItemIds].map(id => this.callbacks.findItemById(id)).filter((item): item is VFSNodeUI => !!item);
-      if (this.contextMenuConfig?.bulkItems) {
-        contextItem = selected[0] ?? null;
-        menuItems = this.contextMenuConfig.bulkItems(selected, menuItems);
-      }
+      menuItems = this.actions(null);
+
     } else {
       if (!isTargetSelected) {
         this.commandBus.execute('selection:update', {
@@ -86,11 +84,17 @@ export class ContextMenuHandler {
   }
 
   private actions(item: VFSNodeUI | null): MenuItem[] {
-    if (item) return this.buildContextMenuItems(item);
+    if (item) {
+      const current = this.callbacks.findItemById(item.id);
+      return current ? this.buildContextMenuItems(current) : [];
+    }
     const ids = [...this.store.getState().selectedItemIds];
     const selected = ids.map(id => this.callbacks.findItemById(id)).filter((node): node is VFSNodeUI => !!node);
     const defaults = this.getBulkContextMenuItems(selected.length);
-    return this.contextMenuConfig?.bulkItems?.(selected, defaults) ?? defaults;
+    const items = this.contextMenuConfig?.bulkItems?.(selected, defaults) ?? defaults;
+    if (selected.length !== ids.length || !selected.length) return [];
+    return items.filter(entry => entry.type === 'separator' || selected.every(node =>
+      allowsRowAction(entry.id, this.store.getState().readOnly, node)));
   }
   allows(action: string, item: VFSNodeUI | null = null): boolean {
     return this.actions(item).some(entry => entry.type !== 'separator' && entry.id === action && !entry.disabled);
@@ -100,9 +104,11 @@ export class ContextMenuHandler {
     if (!entry || entry.type === 'separator' || entry.disabled) return Promise.resolve();
     const target = item ?? this.callbacks.findItemById([...this.store.getState().selectedItemIds][0]);
     return this.runner.run(action.replace(/^bulk-/, ''), async () => {
-      if (!this.allows(action, item)) return;
-      if (entry.onClick && target) await entry.onClick(target);
-      else await this.handleAction(action, item, position);
+      const latest = this.actions(item).find(candidate => candidate.type !== 'separator' && candidate.id === action && !candidate.disabled);
+      if (!latest || latest.type === 'separator') return;
+      const current = target ? this.callbacks.findItemById(target.id) : null;
+      if (latest.onClick && current) await latest.onClick(current);
+      else await this.handleAction(action, item ? current : null, position);
     });
   }
 
@@ -257,10 +263,11 @@ export class ContextMenuHandler {
 
   private getDefaultContextMenuItems(item: VFSNodeUI): MenuItem[] {
     if (item.kind === 'group') return [];
+    const policy = resolveRowPolicy(this.store.getState().readOnly, item);
     const items: MenuItem[] = [];
     const label = this.createFileLabel;
 
-    if (item.type === 'directory' && !isItemReadOnly(item)) {
+    if (item.type === 'directory' && !policy.readOnly) {
       items.push(
         {
           id: 'create-in-folder-session',
@@ -313,10 +320,20 @@ export class ContextMenuHandler {
       }
     );
 
-    // Read-only entries (Task history) cannot be renamed, moved or deleted.
-    return isItemReadOnly(item) || item.metadata.custom._fixedEntry === true
-      ? items.filter(entry => !('id' in entry) || !['rename', 'moveTo', 'delete'].includes(String(entry.id)))
-      : items;
+    this.appendFavorite(items, item);
+    return this.filterPolicy(items, item);
+  }
+
+  /**
+   * Favorites read and write host metadata rather than the resource, so they stay
+   * available on read-only rows. The entry joins the defaults before host
+   * filtering, which keeps host menu policy authoritative.
+   */
+  private appendFavorite(items: MenuItem[], item: VFSNodeUI): void {
+    const action = this.favoriteAction, active = action?.state(item);
+    if (!action || active === undefined) return;
+    items.push({ id: 'favorite-toggle', label: t(active ? 'vfs.favorites.remove' : 'vfs.favorites.add'),
+      iconHTML: ACTION_ICONS.favorite, onClick: () => action.toggle(item) });
   }
 
   private getBulkContextMenuItems(count: number): MenuItem[] {
@@ -345,6 +362,10 @@ export class ContextMenuHandler {
     ];
   }
 
+  private filterPolicy(items: MenuItem[], node: VFSNodeUI): MenuItem[] {
+    return items.filter(entry => entry.type === 'separator' || allowsRowAction(entry.id, this.store.getState().readOnly, node));
+  }
+
   private buildContextMenuItems(item: VFSNodeUI): MenuItem[] {
     const defaultItems = this.getDefaultContextMenuItems(item);
 
@@ -354,7 +375,7 @@ export class ContextMenuHandler {
           .items(item, defaultItems)
           .filter(m => {
             if (m.type === 'separator') return true;
-            return !(m.hidden && m.hidden(item));
+            return allowsRowAction(m.id, this.store.getState().readOnly, item) && !(m.hidden && m.hidden(item));
           });
       } catch (e) {
         console.error('Error executing custom contextMenu.items:', e);

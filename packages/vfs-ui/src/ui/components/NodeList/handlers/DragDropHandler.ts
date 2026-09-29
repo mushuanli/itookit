@@ -3,6 +3,7 @@
  * @desc Drag and drop operations. Uses ICommandPort.
  */
 import type { ICommandPort } from '../../../../contracts/ports';
+import { ROW_FLAGS } from '../../../../utils/row-policy';
 
 export interface DragDropPayload {
   sourceInstanceId: string;
@@ -20,9 +21,19 @@ export class DragDropHandler {
     private readonly getSelectedItemIds: () => Set<string>
   ) {}
 
+  /** Read-only rows and owner-managed entries never act as a drag source. */
+  private cannotDrag(itemEl: HTMLElement | null | undefined): boolean {
+    return itemEl?.dataset[ROW_FLAGS.readOnly] === 'true' || itemEl?.dataset[ROW_FLAGS.fixed] === 'true';
+  }
+
+  /** Read-only rows reject dropped items; the command port re-checks the real policy. */
+  private cannotReceiveDrop(itemEl: HTMLElement | null | undefined): boolean {
+    return itemEl?.dataset[ROW_FLAGS.readOnly] === 'true';
+  }
+
   handleDragStart = (event: DragEvent): void => {
     const itemEl = (event.target as Element).closest<HTMLElement>('[data-item-id]');
-    if (itemEl?.dataset.fixedEntry === 'true') { event.preventDefault(); return; }
+    if (this.cannotDrag(itemEl)) { event.preventDefault(); return; }
     if (!itemEl || !event.dataTransfer) return;
 
     const itemId = itemEl.dataset.itemId!;
@@ -41,11 +52,9 @@ export class DragDropHandler {
     event.dataTransfer.effectAllowed = 'move';
 
     setTimeout(() => {
-      ids.forEach(id => {
-        this.container
-          .querySelector(`[data-item-id="${id}"]`)
-          ?.classList.add('is-dragging');
-      });
+      for (const row of this.container.querySelectorAll<HTMLElement>('[data-item-id]')) {
+        if (ids.includes(row.dataset.itemId!)) row.classList.add('is-dragging');
+      }
     }, 0);
   };
 
@@ -56,7 +65,7 @@ export class DragDropHandler {
     const targetEl = (event.target as Element).closest<HTMLElement>(
       '[data-item-id]'
     );
-    if (!targetEl || !event.dataTransfer) return;
+    if (!targetEl || this.cannotReceiveDrop(targetEl) || !event.dataTransfer) return;
 
     try {
       const rawData = event.dataTransfer.getData('application/json');
@@ -111,7 +120,7 @@ export class DragDropHandler {
         '.drop-target-above, .drop-target-below, .drop-target-folder'
       );
 
-      if (targetEl && payload.itemIds?.length > 0 && targetEl.dataset.itemId) {
+      if (targetEl && !this.cannotReceiveDrop(targetEl) && payload.itemIds?.length > 0 && targetEl.dataset.itemId) {
         const targetId = targetEl.dataset.itemId;
         let position: 'before' | 'after' | 'into';
 
@@ -119,11 +128,9 @@ export class DragDropHandler {
         else if (targetEl.classList.contains('drop-target-below')) position = 'after';
         else position = 'into';
 
-        this.commandBus.execute('file:move', {
-          itemIds: payload.itemIds,
-          targetId,
-          position,
-        });
+        void Promise.resolve(this.commandBus.execute('file:move', {
+          itemIds: payload.itemIds, targetId, position,
+        })).catch(() => {});
       }
     } catch (e) {
       console.error('[DragDropHandler] Failed to parse dragged data', e);
@@ -133,6 +140,7 @@ export class DragDropHandler {
   };
 
   handleDragEnd = (): void => {
+    this.cancelAutoExpand();
     this.container
       .querySelectorAll('.is-dragging')
       .forEach(el => el.classList.remove('is-dragging'));

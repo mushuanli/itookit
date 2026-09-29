@@ -1,10 +1,12 @@
 import type { ResourceListOptions } from '@itookit/ui-common';
-import type { VFSNodeUI } from './types';
+import type { FavoriteAction, VFSNodeUI } from './types';
 export type { FileCreationConfig } from '@itookit/ui-common';
 export type BrowserBaseOptions = ResourceListOptions<VFSNodeUI>;
 
 /** A fixed navigation action; its active state is independent of mutable resource selection. */
 export interface DirectoryAction {
+    /** Insert after the direct child with this resource ID; falls back to the end. */
+    afterChildId?: (parentPath: string) => string | undefined;
     label: string;
     /** Trusted icon markup supplied by the host. */
     icon?: string;
@@ -13,4 +15,12 @@ export interface DirectoryAction {
     visible(path: string): boolean;
     disabled?(path: string): boolean;
     run(path: string): Promise<void>;
+}
+
+/** Host-owned row actions shared by the shell and the list that renders them. */
+export interface VFSRowActionOptions {
+    /** Favorite state and toggle; rows without state hide the control. */
+    favoriteAction?: FavoriteAction;
+    /** Host deletion for entries that declare `presentation.quickDelete`, after inline confirmation. */
+    onQuickDelete?: (node: VFSNodeUI) => Promise<void>;
 }

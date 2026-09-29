@@ -7,6 +7,7 @@ import { fromVFS } from '../src/browser/from-vfs';
 import { displayNode } from '../src/browser/SourceAdapter';
 import { formatFileSize } from '../src/utils/file-size';
 import { createFileItemHTML } from '../src/ui/components/NodeList/items/itemTemplates';
+import { resolveRowPolicy } from '../src/utils/row-policy';
 
 const file = { path: '/config.yaml', name: 'config.yaml', parentPath: '/', type: 'file' as const,
   size: 2048, createdAt: 0, modifiedAt: 0, version: 1, tags: [], metadata: { title: 'Old title', _fileDetails: true } };
@@ -31,7 +32,8 @@ it('keeps type icons alongside pin markers and displays known zero separately fr
   const mapped = mapFSNodeToUIItem(file); mapped.metadata.custom.isPinned = true;
   const html = createFileItemHTML(mapped, { isActive: false, isSelected: false, isOutlineExpanded: false,
     isSelectionMode: false, isConfirmingDelete: false, searchQueries: [],
-    uiSettings: { sortBy: 'title', density: 'compact', showSummary: false, showTags: false, showBadges: false } });
+    uiSettings: { sortBy: 'title', density: 'compact', showSummary: false, showTags: false, showBadges: false } },
+    resolveRowPolicy(false, mapped));
   expect(html).toContain('2 KiB'); expect(html).toContain(FILE_ICONS.config); expect(html).toContain(FILE_ICONS.pin);
   expect(mapFSNodeToUIItem({ ...file, metadata: {} }).presentation?.fileDetails).toBe(false);
 });

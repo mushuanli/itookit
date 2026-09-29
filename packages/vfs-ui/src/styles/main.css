@@ -128,7 +128,7 @@
 }
 .vfs-node-list__new-btn:focus-visible,
 .vfs-node-list__secondary-action:focus-visible { outline: 2px solid var(--primary-color, #6366f1); outline-offset: 2px; }
-.vfs-node-list__new-btn:disabled { opacity: .45; cursor: wait; }
+.vfs-node-list__new-btn:disabled { opacity: .45; cursor: not-allowed; }
 .vfs-node-list__new-btn--icon { padding: 6px; color: var(--text-secondary, #64748b); }
 .vfs-node-list__new-btn--icon svg { width: 16px; height: 16px; flex-shrink: 0; }
 .vfs-node-list__button-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -386,6 +386,7 @@
 .vfs-node-item:hover .vfs-node-item__action-btn {
   opacity: 1;
 }
+.vfs-node-item:focus-within .vfs-node-item__action-btn { opacity: 1; }
 
 /* --- Delete Button --- */
 .vfs-node-item__delete-btn {
@@ -1533,3 +1534,13 @@
 .vfs-ui [data-file-icon="slides"] { color: var(--file-slides); }
 .vfs-ui [data-file-icon="audio"] { color: var(--file-audio); }
 .vfs-ui [data-file-icon="database"] { color: var(--file-database); }
+
+/* Favorites mirror host state: an active star always shows, an inactive one
+   follows the row action reveal and is never hidden on devices without hover. */
+.vfs-node-item__favorite-btn { color: var(--color-gray-400); flex-shrink: 0; }
+.vfs-node-item__favorite-btn[aria-pressed="false"] path { fill: none; stroke: currentColor; }
+.vfs-node-item__favorite-btn[aria-pressed="true"] { opacity: 1; }
+.vfs-node-item__favorite-btn:hover { background-color: var(--color-gray-100); }
+@media (hover: none) {
+  .vfs-node-item__favorite-btn { opacity: 1; }
+}

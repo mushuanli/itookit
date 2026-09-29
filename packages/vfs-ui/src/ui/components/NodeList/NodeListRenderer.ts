@@ -2,14 +2,14 @@
  * @file vfs-ui/ui/components/NodeList/NodeListRenderer.ts
  * @desc Handles rendering of node items in the list.
  */
-import type { VFSNodeUI } from '../../../contracts/types';
+import type { FavoriteAction, VFSNodeUI } from '../../../contracts/types';
 import type { NodeListState } from './NodeListState';
 import type { SelectionHandler } from './handlers/SelectionHandler';
 import { BaseNodeItem } from './items/BaseNodeItem';
 import { FileItem, FileItemProps } from './items/FileItem';
 import { DirectoryItem, DirectoryItemProps } from './items/DirectoryItem';
 import { createItemInputHTML } from './templates';
-import { isItemReadOnly } from '../../../utils/helpers';
+import { resolveRowPolicy, type RowPolicy } from '../../../utils/row-policy';
 import { DirectoryPreview } from './DirectoryPreview';
 
 export interface RenderContext {
@@ -19,13 +19,31 @@ export interface RenderContext {
   onPreviewChange?: () => void;
 }
 
+export interface NodeListRendererOptions {
+  selectionHandler: SelectionHandler;
+  leafDirectory?: (node: VFSNodeUI) => boolean;
+  cardDirectory?: (node: VFSNodeUI) => boolean;
+  directoryPreview?: (node: VFSNodeUI) => number | undefined;
+  /** Host-owned favorite state; undefined rows render no control. */
+  favoriteAction?: FavoriteAction;
+}
+
 export class NodeListRenderer {
   private itemInstances: Map<string, BaseNodeItem> = new Map();
   private readonly preview: DirectoryPreview;
+  private readonly selectionHandler: SelectionHandler;
+  private readonly leafDirectory?: (node: VFSNodeUI) => boolean;
+  private readonly cardDirectory?: (node: VFSNodeUI) => boolean;
+  private readonly favoriteAction?: FavoriteAction;
   private rerender?: (focusId: string) => void;
 
-  constructor(private readonly selectionHandler: SelectionHandler, private readonly leafDirectory?: (node: VFSNodeUI) => boolean, private readonly cardDirectory?: (node: VFSNodeUI) => boolean,
-    directoryPreview?: (node: VFSNodeUI) => number | undefined) { this.preview = new DirectoryPreview(directoryPreview); }
+  constructor(options: NodeListRendererOptions) {
+    this.selectionHandler = options.selectionHandler;
+    this.leafDirectory = options.leafDirectory;
+    this.cardDirectory = options.cardDirectory;
+    this.favoriteAction = options.favoriteAction;
+    this.preview = new DirectoryPreview(options.directoryPreview);
+  }
 
   renderItems(
     container: HTMLElement,
@@ -92,26 +110,21 @@ export class NodeListRenderer {
       if (visitedIds.has(item.id)) continue;
       visitedIds.add(item.id);
 
+      const policy = resolveRowPolicy(state.readOnly, item);
       let itemInstance = this.itemInstances.get(item.id);
 
-      if (!itemInstance) {
-        if (item.type === 'file') {
-          const props = this.getFileItemProps(item, state, context.confirmDeleteId);
-          itemInstance = new FileItem(item, state.readOnly || isItemReadOnly(item), props);
-        } else {
-          const props = this.getDirectoryItemProps(item, state);
-          itemInstance = new DirectoryItem(item, state.readOnly || isItemReadOnly(item), props);
-        }
-      } else {
-        itemInstance.updateItem(item);
+      // Policy is baked into item markup; any policy change must rebuild the row.
+      if (itemInstance && (itemInstance.policy.readOnly !== policy.readOnly
+        || itemInstance.policy.fixed !== policy.fixed || itemInstance.policy.inlineDelete !== policy.inlineDelete
+        || itemInstance.policy.hostOwnedDelete !== policy.hostOwnedDelete
+        || (itemInstance instanceof FileItem) !== (item.type === 'file'))) {
+        itemInstance.destroy(); itemInstance = undefined;
       }
-
-      if (item.type === 'file') {
-        const props = this.getFileItemProps(item, state, context.confirmDeleteId);
-        (itemInstance as FileItem).update(props);
+      if (itemInstance) {
+        itemInstance.updateItem(item);
+        this.updateItemProps(itemInstance, item, state, context.confirmDeleteId);
       } else {
-        const props = this.getDirectoryItemProps(item, state);
-        (itemInstance as DirectoryItem).update(props);
+        itemInstance = this.createItem(item, policy, state, context.confirmDeleteId);
       }
 
       parentEl.appendChild(itemInstance.element);
@@ -146,6 +159,17 @@ export class NodeListRenderer {
     }
   }
 
+  private createItem(item: VFSNodeUI, policy: RowPolicy, state: NodeListState, confirmDeleteId: string | null): BaseNodeItem {
+    return item.type === 'file'
+      ? new FileItem(item, policy, this.getFileItemProps(item, state, confirmDeleteId))
+      : new DirectoryItem(item, policy, this.getDirectoryItemProps(item, state, confirmDeleteId));
+  }
+
+  private updateItemProps(instance: BaseNodeItem, item: VFSNodeUI, state: NodeListState, confirmDeleteId: string | null): void {
+    if (item.type === 'file') (instance as FileItem).update(this.getFileItemProps(item, state, confirmDeleteId));
+    else (instance as DirectoryItem).update(this.getDirectoryItemProps(item, state, confirmDeleteId));
+  }
+
   private getFileItemProps(
     item: VFSNodeUI,
     state: NodeListState,
@@ -159,14 +183,18 @@ export class NodeListRenderer {
       searchQueries: state.textSearchQueries,
       uiSettings: state.uiSettings,
       isConfirmingDelete: confirmDeleteId === item.id,
+      favorite: this.favoriteAction?.state(item),
     };
   }
 
   private getDirectoryItemProps(
     item: VFSNodeUI,
-    state: NodeListState
+    state: NodeListState,
+    confirmDeleteId: string | null
   ): DirectoryItemProps {
     return {
+      isConfirmingDelete: confirmDeleteId === item.id,
+      favorite: this.favoriteAction?.state(item),
       isLeaf: this.leafDirectory?.(item),
       isCard: this.cardDirectory?.(item),
       isActive: item.id === state.activeId,

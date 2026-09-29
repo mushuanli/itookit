@@ -1,4 +1,4 @@
-import { FILE_ICONS, fileTypeIcon } from '@itookit/common';
+import { ACTION_ICONS, FILE_ICONS, fileTypeIcon } from '@itookit/common';
 import { formatFileSize } from '../../../../utils/file-size';
 /**
  * @file vfs-ui/ui/components/NodeList/items/itemTemplates.ts
@@ -6,6 +6,7 @@ import { formatFileSize } from '../../../../utils/file-size';
  */
 import { Heading, escapeHTML, t } from '@itookit/common';
 import type { VFSNodeUI, UISettings } from '../../../../contracts/types';
+import type { RowPolicy } from '../../../../utils/row-policy';
 import { formatRelativeTime } from '../../../../utils/helpers';
 
 const highlight = (text: string | undefined, queries: string[]): string => {
@@ -41,7 +42,21 @@ const createOutlineHTML = (headings: Heading[]): string => {
   return `<ul class="vfs-node-item__outline-list">${renderItems(headings)}</ul>`;
 };
 
+/** Shared two-step deletion control for files and host-selected navigation entries. */
+const createQuickDeleteHTML = (confirming = false): string => {
+  const label = escapeHTML(t(confirming ? 'vfs.action.confirmQuickDelete' : 'action.delete'));
+  return `<button type="button" class="vfs-node-item__action-btn vfs-node-item__delete-btn ${confirming ? 'is-confirming' : ''}" data-action="${confirming ? 'delete-direct' : 'delete-init'}" title="${label}" aria-label="${label}"><span aria-hidden="true">${confirming ? ACTION_ICONS.delete : ACTION_ICONS.close}</span></button>`;
+};
+
+/** Host-owned favorite control; the row hides it when the host reports no state. */
+const createFavoriteHTML = (active?: boolean): string => {
+  if (active === undefined) return '';
+  const label = escapeHTML(t(active ? 'vfs.favorites.remove' : 'vfs.favorites.add'));
+  return `<button type="button" class="vfs-node-item__action-btn vfs-node-item__favorite-btn" data-action="favorite-toggle" aria-pressed="${active}" title="${label}" aria-label="${label}">${ACTION_ICONS.favorite}</button>`;
+};
+
 export interface FileItemProps {
+  favorite?: boolean;
   isActive: boolean;
   isSelected: boolean;
   isOutlineExpanded: boolean;
@@ -54,7 +69,7 @@ export interface FileItemProps {
 export const createFileItemHTML = (
   file: VFSNodeUI,
   props: FileItemProps,
-  isReadOnly = false
+  policy: RowPolicy
 ): string => {
   const { id, metadata, content, headings = [], icon } = file;
   const { title, lastModified, tags = [], custom = {} } = metadata;
@@ -71,19 +86,9 @@ export const createFileItemHTML = (
   const { unread: hasUnreadUpdate, attention: hasWaitingInput } = file.presentation ?? {};
   const summary = content?.summary || '';
   const connLabel = file.presentation?.subtitle;
+  const isReadOnly = policy.readOnly;
 
-  let deleteBtnHTML = '';
-  if (!isReadOnly) {
-    const action = isConfirmingDelete ? 'delete-direct' : 'delete-init';
-    const iconHtml = isConfirmingDelete
-      ? '<i class="fas fa-trash"></i>'
-      : '×';
-    const className = isConfirmingDelete
-      ? 'vfs-node-item__action-btn vfs-node-item__delete-btn is-confirming'
-      : 'vfs-node-item__action-btn vfs-node-item__delete-btn';
-    const titleText = isConfirmingDelete ? '点击立即删除' : '移除';
-    deleteBtnHTML = `<button class="${className}" data-action="${action}" title="${titleText}">${iconHtml}</button>`;
-  }
+  const deleteBtnHTML = policy.inlineDelete ? createQuickDeleteHTML(isConfirmingDelete) : '';
 
   const hasOutline = headings?.length > 0;
   const outlineToggleHTML = hasOutline
@@ -119,10 +124,12 @@ export const createFileItemHTML = (
   const displayIcon = icon || fileTypeIcon(title);
 
   const menuHTML = custom.navigationMenu ? `<button type="button" class="vfs-node-item__action-btn" data-action="item-menu" aria-label="${escapeHTML(t('vfs.columns.more'))}">⋯</button>` : '';
-  const hasActions = deleteBtnHTML || outlineToggleHTML || menuHTML;
+  const favoriteHTML = createFavoriteHTML(props.favorite);
+  const hasActions = deleteBtnHTML || outlineToggleHTML || menuHTML || favoriteHTML;
   const actionsHTML = hasActions
     ? `<div class="vfs-node-item__actions">
         ${menuHTML}
+        ${favoriteHTML}
         ${deleteBtnHTML}
         ${outlineToggleHTML}
       </div>`
@@ -164,6 +171,8 @@ export const createFileItemHTML = (
 };
 
 export interface DirectoryItemProps {
+  favorite?: boolean;
+  isConfirmingDelete?: boolean;
   isLeaf?: boolean;
   isCard?: boolean;
   isActive?: boolean;
@@ -177,7 +186,7 @@ export interface DirectoryItemProps {
 export const createDirectoryItemHTML = (
   dir: VFSNodeUI,
   props: DirectoryItemProps,
-  isReadOnly = false
+  policy: RowPolicy
 ): string => {
   const { id, metadata, icon } = dir;
   const { title, tags = [] } = metadata;
@@ -188,6 +197,7 @@ export const createDirectoryItemHTML = (
     isSelectionMode,
     searchQueries,
   } = props;
+  const isReadOnly = policy.readOnly;
 
   const checkbox =
     !isReadOnly && isSelectionMode
@@ -211,6 +221,8 @@ export const createDirectoryItemHTML = (
             ${tagsHtml}
           </div>
         </div>
+        ${createFavoriteHTML(props.favorite)}
+        ${policy.inlineDelete ? createQuickDeleteHTML(props.isConfirmingDelete) : ''}
         ${metadata.custom.navigationMenu ? `<button type="button" class="vfs-directory-item__menu" data-action="item-menu" aria-label="${escapeHTML(t('vfs.columns.more'))}">⋯</button>` : ''}
       </div>
       <div class="vfs-directory-item__children" style="${isExpanded ? '' : 'display:none;'}"></div>

@@ -4,6 +4,9 @@
 import type { LocaleStrings } from './zh-CN';
 
 export const en: LocaleStrings = {
+    'vfs.favorites.add': 'Add to favorites',
+    'vfs.favorites.remove': 'Remove from favorites',
+    'vfs.action.confirmQuickDelete': 'Click again to delete',
     'project.draftDiscard': 'Clear draft',
     'project.draftSaveFailed': 'Draft save failed. Keep this page open and copy your input.',
     'project.draftResume': 'Opened the previous session. Check its messages before sending again.',

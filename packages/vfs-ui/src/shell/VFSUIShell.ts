@@ -12,7 +12,7 @@ import {
     generateShortUUID,
     traceBoot,
 } from '@itookit/common';
-import type { BrowserBaseOptions } from '../contracts/options';
+import type { BrowserBaseOptions, VFSRowActionOptions } from '../contracts/options';
 import type { IFileSystem } from '@itookit/vfs-core';
 
 import type {
@@ -44,7 +44,7 @@ import { MoveToModal } from '../ui/components/MoveToModal/MoveToModal';
 
 import { findNodeById } from '../utils/helpers';
 
-export interface VFSUIShellOptions extends BrowserBaseOptions {
+export interface VFSUIShellOptions extends BrowserBaseOptions, VFSRowActionOptions {
   onError?: (error: unknown) => void;
   persistence?: boolean;
   source?: import('../contracts/source').BrowserSource;
@@ -474,6 +474,8 @@ export class VFSUIShell {
       toolbar: this.options.toolbar, toolbarOptions: this.options.toolbarOptions,
       activateDirectories: this.options.activateDirectories,
       directoryAction: this.options.directoryAction,
+      onQuickDelete: this.options.onQuickDelete,
+      favoriteAction: this.options.favoriteAction,
       primaryAction: this.options.primaryAction,
       exportDirectories: this.options.exportDirectories,
       searchFilter: this.options.searchFilter,
@@ -484,11 +486,12 @@ export class VFSUIShell {
     const columns = this.options.columns;
     if (columns) {
       this.columnLayout = new ColumnLayout(this.options.sessionListContainer, columns);
-      const navigation = new ColumnState(this.statePort, (state, query) => columns.navigationItems(state.items, query), () => null, columns.navigationSearch, columns.navigationActiveId);
-      this.contentState = new ColumnState(this.statePort, state => {
+      const navigation = new ColumnState({ source: this.statePort, items: (state, query) => columns.navigationItems(state.items, query),
+        root: () => null, onSearch: columns.navigationSearch, resolveActive: columns.navigationActiveId });
+      this.contentState = new ColumnState({ source: this.statePort, items: state => {
         const items = this.contentRoot === '/' ? state.items : findNodeById(state.items, this.contentRoot ?? '')?.children ?? [];
         return pruneLeaves(columns.contentItems?.(items) ?? items, columns.contentLeaf);
-      }, () => this.contentRoot);
+      }, root: () => this.contentRoot });
       this.navigationList = new NodeList({ ...listOptions, container: this.columnLayout.navigation,
         title: columns.navigationTitle, searchPlaceholder: columns.navigationSearchPlaceholder ?? listOptions.searchPlaceholder, store: navigation, commandBus: navigation.commands(this.commandPort),
         leafDirectory: columns.navigationLeaf, cardDirectory: columns.navigationCard,

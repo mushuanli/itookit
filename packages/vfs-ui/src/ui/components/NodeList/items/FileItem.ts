@@ -3,13 +3,14 @@
  */
 import { BaseNodeItem } from './BaseNodeItem';
 import type { VFSNodeUI } from '../../../../contracts/types';
+import type { RowPolicy } from '../../../../utils/row-policy';
 import { createFileItemHTML, FileItemProps } from './itemTemplates';
 
 export class FileItem extends BaseNodeItem {
   private props: FileItemProps;
 
-  constructor(item: VFSNodeUI, isReadOnly: boolean, props: FileItemProps) {
-    super(item, isReadOnly);
+  constructor(item: VFSNodeUI, policy: RowPolicy, props: FileItemProps) {
+    super(item, policy);
     this.props = props;
     this.render();
   }
@@ -22,7 +23,7 @@ export class FileItem extends BaseNodeItem {
   }
 
   protected render(): void {
-    this.replaceElement(createFileItemHTML(this.item, this.props, this.isReadOnly));
+    this.replaceElement(createFileItemHTML(this.item, this.props, this.policy));
   }
 }
 

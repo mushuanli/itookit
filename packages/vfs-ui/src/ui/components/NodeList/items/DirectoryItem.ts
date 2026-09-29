@@ -3,14 +3,15 @@
  */
 import { BaseNodeItem } from './BaseNodeItem';
 import type { VFSNodeUI } from '../../../../contracts/types';
+import type { RowPolicy } from '../../../../utils/row-policy';
 import { createDirectoryItemHTML, DirectoryItemProps } from './itemTemplates';
 
 export class DirectoryItem extends BaseNodeItem {
   public childrenContainer!: HTMLElement;
   private props: DirectoryItemProps;
 
-  constructor(item: VFSNodeUI, isReadOnly: boolean, props: DirectoryItemProps) {
-    super(item, isReadOnly);
+  constructor(item: VFSNodeUI, policy: RowPolicy, props: DirectoryItemProps) {
+    super(item, policy);
     this.props = props;
     this.render();
   }
@@ -25,7 +26,7 @@ export class DirectoryItem extends BaseNodeItem {
   protected render(): void {
     const oldChildren = this.childrenContainer;
     this.replaceElement(
-      createDirectoryItemHTML(this.item, this.props, this.isReadOnly)
+      createDirectoryItemHTML(this.item, this.props, this.policy)
     );
     this.childrenContainer = this.element.querySelector(
       '.vfs-directory-item__children'

@@ -19,6 +19,8 @@ browser.destroy();
 
 此入口默认只浏览，不隐式创建文件或保存选择状态。传入 `actions` 可增加业务操作；同一动作可出现在工具栏、单项和多选菜单。普通文件 CRUD、标签、大纲和双列装配使用 `createVFSUI(options, fs)`；它与简明入口共享状态、列表和交互实现。
 
+`createVFSUI` 通过端口接收宿主策略而不是复制业务：`favoriteAction.state/toggle` 提供收藏状态与切换，`onQuickDelete` 执行声明了 `presentation.quickDelete` 的虚拟条目删除；行级只读、固定条目与行内删除的判定集中在 `src/utils/row-policy.ts`。
+
 - [接口与组件](./doc/components.md)
 - [边界与迁移记录](../../doc/design/vfs-ui-boundary-review.md)
 - [开发说明](./AGENTS.md)

@@ -3,18 +3,22 @@
  * @desc Abstract base for individual list items.
  */
 import type { VFSNodeUI } from '../../../../contracts/types';
+import { ROW_FLAGS, type RowPolicy } from '../../../../utils/row-policy';
 
 export abstract class BaseNodeItem {
   public element: HTMLElement;
   protected item: VFSNodeUI;
-  protected readonly isReadOnly: boolean;
+  /** Policy resolved when the item was built; the renderer rebuilds on a read-only flip. */
+  public readonly policy: RowPolicy;
 
-  constructor(item: VFSNodeUI, isReadOnly: boolean) {
+  constructor(item: VFSNodeUI, policy: RowPolicy) {
     this.item = item;
-    this.isReadOnly = isReadOnly;
+    this.policy = policy;
     this.element = document.createElement('div');
-    if (!isReadOnly) this.element.draggable = true;
+    if (!policy.readOnly) this.element.draggable = true;
   }
+
+  get isReadOnly(): boolean { return this.policy.readOnly; }
 
   updateItem(newItem: VFSNodeUI): void {
     const needsRerender = this.shouldRerender(this.item, newItem);
@@ -39,9 +43,9 @@ export abstract class BaseNodeItem {
     this.element.classList.toggle('vfs-node-item--unavailable', disabled);
     this.element.setAttribute('aria-disabled', String(disabled));
     this.element.inert = disabled;
-    const fixed = this.item.metadata.custom._fixedEntry === true;
-    this.element.dataset.fixedEntry = String(fixed);
-    if (disabled || fixed) this.element.draggable = false;
+    this.element.dataset[ROW_FLAGS.fixed] = String(this.policy.fixed);
+    this.element.dataset[ROW_FLAGS.readOnly] = String(this.policy.readOnly);
+    this.element.draggable = !disabled && !this.policy.fixed && !this.policy.readOnly;
   }
 
   protected shouldRerender(oldItem: VFSNodeUI, newItem: VFSNodeUI): boolean {
