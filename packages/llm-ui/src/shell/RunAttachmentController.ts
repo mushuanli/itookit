@@ -3,6 +3,7 @@ import type {
     InteractionRequest,
     JsonValue,
     TaskHandle,
+    TaskRecord,
     TaskSignal,
 } from '@itookit/durable-kernel';
 import { randomUUID } from '@itookit/common';
@@ -31,6 +32,12 @@ export class RunAttachmentController {
     ) {}
 
     get activeTaskId(): string | undefined { return this.handle?.id; }
+
+    /** Terminal outcomes (stdout, failure reason) belong to the host; the controller only exposes them. */
+    async current(): Promise<TaskRecord | undefined> {
+        if (!this.handle) return undefined;
+        return (await this.handle.status()).task;
+    }
 
     /** Changes synchronously whenever an attachment is replaced or detached. */
     get revision(): number { return this.generation; }

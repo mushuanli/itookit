@@ -85,7 +85,8 @@ it('routes editor approvals to the captured interaction and clears resolved or t
     setup();
     const attachment = { revision: 3, respondApproval: vi.fn(async () => {}) };
     const editor = { chatInput: input, currentSessionId: 'session', runAttachment: attachment,
-        showFlowInput: () => false, restorePrivilegedTaskAttachment: async () => {}, statusIndicator: { update: vi.fn() } };
+        showFlowInput: () => false, restorePrivilegedTaskAttachment: async () => {}, showDirectCommandOutput: async () => {},
+        statusIndicator: { update: vi.fn() } };
     const methods = LLMWorkspaceEditor.prototype as any;
     const request = { id: 'approval', kind: 'approval', prompt: 'Approve?', payload: { command: 'inspect' } };
     methods.handleRunWaiting.call(editor, request); note().value = 'checked'; click('approve');

@@ -24,6 +24,10 @@ Harness 工具卡片由 `node:appended` 立即挂载，再消费 `tool:running/s
 
 斜杠命令链见 [slash-commands.md](./doc/slash-commands.md)。
 
+`commands/direct-command.ts` 分离输入策略 `parseDirectCommand`、宿主执行分派 `dispatchDirectCommand` 与终态读取 `readDirectCommandOutcome`；发送、用户重发、助手重试（追溯关联用户输入）、编辑重跑及会话重新运行共用该规则。`CommandContext.executeDirectCommand` 连接已有 exec 控制面；`resolveSubmission` 仅普通发送使用。普通消息仍走各自轮次/分支命令，直接命令不会回退到 LLM，也不锁定对话模式。编辑器仅装配端口，不识别输入语法。
+
+直接命令没有会话轮次：`LLMWorkspaceEditor.handleRunEvent` 在 `task.succeeded/failed/cancelled` 时经 `RunAttachmentController.current()` 读取 `task.exit`，把 stdout/退出码或失败原因渲染到 `ChatInputView.showToolOutput`（`ToolOutputPanel`，图标来自 `FEEDBACK_ICONS`）；输出不写回会话历史，失败不再只留在 console。
+
 ## 运行
 
 ```bash

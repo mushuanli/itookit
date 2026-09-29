@@ -72,7 +72,7 @@ it('deduplicates editor reruns before admission and captures the selected mode',
         return f.responses.get(command);
     });
     const settings = { executionMode: 'agent' };
-    const editor = { currentSessionId: 's', rerunPending: false, sessionManager: { isGenerating: () => false },
+    const editor = { options: {}, currentSessionId: 's', rerunPending: false, sessionManager: { isGenerating: () => false },
         commandBus: { execute: f.execute }, chatInput: { getConfig: () => ({ settings }) } };
     const run = () => (LLMWorkspaceEditor.prototype as any).rerunSession.call(editor);
     const first = run(); await run();

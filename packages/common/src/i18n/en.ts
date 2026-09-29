@@ -4,6 +4,13 @@
 import type { LocaleStrings } from './zh-CN';
 
 export const en: LocaleStrings = {
+    'chatInput.command.empty': 'Enter a command after !, for example !ls.',
+    'chatInput.command.attachments': 'Direct commands do not accept attachments. Remove them and try again.',
+    'chatInput.command.unavailable': 'Command execution is unavailable. Local projects need a local execution backend; for remote projects, check execution in fs-agent.',
+    'chatInput.command.failed': 'Command execution failed.',
+    'chatInput.command.cancelled': 'Command cancelled.',
+    'chatInput.toolOutput.done': 'Done',
+    'chatInput.toolOutput.failed': 'Failed',
     'project.favorites': 'Favorites',
     'project.favoriteSession': 'Session',
     'vfs.favorites.add': 'Add to favorites',
@@ -15,9 +22,6 @@ export const en: LocaleStrings = {
     'project.unknownSize': 'unknown',
     'project.largeTextPreview': 'Only the first 256 KiB is shown. This is an incomplete, read-only preview and cannot be saved.',
     'project.largeBinaryPreview': 'This large file cannot be previewed inline. Open it with an external tool.',
-    'remote.enableExecution': 'Enable remote commands',
-    'remote.disableExecution': 'Disable remote commands',
-    'remote.executionUnavailable': 'Command execution is not enabled on this remote file system.',
     'remote.selectAvailable': 'Select an available remote file system',
     'remote.recheck': 'Check again',
     'remote.error.authentication': 'Username or password rejected (HTTP 401). Check the server credentials.',

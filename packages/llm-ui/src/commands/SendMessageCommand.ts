@@ -3,6 +3,7 @@
 
 import { SessionCommand, type SessionOrigin, type HistoryPolicy } from '@itookit/llm-session';
 import { Command } from './Command';
+import { dispatchDirectCommand } from './direct-command';
 import { Toast } from '@itookit/ui-common';
 import { ErrorHandler } from '../utils/errorHandler';
 import type { ChatOverrides } from '../domain/types';
@@ -27,6 +28,12 @@ export class SendMessageCommand extends Command<SendMessageParams, boolean> {
             executionMode: overrides?.executionMode ?? this.ctx.chatInput.getConfig?.().settings?.executionMode ?? 'chat',
             ...(overrides?.flowParameters ? { flowParameters: structuredClone(overrides.flowParameters) } : {}),
         };
+        try {
+            if (await dispatchDirectCommand(text, files, this.ctx.executeDirectCommand)) return true;
+        } catch (error) {
+            this.ctx.chatInput.restoreInput(text, agentId);
+            throw error;
+        }
         const sessionId = this.ctx.getSessionId();
         if (!sessionId) throw new Error('No session loaded');
 
@@ -37,6 +44,7 @@ export class SendMessageCommand extends Command<SendMessageParams, boolean> {
         this.ctx.historyView.scrollToBottom(true);
 
         try {
+            if (submission === undefined && this.ctx.resolveSubmission) submission = await this.ctx.resolveSubmission();
             let finalText = text || '';
 
             if (files.length > 0) {

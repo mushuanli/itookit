@@ -57,7 +57,9 @@ it('freezes the send mode before an attachment upload and keeps Flow routing aut
     const command = new SendMessageCommand(context as never);
     const overrides: ChatOverrides = { executionMode: 'chat' };
     const sending = command.run({ text: 'goal', files: [new File(['text'], 'note.txt')], overrides });
-    overrides.executionMode = 'agent'; uploaded([]); await sending;
+    overrides.executionMode = 'agent';
+    await vi.waitFor(() => expect(uploaded).toBeTypeOf('function'));
+    uploaded([]); await sending;
     expect(execute).toHaveBeenLastCalledWith(SessionCommand.Send, expect.objectContaining({
         overrides: expect.objectContaining({ executionMode: 'chat' }),
         sendIntent: expect.objectContaining({ execution: { kind: 'agent', agentId: 'default', mode: 'chat' } }),

@@ -5,6 +5,13 @@
 // Interpolation syntax:   {param}  e.g. '已导入 {count} 个 Skill'
 
 export const zhCN = {
+    'chatInput.command.empty': '请在 ! 后输入命令，例如 !ls。',
+    'chatInput.command.attachments': '直接执行命令不支持附件，请移除附件后重试。',
+    'chatInput.command.unavailable': '当前会话没有命令执行能力。本机项目需要本机执行环境；远程项目请检查 fs-agent 是否开启 execution。',
+    'chatInput.command.failed': '命令执行失败。',
+    'chatInput.command.cancelled': '命令已取消。',
+    'chatInput.toolOutput.done': '执行完成',
+    'chatInput.toolOutput.failed': '执行失败',
     'project.favorites': '收藏夹',
     'project.favoriteSession': '会话',
     'vfs.favorites.add': '收藏',
@@ -16,9 +23,6 @@ export const zhCN = {
     'project.unknownSize': '未知',
     'project.largeTextPreview': '仅预览前 256 KiB，未加载全文；此预览只读，不能保存。',
     'project.largeBinaryPreview': '此大文件无法内嵌预览，请使用外部工具打开。',
-    'remote.enableExecution': '启用远程命令',
-    'remote.disableExecution': '禁用远程命令',
-    'remote.executionUnavailable': '该远程文件系统尚未启用命令执行。',
     'remote.selectAvailable': '请选择可用的远程文件系统',
     'remote.recheck': '重新检查',
     'remote.error.authentication': '用户名或密码不正确（HTTP 401）。请核对服务器配置的用户名和密码。',

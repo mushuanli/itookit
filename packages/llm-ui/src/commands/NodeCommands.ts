@@ -3,6 +3,7 @@
 
 import { SessionCommand, type SessionGroup, type ExecutionNode } from '@itookit/llm-session';
 import { Command } from './Command';
+import { dispatchDirectCommand } from './direct-command';
 import type { ErrorSeverity } from '../utils/errorHandler';
 
 
@@ -56,6 +57,10 @@ export class RegenerateCommand extends Command<{ nodeId: string }> {
             );
             if (!check.allowed) throw new Error(check.reason || 'Cannot regenerate');
 
+            const user = session.role === 'user' ? session
+                : sessions.find(item => item.role === 'user' && (item.id === session.parentUserSessionId
+                    || (!!session.persistedNodeId && item.persistedNodeId === session.persistedNodeId)));
+            if (user && await dispatchDirectCommand(user.content ?? '', user.files ?? [], this.ctx.executeDirectCommand)) return;
             this.ctx.chatInput.setLoading(true);
 
             if (session.role === 'user') {
@@ -120,6 +125,11 @@ export class EditAndRetryCommand extends Command<{ nodeId: string }> {
         const session = sessions.find(s => s.id === nodeId);
         if (!session || session.role !== 'user') return;
 
+        const exec = this.ctx.executeDirectCommand;
+        if (await dispatchDirectCommand(session.content ?? '', session.files ?? [], exec ? async command => {
+            await this.ctx.commands.execute(SessionCommand.CommitEdit, { messageId: nodeId, newContent: session.content ?? '', autoRerun: false });
+            await exec(command);
+        } : undefined)) return;
         this.ctx.chatInput.setLoading(true);
         await this.ctx.commands.execute(SessionCommand.CommitEdit, {
             messageId: nodeId,

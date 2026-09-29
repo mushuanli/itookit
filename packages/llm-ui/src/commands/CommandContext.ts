@@ -46,4 +46,7 @@ export interface CommandContext {
 
     // 上下文
     getSessionId: () => string;
+    /** Execute explicit user shell input through the host's existing process policy. */
+    executeDirectCommand?: (command: string) => Promise<void>;
+    resolveSubmission?: () => Promise<import('@itookit/common').SendIntent['submission']>;
 }

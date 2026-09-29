@@ -1,10 +1,12 @@
 import { t, type ChatExecutionMode, type ICommandBus } from '@itookit/common';
 import { SessionCommand, type SessionGroup } from '@itookit/llm-session';
 import { rerunSessionFlow, type FlowRerunContext } from '../flows/rerun-flow';
+import { dispatchDirectCommand } from '../commands/direct-command';
 
 /** Start a new run from persisted input; completed effects and files are not rolled back. */
 export async function rerunSession(
     commands: ICommandBus, sessionId: string, mode: ChatExecutionMode, signal: AbortSignal,
+    exec?: (command: string) => Promise<void>,
 ): Promise<void> {
     const flow = await commands.execute<FlowRerunContext | null>(SessionCommand.FlowRerunContext);
     if (await commands.execute(SessionCommand.GetCurrentId) !== sessionId || signal.aborted) return;
@@ -16,6 +18,7 @@ export async function rerunSession(
     const check = await commands.execute<{ allowed: boolean; reason?: string }>(SessionCommand.CanRegenerate, { messageId: user.id });
     if (await commands.execute(SessionCommand.GetCurrentId) !== sessionId || signal.aborted) return;
     if (!check.allowed) throw new Error(check.reason || t('session.rerun.unavailable'));
+    if (await dispatchDirectCommand(user.content ?? '', user.files ?? [], exec)) return;
     await commands.execute(SessionCommand.RegenerateFromUser, {
         userMessageId: user.id, options: { overrides: { executionMode: mode } },
     });

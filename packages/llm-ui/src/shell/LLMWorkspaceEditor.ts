@@ -51,6 +51,7 @@ import { WorkspacePaneController } from './WorkspacePaneController';
 import { WorkspaceDirectoryMenu } from './WorkspaceDirectoryMenu';
 import { NavigationHelper } from './NavigationHelper';
 import { RunAttachmentController } from './RunAttachmentController';
+import { readDirectCommandOutcome } from '../commands/direct-command';
 import { inputInteraction } from './input-interaction';
 import {
     buildExecutorOptions, validateAgentId, buildConnectionOptions,
@@ -402,7 +403,10 @@ export class LLMWorkspaceEditor implements IEditor {
                 onUnloadSkill: (id: string) => this.options.sessionSkills!.unload(this.options.sessionId, id),
             } : {}),
             onSend: (text, files, agentId, overrides) =>
-                this.sendWithSubmission({ text, files, agentId, overrides }).then(() => {}),
+                this.sendCommand.run({ text, files, agentId, overrides }).then(() => {})
+                    // Direct commands reject on purpose (no fallback to chat): report the reason the
+                    // command could not start instead of leaving an unhandled rejection.
+                    .catch(error => this.errorHandler.handle(error, 'Send message')),
             onStop: () => this.commandBus.execute(SessionCommand.Abort).catch(error => this.errorHandler.handle(error, 'Stop execution')),
             initialAgents,
             initialConfig: {
@@ -519,12 +523,30 @@ export class LLMWorkspaceEditor implements IEditor {
         if (['task.succeeded', 'task.failed', 'task.cancelled'].includes(event.type)) {
             this.chatInput.clearInteraction();
             this.inputDialogAbort?.abort();
+            void this.showDirectCommandOutput();
         }
         if (event.type === 'task.succeeded') this.statusIndicator.update('completed');
         else if (event.type === 'task.failed' || event.type === 'task.cancelled') {
             this.statusIndicator.update(event.type === 'task.failed' ? 'failed' : 'idle');
         } else if (event.type === 'task.ready') this.statusIndicator.update('queued');
         else if (event.type.startsWith('task.')) this.statusIndicator.update('running');
+    }
+
+    /**
+     * Explicit shell input (`!` / `/exec`) has no conversation turn of its own: its stdout,
+     * stderr and exit code belong in the inline output panel, and a failure must not stay
+     * invisible. Other privileged tasks (`/plan`, flows) never enter this panel.
+     */
+    private async showDirectCommandOutput(): Promise<void> {
+        try {
+            const task = await this.runAttachment?.current();
+            const outcome = task && readDirectCommandOutcome(task);
+            if (!outcome) return;
+            const fallback = outcome.status === 'cancelled' ? t('chatInput.command.cancelled') : t('chatInput.command.failed');
+            this.chatInput.showToolOutput(outcome.command, outcome.output || fallback, outcome.success);
+        } catch (error) {
+            Toast.error(error instanceof Error ? error.message : String(error));
+        }
     }
 
     private handleRunWaiting(request: InteractionRequest<JsonValue>): void {
@@ -578,6 +600,8 @@ export class LLMWorkspaceEditor implements IEditor {
             bus: this.bus,
             errorHandler: this.errorHandler,
             getSessionId: () => this.options.sessionId,
+            executeDirectCommand: this.options.privilegedCommands ? command => this.startExec(command) : undefined,
+            resolveSubmission: this.options.resolveSubmission,
         };
     }
 
@@ -925,19 +949,8 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     setReadOnly(): void { }
-    private async sendWithSubmission(message: import('../commands/SendMessageCommand').SendMessageParams): Promise<boolean | undefined> {
-        try {
-            const submission = message.submission ?? await this.options.resolveSubmission?.();
-            return await this.sendCommand.run({ ...message, submission });
-        } catch (error) {
-            this.chatInput.restoreInput(message.text, message.agentId);
-            this.errorHandler.handle(error, 'Resolve submission');
-            return false;
-        }
-    }
-
     get commands() { return { rerunSession: () => this.rerunSession(),
-        sendMessage: (message: import('../commands/SendMessageCommand').SendMessageParams) => this.sendWithSubmission(message),
+        sendMessage: (message: import('../commands/SendMessageCommand').SendMessageParams) => this.sendCommand.run(message),
     }; }
 
     private async rerunSession(): Promise<void> {
@@ -948,7 +961,8 @@ export class LLMWorkspaceEditor implements IEditor {
         this.rerunAbort = new AbortController();
         try {
             await rerunSession(this.commandBus, this.currentSessionId,
-                this.chatInput.getConfig().settings.executionMode ?? 'chat', this.rerunAbort.signal);
+                this.chatInput.getConfig().settings.executionMode ?? 'chat', this.rerunAbort.signal,
+                this.options.privilegedCommands ? command => this.startExec(command) : undefined);
         } finally { this.rerunPending = false; }
     }
     getMode() { return 'edit' as const; }

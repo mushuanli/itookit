@@ -1,6 +1,8 @@
 // @file: llm-ui/components/input/ToolOutputPanel.ts
-// 内联工具输出面板：展示 /read /grep /glob 等直接工具调用结果。
+// 内联工具输出面板：展示 /read /grep /glob、`!` 与 /exec 等直接调用的结果。
 // 从 ChatInputView 抽出，自包含（创建/渲染/清除），不持有 ChatInput 状态。
+
+import { FEEDBACK_ICONS, t } from '@itookit/common';
 
 const escapeHtml = (s: string) =>
     s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -24,14 +26,14 @@ export class ToolOutputPanel {
             parent.insertBefore(this.el, wrapper ?? parent.firstChild);
         }
 
-        const lines = output.split('\n').length;
-        const icon = success ? '✅' : '❌';
+        const icon = success ? FEEDBACK_ICONS.success : FEEDBACK_ICONS.error;
+        const status = t(success ? 'chatInput.toolOutput.done' : 'chatInput.toolOutput.failed');
 
         this.el.innerHTML = `
             <div class="llm-input__tool-output-header">
                 <code class="llm-input__tool-output-cmd">$ ${escapeHtml(cmd)}</code>
-                <span class="llm-input__tool-output-meta">${icon} ${lines} line${lines !== 1 ? 's' : ''}</span>
-                <button class="llm-input__tool-output-close" type="button" title="Close">×</button>
+                <span class="llm-input__tool-output-meta">${icon} ${escapeHtml(status)}</span>
+                <button class="llm-input__tool-output-close" type="button" title="${escapeHtml(t('action.close'))}">×</button>
             </div>
             <pre class="llm-input__tool-output-body">${escapeHtml(output)}</pre>`;
 
