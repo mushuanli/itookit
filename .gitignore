@@ -53,3 +53,5 @@ tests/test_sidecar/
 
 # Local performance traces
 localhost-recording*.json
+/Trace-*.json
+/t[0-9]*.json
