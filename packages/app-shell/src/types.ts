@@ -139,6 +139,8 @@ export interface AppOptions {
     routeAliases?: Record<string, string>;
     /** Called during boot steps; use this to drive a loading overlay. */
     onProgress?: (msg: string) => void;
+    /** The workspace columns exist; reveal the empty sidebar while its data is loading. */
+    onWorkspaceMounted?: (parts: BootWorkspaceParts) => void;
     /**
      * The workspace layout and its sidebar are mounted; a host overlay may now cover only
      * `editor`, keeping the app nav and the Session sidebar readable during the rest of boot.

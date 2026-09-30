@@ -175,6 +175,9 @@ importers:
       '@itookit/llm-session':
         specifier: workspace:*
         version: link:../../packages/llm-session
+      '@itookit/llm-settings-ui':
+        specifier: workspace:*
+        version: link:../../packages/llm-settings-ui
       '@itookit/llm-ui':
         specifier: workspace:*
         version: link:../../packages/llm-ui
@@ -281,6 +284,9 @@ importers:
       '@itookit/llm-session':
         specifier: workspace:*
         version: link:../../packages/llm-session
+      '@itookit/llm-settings-ui':
+        specifier: workspace:*
+        version: link:../../packages/llm-settings-ui
       '@itookit/llm-ui':
         specifier: workspace:*
         version: link:../../packages/llm-ui

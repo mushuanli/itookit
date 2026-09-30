@@ -2,20 +2,6 @@ import { defineConfig } from 'vite';
 import path from 'path';
 import { workspaceAliases, workspaceExcludes } from '../../scripts/workspace-sources.mjs';
 
-const MERMAID_RUNTIME_PACKAGES = [
-    '/mermaid/', '/@mermaid-js/', '/cytoscape', '/cose-base/', '/layout-base/',
-    '/d3', '/dagre-d3-es/', '/graphlib/', '/katex/', '/khroma/', '/roughjs/',
-    '/path-data-parser/', '/points-on-', '/stylis/', '/ts-dedent/',
-    '/@braintree/sanitize-url/', '/@iconify/', '/dayjs/',
-];
-
-function dependencyChunk(id: string): string | undefined {
-    if (!id.includes('node_modules')) return;
-    const normalized = id.replaceAll('\\', '/');
-    return MERMAID_RUNTIME_PACKAGES.some(name => normalized.includes(`/node_modules${name}`))
-        ? 'mermaid-runtime' : 'vendor';
-}
-
 export default defineConfig({
     base: './',
     plugins: [{
@@ -66,11 +52,6 @@ export default defineConfig({
                 id === 'better-sqlite3' ||
                 id === 'child_process' ||
                 id === 'readline',
-            output: {
-                // Keep the large diagram engine outside the startup vendor chunk. It is fetched
-                // only when rendered Markdown actually contains a Mermaid block.
-                manualChunks: dependencyChunk,
-            },
         },
     },
 

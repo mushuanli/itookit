@@ -23,7 +23,7 @@ import { setupMobileWorkspaceView } from './navigation/mobile-workspace-view';
 import { SkillsEngine } from '@itookit/app-settings';
 
 import { AppOptions, AppHandle, WorkspaceConfig } from './types';
-import { defaultEditorFactory } from '@itookit/mdxeditor';
+import { lazyMdxEditorFactory as defaultEditorFactory } from './browser/lazy-mdx';
 import { FILE_REGISTRY, EditorTypeKey } from './config/file-registry';
 import { themeService, ThemeMode } from './ThemeService';
 
@@ -253,6 +253,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         layoutEl.appendChild(sidebarEl);
         layoutEl.appendChild(editorEl);
         container.appendChild(layoutEl);
+        if (!visibleWorkspaceId || visibleWorkspaceId === elementId) options.onWorkspaceMounted?.({ editor: editorEl });
         cleanupFns.push(setupMobileWorkspaceView(layoutEl, sidebarEl, editorEl));
 
         const strategyType = wsConfig.type ?? 'standard';

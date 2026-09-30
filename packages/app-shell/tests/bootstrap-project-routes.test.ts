@@ -116,6 +116,11 @@ describe('saved project routes at bootstrap', () => {
         history.replaceState(null, '', '#/projects/' + encodeURIComponent('/' + documentName));
         const phases: string[] = [];
         const app = await f.start({
+            onWorkspaceMounted: () => {
+                phases.push('shell');
+                expect(document.querySelector('.mm-sidebar')).not.toBeNull();
+                expect(document.querySelector('.project-workbench__tree')).toBeNull();
+            },
             onWorkspaceReady: () => {
                 phases.push('sidebar');
                 expect(document.querySelector('.project-workbench__tree')).not.toBeNull();
@@ -127,7 +132,7 @@ describe('saved project routes at bootstrap', () => {
             },
             onEditorReady: () => phases.push('editor'),
         });
-        try { expect(phases).toEqual(['sidebar', 'interactive', 'editor']); }
+        try { expect(phases).toEqual(['shell', 'sidebar', 'interactive', 'editor']); }
         finally { await app.destroy(); await f.dispose(); }
     });
 

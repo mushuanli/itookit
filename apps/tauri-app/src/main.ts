@@ -26,21 +26,15 @@ import { createFileSystemSource } from '@itookit/vfs-core';
 import { initApp, installMobileNavigation, windowSessionLeaseToken, workspaceRoot, type AppUI } from '@itookit/app-shell';
 import { createApplicationRuntime } from '@itookit/app-core';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { createFlowContextMenuConfig, createAIContextMenuConfig,
+    installFlowLibrary, restoreFlowLibrary } from '@itookit/llm-ui/startup';
 import {
-    createLLMFactory,
-    createAgentEditorFactory,
-    createFlowsEditorFactory,
-    createFlowContextMenuConfig,
-    installFlowLibrary,
-    restoreFlowLibrary,
-    createSkillsEditorFactory,
-    createAIContextMenuConfig,
     ProviderSettingsEditor,
     ConnectionSettingsEditor,
     MCPSettingsEditor,
     CostEditor,
     SystemPromptSettingsEditor,
-} from '@itookit/llm-ui';
+} from '@itookit/llm-settings-ui';
 import { WORKSPACES } from './config/modules';
 import { TauriSqlSidecarDb } from './db/tauri-sql-sidecar';
 import { TauriFsOps } from './fs/tauri-fs-ops';
@@ -50,16 +44,14 @@ import { createSendBoundary } from './log/send-boundary';
 import { SessionCommand } from '@itookit/llm-session';
 import { TauriSkillSource } from './kernel/tauri-skill-source';
 
-// Bundled locally: the desktop app must render icons offline. The CDN <link> this
-// replaces needed network access and a cdnjs CSP allowance.
-import '@fortawesome/fontawesome-free/css/all.min.css';
-import '@itookit/vfs-ui/style.css';
-import '@itookit/mdxeditor/style.css';
-import '@itookit/llm-ui/style.css';
-import '@itookit/app-settings/style.css';
-import './styles/index.css';
-
 // ── Path helpers ───────────────────────────────────────────────────────────────
+
+type EditorFactory = ReturnType<AppUI['createChatEditor']>;
+
+function lazyEditorFactory(load: () => Promise<EditorFactory>): EditorFactory {
+    let pending: Promise<EditorFactory> | undefined;
+    return async (container, options) => (await (pending ??= load()))(container, options);
+}
 
 const entryAt = performance.now();
 const documentAt = performance.getEntriesByName('mindos.document')[0]?.startTime;
@@ -296,16 +288,19 @@ async function bootstrap(): Promise<void> {
     // 3. Hand off to app-shell
     // Session Bash runs through the platform directory-grant namespace.
     const ui: AppUI = {
-        createChatEditor: (agents, deps) => createLLMFactory(agents, {
-            ...deps,
-            onLoadMetrics: metrics => { void recordDiagnostic('session.load.ready', metrics); },
-        }),
-        createAgentEditor: createAgentEditorFactory,
-        createFlowEditor: createFlowsEditorFactory,
+        createChatEditor: (agents, deps) => lazyEditorFactory(async () =>
+            (await import('@itookit/llm-ui')).createLLMFactory(agents, {
+                ...deps, onLoadMetrics: metrics => { void recordDiagnostic('session.load.ready', metrics); },
+            })),
+        createAgentEditor: agents => lazyEditorFactory(async () =>
+            (await import('@itookit/llm-ui')).createAgentEditorFactory(agents)),
+        createFlowEditor: deps => lazyEditorFactory(async () =>
+            (await import('@itookit/llm-ui')).createFlowsEditorFactory(deps)),
         createFlowContextMenu: createFlowContextMenuConfig,
         installFlowLibrary,
         restoreFlowLibrary,
-        createSkillEditor: createSkillsEditorFactory,
+        createSkillEditor: agents => lazyEditorFactory(async () =>
+            (await import('@itookit/llm-ui')).createSkillsEditorFactory(agents)),
         createAIContextMenu: createAIContextMenuConfig,
         llmUiEditors: {
             ProviderSettingsEditor,
@@ -374,6 +369,7 @@ async function bootstrap(): Promise<void> {
         routeAliases: { home: 'llm-workspace', projects: 'llm-workspace', workbench: 'llm-workspace' },
         onProgress: log,
         // Staged reveal: nav (static) → Session sidebar → editor, instead of one full-screen wait.
+        onWorkspaceMounted: parts => focusLoading(parts.editor),
         onWorkspaceReady: parts => focusLoading(parts.editor),
         onSidebarInteractive: () => document.body.classList.add('is-sidebar-ready'),
         onEditorReady: () => hideLoading(),

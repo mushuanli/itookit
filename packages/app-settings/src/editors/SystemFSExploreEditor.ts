@@ -20,8 +20,10 @@ import type { EditorFactory, EditorOptions } from '@itookit/ui-common';
  */
 import { BaseSettingsEditor } from '@itookit/ui-common';
 import { createVFSUI, fromVFS, VFSUIShell } from '@itookit/vfs-ui';
-import { defaultEditorFactory } from '@itookit/mdxeditor';
 import '@itookit/mdxeditor/style.css';
+
+const defaultEditorFactory: EditorFactory = async (container, options) =>
+    (await import('@itookit/mdxeditor')).defaultEditorFactory(container, options);
 import { SettingsService } from '../services/SettingsService';
 import { createSystemFileInspector } from './system-fs/system-file-inspector';
 

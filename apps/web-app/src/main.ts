@@ -3,45 +3,43 @@ import { createHttpSourceProvider } from '@itookit/vfsdriver-http';
 import { initApp, installMobileNavigation, windowSessionLeaseToken, type AppUI } from '@itookit/app-shell';
 import { createApplicationRuntime } from '@itookit/app-core';
 import { openIndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
+import { createFlowContextMenuConfig, createAIContextMenuConfig,
+    installFlowLibrary, restoreFlowLibrary } from '@itookit/llm-ui/startup';
 import {
-    createLLMFactory,
-    createAgentEditorFactory,
-    createFlowsEditorFactory,
-    createFlowContextMenuConfig,
-    installFlowLibrary,
-    restoreFlowLibrary,
-    createSkillsEditorFactory,
-    createAIContextMenuConfig,
     ProviderSettingsEditor,
     ConnectionSettingsEditor,
     MCPSettingsEditor,
     CostEditor,
     SystemPromptSettingsEditor,
-} from '@itookit/llm-ui';
+} from '@itookit/llm-settings-ui';
 import { WORKSPACES } from './config/modules';
 import { BrowserSkillToolHandlerFactory } from './kernel/browser-skill-tools';
 
-import '@fortawesome/fontawesome-free/css/all.min.css';
-import '@itookit/vfs-ui/style.css';
-import '@itookit/mdxeditor/style.css';
-import '@itookit/llm-ui/style.css';
-import '@itookit/app-settings/style.css';
-import './styles/index.css';
-
 // Dev must always load the current workspace source graph.
 void configureAppCache(import.meta.env.DEV).catch(error => console.warn('App cache setup failed', error));
+
+type EditorFactory = ReturnType<AppUI['createChatEditor']>;
+
+function lazyEditorFactory(load: () => Promise<EditorFactory>): EditorFactory {
+    let pending: Promise<EditorFactory> | undefined;
+    return async (container, options) => (await (pending ??= load()))(container, options);
+}
 
 async function main() {
     installMobileNavigation();
     const backend = await openIndexedDBBackend({ dbName: 'MindOS-v3' });
     const ui: AppUI = {
-        createChatEditor: createLLMFactory,
-        createAgentEditor: createAgentEditorFactory,
-        createFlowEditor: createFlowsEditorFactory,
+        createChatEditor: (service, deps) => lazyEditorFactory(async () =>
+            (await import('@itookit/llm-ui')).createLLMFactory(service, deps)),
+        createAgentEditor: service => lazyEditorFactory(async () =>
+            (await import('@itookit/llm-ui')).createAgentEditorFactory(service)),
+        createFlowEditor: deps => lazyEditorFactory(async () =>
+            (await import('@itookit/llm-ui')).createFlowsEditorFactory(deps)),
         createFlowContextMenu: createFlowContextMenuConfig,
         installFlowLibrary,
         restoreFlowLibrary,
-        createSkillEditor: createSkillsEditorFactory,
+        createSkillEditor: service => lazyEditorFactory(async () =>
+            (await import('@itookit/llm-ui')).createSkillsEditorFactory(service)),
         createAIContextMenu: createAIContextMenuConfig,
         llmUiEditors: {
             ProviderSettingsEditor,

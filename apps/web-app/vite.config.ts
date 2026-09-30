@@ -32,17 +32,6 @@ export default defineConfig({
     },
     build: {
         target: 'esnext',
-        // 生产环境构建配置
-        rollupOptions: {
-            output: {
-                // 可选：把所有 node_modules 依赖打成一个 vendor 包，减少碎片文件
-                manualChunks: (id) => {
-                    if (id.includes('node_modules')) {
-                        return 'vendor';
-                    }
-                }
-            }
-        }
     },
 
     // 关于 optimizeDeps 的说明见下方解释

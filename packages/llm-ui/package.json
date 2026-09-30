@@ -12,6 +12,11 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./startup": {
+      "types": "./src/startup.ts",
+      "import": "./src/startup.ts",
+      "default": "./src/startup.ts"
+    },
     "./style.css": "./src/styles/index.css"
   },
   "publishConfig": {
@@ -25,6 +30,10 @@
         "import": "./dist/llm-ui.js",
         "require": "./dist/llm-ui.umd.cjs"
       },
+      "./startup": {
+        "types": "./dist/startup.d.ts",
+        "import": "./dist/startup.js"
+      },
       "./style.css": "./dist/style.css"
     }
   },
@@ -34,7 +43,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && vite build --config vite.startup.config.ts",
     "dev": "vite build --watch",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",

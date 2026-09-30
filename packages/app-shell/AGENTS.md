@@ -68,6 +68,8 @@ const factory = factories[strategyType] ?? defaultEditorFactory;
 - 项目与工具箱分别通过 `createProjectModule` / `createToolboxModule` 装配，返回统一 WorkspaceModule；bootstrap 只消费工作区能力，不用具体工作台类做 instanceof 判断。模块销毁同时释放目录投影和事件订阅，动态移除与应用退出共用一次释放。
 - `loadWorkspace()` 包含去重 — 并发加载同一工作区共享同一个 Promise (`pendingLoads`)
 - chat 工作区在 `SessionWorkbench` 完成侧栏树加载后立即触发 `onSidebarReady`，宿主的 `onWorkspaceReady` 因此先把加载遮罩限制在正文列；让出一帧后再恢复选中项、项目正文和深链编辑器。侧栏初始化完成后 `onSidebarInteractive` 允许桌面端提前开放点击；显式深链不额外打开旧的侧栏选中项。`onEditorReady` 仍在正文首挂载后触发。
+- 两列 DOM 创建后 `onWorkspaceMounted` 立即让桌面端把加载遮罩移到正文列，VFS 侧栏骨架在数据读取期间可见；`onWorkspaceReady` 表示侧栏数据已完成。
+- MDX 默认编辑器经 `browser/lazy-mdx.ts` 延迟导入；标准工作区的 MentionPlugin 也只在打开正文时加载。侧栏数据与正文编辑器不能共用启动时的静态模块图。
 - 路由基于 hash URL (`#/<slug>/<resourceId>`)，由 `history.pushState/replaceState` 写入，监听 `popstate` + `NAVIGATION_EVENTS.NAVIGATE`
 - `ThemeService` 管理 `<html>` 的 `data-theme` attribute，监听 `app:theme-change` 事件，偏好持久化到 `etc:/ui/theme.json`；`AppHandle.setTheme(mode)` 切换主题
 

@@ -9,7 +9,7 @@ import { createVFSMentionProviders } from '../browser/mention/createVFSMentionPr
  * 不创建 DOM，不拥有布局。消费方负责创建 sidebar/editor 容器并传入。
  */
 import { createVFSUI, VFSUIShell } from '@itookit/vfs-ui';
-import { defaultEditorFactory, MentionPlugin } from '@itookit/mdxeditor';
+import { lazyMdxEditorFactory as defaultEditorFactory } from '../browser/lazy-mdx';
 import type { WorkbenchConfig } from '../types';
 import { t, NavigationRequest} from '@itookit/common';
 import { EditorOptions, IEditor, EditorHostContext } from '@itookit/ui-common';
@@ -88,7 +88,7 @@ export class Workbench {
 
         const mentionScope = editorConfig?.mentionScope;
         const mentionPlugin = mentionScope !== undefined
-            ? new MentionPlugin({
+            ? new (await import('@itookit/mdxeditor')).MentionPlugin({
                 providers: createVFSMentionProviders(this.engine, mentionScope),
                 onMentionClick: (_providerKey: string, nodeId: string) => {
                     this.config.onNavigate?.({ target: 'self', action: 'open', resourceId: nodeId });
