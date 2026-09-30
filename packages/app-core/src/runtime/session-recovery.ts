@@ -1,6 +1,7 @@
 import { traceBoot } from '@itookit/common';
 import type { Kernel } from '@itookit/durable-kernel';
 import { SessionLeaseStore, type SessionLeaseRecord, type SessionOwnerKind } from '../kernel/session-lease';
+import { summarizeRecovery, type RecoverySample } from './recovery-trace';
 
 type RecoveryKernel = Pick<Kernel, 'listSessions' | 'recoverSessions' | 'recoverSession'>;
 type Owner = { id: string; kind: SessionOwnerKind };
@@ -8,6 +9,7 @@ export interface SessionRecovery {
     leases: Map<string, SessionLeaseRecord>;
     /** Acquire and recover before admitting writes; concurrent requests share one recovery. */
     acquireLater(sessionId: string): Promise<boolean>;
+    /** Lease for structural writes (create/delete/move); waits out the boot sweep of that Session. */
     acquireMetadataLease(sessionId: string): Promise<boolean>;
     release(): Promise<void>;
 }
@@ -18,6 +20,8 @@ class LeasedRecovery implements SessionRecovery {
     private readonly pending = new Map<string, Promise<boolean>>();
     private readonly renewals = new Map<string, Promise<boolean>>();
     private readonly heartbeat: ReturnType<typeof setInterval>;
+    private sweep?: Promise<void>;
+    private swept?: Set<string>;
     private released = false;
     constructor(private kernel: RecoveryKernel, private store: SessionLeaseStore, private owner: Owner,
         heartbeatMs: number, private beforeRecover?: (sessionId: string) => Promise<void>, private excluded = new Set<string>()) {
@@ -27,16 +31,50 @@ class LeasedRecovery implements SessionRecovery {
     }
 
     async boot(): Promise<void> {
+        const leased: string[] = [];
         for await (const session of this.kernel.listSessions()) {
             if (this.excluded.has(session.id) || !await this.acquire(session.id)) continue;
             await this.beforeRecover?.(session.id);
+            leased.push(session.id);
         }
-        if (this.leases.size) await traceBoot('recoverLeasedSessions', () => this.kernel.recoverSessions([...this.leases.keys()], { takeover: true }));
-        for (const id of this.leases.keys()) this.ready.add(id);
+        // Recovery is proportional to the catalog, so the host paints first and every write waits
+        // for it through acquireLater; only lease acquisition and host reconciliation block boot.
+        if (leased.length) this.startSweep(leased);
+    }
+
+    private startSweep(leased: string[]): void {
+        this.swept = new Set(leased);
+        const sweep = this.recoverLeased(leased);
+        this.sweep = sweep;
+        void sweep.catch(error => {
+            console.error('[Lease] Session recovery failed; writes stay blocked until a Session recovers on demand', error);
+            // Later writes retry the affected Session online instead of failing on a stale sweep.
+            if (this.sweep === sweep) this.sweep = undefined;
+        });
+    }
+
+    /** Recovery is proportional to the leased catalog; report the per-Session split at boot. */
+    private async recoverLeased(leased: string[]): Promise<void> {
+        const samples: RecoverySample[] = [];
+        try {
+            await traceBoot(`recoverLeasedSessions (${leased.length} sessions, background)`,
+                () => this.kernel.recoverSessions(leased,
+                    { takeover: true, onSessionRecovered: (sessionId, timing) => { samples.push({ sessionId, ...timing }); } }));
+            if (!this.released) for (const id of leased) if (this.leases.has(id)) this.ready.add(id);
+        } finally {
+            if (samples.length) console.log(`[Boot]   ↳ ${summarizeRecovery(samples)}`);
+        }
+    }
+
+    /** Wait for the boot sweep before touching a Session it is still restoring. */
+    private async settleSweep(id: string): Promise<void> {
+        if (this.sweep && this.swept?.has(id)) await this.sweep;
     }
 
     async acquireMetadataLease(id: string): Promise<boolean> {
         if (this.released) return false;
+        // Structural writes must not race the sweep; a failed sweep still leaves the lease gate.
+        await this.settleSweep(id).catch(() => {});
         return await this.renew(id) || await this.acquire(id);
     }
 
@@ -51,8 +89,19 @@ class LeasedRecovery implements SessionRecovery {
     }
 
     private async prepare(id: string): Promise<boolean> {
+        // Captured before any await: a write that arrives while the sweep is pending must observe
+        // that sweep's outcome, even when it settles during the lease renewal below.
+        const sweep = this.sweep;
         if (await this.renew(id) && this.ready.has(id)) return !this.released;
-        if (this.released || !await this.acquire(id)) return false;
+        if (this.released) return false;
+        // A Session leased at boot is recovered by the sweep; waiting here keeps its writes
+        // refused until recovery finishes, and surfaces a sweep failure to the writer. A failed
+        // or unfruitful sweep falls through to online recovery of this Session alone.
+        if (sweep && !this.ready.has(id) && this.swept?.has(id)) {
+            await sweep;
+            if (this.ready.has(id)) return !this.released;
+        }
+        if (!await this.acquire(id)) return false;
         try {
             await this.beforeRecover?.(id);
             // Online recovery respects existing Task/Effect leases; it never fences work in other Sessions.
@@ -109,7 +158,9 @@ class LeasedRecovery implements SessionRecovery {
         if (this.released) return;
         this.released = true;
         clearInterval(this.heartbeat);
-        await Promise.allSettled([...this.pending.values(), ...this.renewals.values()]);
+        // The sweep must finish before its leases are released; a failed sweep was reported to
+        // every blocked writer already and must not break teardown.
+        await Promise.allSettled([...(this.sweep ? [this.sweep] : []), ...this.pending.values(), ...this.renewals.values()]);
         const results = await Promise.allSettled([...this.leases.values()].map(lease => this.store.release(lease)));
         this.leases.clear(); this.ready.clear();
         const errors = results.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
@@ -117,7 +168,11 @@ class LeasedRecovery implements SessionRecovery {
     }
 }
 
-/** Boot may take over an idle Kernel; later acquisition recovers only the selected Session online. */
+/**
+ * Boot acquires leases and reconciles each host's workspace, then recovers the leased Sessions in
+ * the background: the host paints immediately and `acquireLater` refuses writes until it finishes.
+ * Later acquisition recovers only the selected Session online.
+ */
 export async function recoverSessionsWithLeases(kernel: RecoveryKernel, leaseStore: SessionLeaseStore, owner: Owner,
     heartbeatMs = 10_000, beforeRecover?: (sessionId: string) => Promise<void>, excluded = new Set<string>()): Promise<SessionRecovery> {
     const recovery = new LeasedRecovery(kernel, leaseStore, owner, heartbeatMs, beforeRecover, excluded);

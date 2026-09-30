@@ -71,7 +71,7 @@ describe('Session recovery with leases', () => {
 
             expect([...recovery.leases.keys()]).toEqual(['free']);
             expect(kernel.recoverSessions).toHaveBeenCalledTimes(1);
-            expect(kernel.recoverSessions).toHaveBeenCalledWith(['free'], { takeover: true });
+            expect(kernel.recoverSessions).toHaveBeenCalledWith(['free'], expect.objectContaining({ takeover: true }));
             expect(beforeRecover).toHaveBeenCalledExactlyOnceWith('free');
 
             // Late acquisition must recover before the write gate grants access.
@@ -128,6 +128,53 @@ describe('Session recovery with leases', () => {
             expect(recovery.leases.has('s')).toBe(false);
             expect(await recovery.acquireLater('s')).toBe(true);
         } finally { await recovery.release(); expect(await recovery.acquireLater('s')).toBe(false); await manager.dispose(); }
+    });
+
+    it('returns before the recovery sweep finishes and blocks writes until it does', async () => {
+        const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+        const fs = await manager.openFileSystem('/data'), store = new SessionLeaseStore(fs);
+        let releaseSweep!: () => void;
+        const gate = new Promise<void>(resolve => { releaseSweep = resolve; });
+        const kernel = { async *listSessions() { yield { id: 's' }; }, recoverSessions: vi.fn(() => gate), recoverSession: vi.fn() };
+        const recovery = await recoverSessionsWithLeases(kernel as never, store, { id: 'host', kind: 'web' });
+        try {
+            expect(kernel.recoverSessions).toHaveBeenCalledExactlyOnceWith(['s'], expect.objectContaining({ takeover: true }));
+            // Boot already returned: the host can paint while the sweep is still running.
+            expect([...recovery.leases.keys()]).toEqual(['s']);
+            const blocked = recovery.acquireLater('s');
+            let settled = false;
+            void blocked.then(() => { settled = true; });
+            await Promise.resolve();
+            expect(settled).toBe(false);
+
+            releaseSweep();
+            expect(await blocked).toBe(true);
+            expect(await recovery.acquireLater('s')).toBe(true);
+            expect(kernel.recoverSession).not.toHaveBeenCalled();
+        } finally { releaseSweep(); await recovery.release(); await manager.dispose(); }
+    });
+
+    it('reports a failed sweep to waiting writers and retries that Session on demand', async () => {
+        const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+        const fs = await manager.openFileSystem('/data'), store = new SessionLeaseStore(fs);
+        let failSweep!: () => void;
+        const gate = new Promise<void>((_resolve, reject) => { failSweep = () => reject(new Error('sweep failed')); });
+        const kernel = { async *listSessions() { yield { id: 's' }; },
+            recoverSessions: vi.fn(() => gate), recoverSession: vi.fn(async () => undefined) };
+        const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const recovery = await recoverSessionsWithLeases(kernel as never, store, { id: 'host', kind: 'web' });
+        try {
+            const blocked = recovery.acquireLater('s');
+            const reported = expect(blocked).rejects.toThrow('sweep failed');
+            failSweep();
+            await reported;
+            // The failed sweep does not fail the host or drop the single-writer lease.
+            expect(await recovery.acquireMetadataLease('s')).toBe(true);
+            // A later write retries this Session online instead of failing on the stale sweep.
+            expect(await recovery.acquireLater('s')).toBe(true);
+            expect(kernel.recoverSession).toHaveBeenCalledExactlyOnceWith('s');
+            await recovery.release();
+        } finally { failSweep(); errors.mockRestore(); await manager.dispose(); }
     });
 
     it('releases acquired leases and stops recovery when host reconciliation fails', async () => {

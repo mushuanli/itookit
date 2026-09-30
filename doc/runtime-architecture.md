@@ -165,7 +165,7 @@ Node CLI
 
 共享运行时记忆工具：createKernelRuntime 通过 createMemoryTools 注册 memory_list、memory_write、memory_remove。KernelAdaptersRuntimeOptions.effectTools 为需要可信 Effect 身份的宿主工具提供 metadata/definition/invoke 绑定；目录可被宿主过滤展示，普通 ToolService.invoke 的占位处理器拒绝直接调用，tool.call 在验证工具句柄后传入 Kernel context，并将调用纳入取消等待。任务记忆服务另校验持久 input 中冻结的 memoryPolicy 和 allowedToolIds；模型参数不选择 Session 或授权策略。
 
-应用启动的 Session 恢复由 `packages/app-core/src/runtime/session-recovery.ts` 的 `recoverSessionsWithLeases` 承载：先获取可持有的 Session 租约，再调用 Kernel `recoverSessions` 一次性恢复该集合，避免逐个恢复时前一个 Session 已启动导致后一个 takeover 被拒。拒租项跳过并记录拥有者与到期时间；持有集合由心跳续租，恢复失败清理已取得租约，应用装配关闭 Kernel 并执行其余启动清理。服务支持恢复前回调，宿主工作区核对接线另行提供。
+应用启动的 Session 恢复由 `packages/app-core/src/runtime/session-recovery.ts` 的 `recoverSessionsWithLeases` 承载：先获取可持有的 Session 租约并完成宿主核对，再调用 Kernel `recoverSessions` 一次性恢复该集合，避免逐个恢复时前一个 Session 已启动导致后一个 takeover 被拒。该批量恢复在后台执行、不阻塞宿主装配与首屏绘制；租约集合内的 Session 在恢复完成前由写入门拒写（`acquireLater` 等待并上报失败），结构写（`acquireMetadataLease`）同样等待其所属恢复，释放时先等在途恢复再释放租约。拒租项跳过并记录拥有者与到期时间；持有集合由心跳续租，恢复失败清理已取得租约，应用装配关闭 Kernel 并执行其余启动清理。服务支持恢复前回调，宿主工作区核对接线另行提供。
 
 运行中注册或启动时拒租的 Session 经 `acquireLater` 获取租约后，先执行宿主核对，再以非 takeover 的 `recoverSession` 在线恢复，成功后才允许写入，无需重启。并发申请共享一次恢复；未过期的 Task/Effect 租约继续等待其原期限，不强制抢占其他 Session。心跳更新租约快照，续租拒绝/失败会清除本地可写标记；发送前重新验证租约，恢复失败释放新取得的租约。应用退出时停止 Kernel 后释放持有租约；此改动不替代完整在途 Effect 停写和跨主机 fencing 验收。
 

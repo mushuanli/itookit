@@ -66,7 +66,7 @@ const runtime = await createApplicationRuntime({ backend, additionalMounts, owne
 const kernel = await createKernelRuntime({ systemFS, llmDriver, storageResolver, recover: false });
 ```
 
-`createApplicationRuntime` 的顺序是：`createInfrastructure`（VFS + LLM 驱动）→ 核心服务（agent/flow/session files/mounts）→ `createKernelRuntime` → 逐个 Session 取租约并 `recoverSession` → 会话系统（`initializeConversationSystem`）→ 默认 Flow 播种 → `RunCatalog`。释放走 `cleanupFns` 逆序 + `AggregateError`，VFS 最后释放。
+`createApplicationRuntime` 的顺序是：`createInfrastructure`（VFS + LLM 驱动）→ 核心服务（agent/flow/session files/mounts）→ `createKernelRuntime` → 取租约并**后台**恢复租约集合（`recoverSessionsWithLeases` 只等租约与宿主核对）→ 会话系统（`initializeConversationSystem`）→ 默认 Flow 播种 → `RunCatalog`。恢复不再阻塞宿主首屏：写入门（`acquireLater`）与结构写（`acquireMetadataLease`）等待该 Session 所属的批量恢复完成，失败向写入方报错并保持拒写；`release()` 等待在途恢复后再释放租约。释放走 `cleanupFns` 逆序 + `AggregateError`，VFS 最后释放。
 
 ## 约束
 

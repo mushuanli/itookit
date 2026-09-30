@@ -111,6 +111,26 @@ describe('saved project routes at bootstrap', () => {
         } finally { await app.destroy(); await f.dispose(); }
     });
 
+    it('reveals the sidebar before opening a deep-linked document', async () => {
+        const f = await fixture();
+        history.replaceState(null, '', '#/projects/' + encodeURIComponent('/' + documentName));
+        const phases: string[] = [];
+        const app = await f.start({
+            onWorkspaceReady: () => {
+                phases.push('sidebar');
+                expect(document.querySelector('.project-workbench__tree')).not.toBeNull();
+                expect(defaultEditorFactory).not.toHaveBeenCalled();
+            },
+            onSidebarInteractive: () => {
+                phases.push('interactive');
+                expect(defaultEditorFactory).not.toHaveBeenCalled();
+            },
+            onEditorReady: () => phases.push('editor'),
+        });
+        try { expect(phases).toEqual(['sidebar', 'interactive', 'editor']); }
+        finally { await app.destroy(); await f.dispose(); }
+    });
+
     it('keeps nested paths and decodes the shell URI envelope only once', () => {
         const resource = '/folder:%E9%A1%B9%E7%9B%AE/@files/a?branch=b';
         expect(parseWorkspaceHash('#/chat/' + encodeURIComponent(resource), 'chat')).toEqual({ slug: 'chat', resource });

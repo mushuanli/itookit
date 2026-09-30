@@ -75,6 +75,17 @@ export interface SessionWorkbenchOptions {
     manageMemory?: (sessionId: string, signal: AbortSignal) => Promise<void>;
     flows?: { fs: IFileSystem; menu: ContextMenuConfig<VFSNodeUI> };
     projects?: ProjectService;
+    onSidebarReady?: () => boolean;
+    initialResourceId?: string;
+}
+
+function afterSidebarPaint(): Promise<void> {
+    return new Promise(resolve => {
+        if (typeof requestAnimationFrame !== 'function' || document.visibilityState === 'hidden') {
+            setTimeout(resolve, 0); return;
+        }
+        requestAnimationFrame(() => setTimeout(resolve, 0));
+    });
 }
 
 /** vfs-ui owns the sidebar; this host owns business views and their file leases. */
@@ -89,6 +100,8 @@ export class SessionWorkbench implements WorkspaceController {
     private browser?: Awaited<ReturnType<typeof createSessionBrowser>>;
     private navigationFiles?: FileSystemView;
     private sidebarUI?: VFSUIShell;
+    private initialSidebarSelection?: string;
+    private sidebarStarting = true;
     private projectNavigation?: ProjectNavigation;
     private familyActions?: SessionFamilyActions;
     private lifecycle!: SessionLifecycleService;
@@ -124,6 +137,8 @@ export class SessionWorkbench implements WorkspaceController {
     private readonly manageMemory: SessionWorkbenchOptions['manageMemory'];
     private readonly flows: SessionWorkbenchOptions['flows'];
     private readonly projects: SessionWorkbenchOptions['projects'];
+    private readonly onSidebarReady: SessionWorkbenchOptions['onSidebarReady'];
+    private readonly initialResourceId: SessionWorkbenchOptions['initialResourceId'];
     private readonly sessions: ProjectSessions;
     constructor(options: SessionWorkbenchOptions) {
         this.sidebar = options.sidebar;
@@ -140,6 +155,8 @@ export class SessionWorkbench implements WorkspaceController {
         this.manageMemory = options.manageMemory;
         this.flows = options.flows;
         this.projects = options.projects;
+        this.onSidebarReady = options.onSidebarReady;
+        this.initialResourceId = options.initialResourceId;
         this.sessions = options.projects?.sessions ?? new ProjectSessions(options.repository);
     }
     async start(): Promise<void> {
@@ -199,7 +216,9 @@ export class SessionWorkbench implements WorkspaceController {
         }, this.navigationFiles) as VFSUIShell;
         this.subscriptions.add(this.sidebarUI.on('sessionSelected', ({ item }) => {
             // Expanding ancestors during selectPath can emit intermediate selections too.
-            if (item && !this.selectionSync) void this.openResource(item.id).catch(error => this.report(error));
+            if (!item || this.selectionSync) return;
+            if (this.sidebarStarting) this.initialSidebarSelection = item.id;
+            else void this.openResource(item.id).catch(error => this.report(error));
         }), this.sidebarUI.on('sidebarStateChanged', ({ isCollapsed }) => this.sidebar.classList.toggle('is-collapsed', isCollapsed)),
         this.repository.subscribe(change => { if (change?.kind !== 'ui-state') this.scheduleRefresh('repository'); }),
         this.files.subscribe(() => this.scheduleRefresh('files')),
@@ -213,9 +232,13 @@ export class SessionWorkbench implements WorkspaceController {
         }));
         if (this.projects) this.subscriptions.add(this.projects.drafts.onPromoted(() => this.scheduleRefresh('project.draftPromoted')));
         await traceBoot('sessionWorkbench.sidebar', () => this.sidebarUI!.start());
+        if (this.onSidebarReady?.()) await afterSidebarPaint();
+        if (this.closed) return;
+        this.sidebarStarting = false;
         if (this.projects?.remoteMounts) this.subscriptions.add(
             this.projects.remoteMounts.onChange(() => { this.updateRemoteAvailability(); this.scheduleRefresh('remote-status'); }), monitorRemoteConnections(this.projects));
-        if (this.projectNavigation && !this.active) {
+        if (this.initialSidebarSelection && !this.initialResourceId) await this.openResource(this.initialSidebarSelection);
+        if (this.projectNavigation && !this.active && !this.initialResourceId) {
             const current = await traceBoot('sessionWorkbench.currentProject', () => this.projects!.current());
             // The startup project is already resolved; hand it to the first sync so it does
             // not look it up again from the folder catalog.

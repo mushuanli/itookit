@@ -130,6 +130,7 @@ function hideLoading(): void {
     document.getElementById('__boot-overlay')?.remove();
     releaseLoadingTarget?.();
     document.body.classList.remove('is-booting');
+    document.body.classList.remove('is-sidebar-ready');
 }
 
 function showError(msg: string): void {
@@ -374,6 +375,7 @@ async function bootstrap(): Promise<void> {
         onProgress: log,
         // Staged reveal: nav (static) → Session sidebar → editor, instead of one full-screen wait.
         onWorkspaceReady: parts => focusLoading(parts.editor),
+        onSidebarInteractive: () => document.body.classList.add('is-sidebar-ready'),
         onEditorReady: () => hideLoading(),
         ui,
     });

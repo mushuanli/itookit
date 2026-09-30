@@ -274,8 +274,16 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         }
 
         if (strategyType === 'chat') {
+            let sidebarReady = false;
+            const revealSidebar = () => {
+                if (sidebarReady || (visibleWorkspaceId && visibleWorkspaceId !== elementId)) return false;
+                sidebarReady = true;
+                options.onWorkspaceReady?.({ editor: editorEl });
+                return true;
+            };
             const module = createProjectModule({ runtime, sessionSkills, sidebar: sidebarEl, container: editorEl,
                 factory, fileFactory: defaultEditorFactory, createFlowContextMenu: options.ui.createFlowContextMenu,
+                initialResourceId, onSidebarReady: revealSidebar,
                 onSelect: (id, mode = 'replace') => updateHistory(elementId, id, mode),
                 hostContext: { chatFromFile, toggleSidebar: collapsed => sidebarEl.classList.toggle('is-collapsed', collapsed ?? !sidebarEl.classList.contains('is-collapsed')), navigate: handleNavigationRequest } });
             cleanupFns.push(module.dispose);
@@ -284,7 +292,8 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                 await module.workbench.setVisible?.(false); return module.workbench;
             }
             // Sidebar is populated from the catalog snapshot now; the editor area mounts later.
-            options.onWorkspaceReady?.({ editor: editorEl });
+            revealSidebar();
+            options.onSidebarInteractive?.();
             if (initialResourceId) {
                 await restoreWorkspaceResource(module.workbench, initialResourceId);
                 // Lifting the host overlay must not race the editor: wait for its first mount in

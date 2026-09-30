@@ -67,6 +67,7 @@ const factory = factories[strategyType] ?? defaultEditorFactory;
 - 文件列跟随策略用 `ProjectFileView`（`preserve` 保持当前内容列，`directory` 固定到该路径）表达，`SessionWorkbench.openResource` 只解析一次路由并交给 `ProjectNavigation.sync`；收藏行解析在 `openFavorite` 内完成。
 - 项目与工具箱分别通过 `createProjectModule` / `createToolboxModule` 装配，返回统一 WorkspaceModule；bootstrap 只消费工作区能力，不用具体工作台类做 instanceof 判断。模块销毁同时释放目录投影和事件订阅，动态移除与应用退出共用一次释放。
 - `loadWorkspace()` 包含去重 — 并发加载同一工作区共享同一个 Promise (`pendingLoads`)
+- chat 工作区在 `SessionWorkbench` 完成侧栏树加载后立即触发 `onSidebarReady`，宿主的 `onWorkspaceReady` 因此先把加载遮罩限制在正文列；让出一帧后再恢复选中项、项目正文和深链编辑器。侧栏初始化完成后 `onSidebarInteractive` 允许桌面端提前开放点击；显式深链不额外打开旧的侧栏选中项。`onEditorReady` 仍在正文首挂载后触发。
 - 路由基于 hash URL (`#/<slug>/<resourceId>`)，由 `history.pushState/replaceState` 写入，监听 `popstate` + `NAVIGATION_EVENTS.NAVIGATE`
 - `ThemeService` 管理 `<html>` 的 `data-theme` attribute，监听 `app:theme-change` 事件，偏好持久化到 `etc:/ui/theme.json`；`AppHandle.setTheme(mode)` 切换主题
 

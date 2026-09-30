@@ -144,6 +144,8 @@ export interface AppOptions {
      * `editor`, keeping the app nav and the Session sidebar readable during the rest of boot.
      */
     onWorkspaceReady?: (parts: BootWorkspaceParts) => void;
+    /** The Session sidebar has finished initializing and can accept navigation. */
+    onSidebarInteractive?: () => void;
     /** The initial editor finished mounting (or the workspace has no editor to wait for). */
     onEditorReady?: () => void;
     /** LLM traffic logger (NoopLLMLogger for web, TauriLLMLogger for Tauri) */

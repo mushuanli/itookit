@@ -40,10 +40,14 @@
     background: var(--bg-secondary);
 }
 
-/* The shell is painted during boot but must not accept input until the app is ready. */
+/* Nav stays guarded during boot; the Session sidebar becomes interactive after initialization. */
 body.is-booting .app-sidebar,
 body.is-booting .mm-sidebar {
     pointer-events: none;
+}
+
+body.is-booting.is-sidebar-ready .mm-sidebar {
+    pointer-events: auto;
 }
 
 @keyframes boot-overlay-spin {
