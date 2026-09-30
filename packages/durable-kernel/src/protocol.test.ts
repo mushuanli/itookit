@@ -554,6 +554,30 @@ describe('durable harness protocols', () => {
         expect((await store.readTask(binding, waiter.id)).status).toBe('ready');
     });
 
+    it('does not probe empty dependency and wait prefixes for every terminal Task', async () => {
+        const ids: string[] = [];
+        for (let i = 0; i < 12; i++) {
+            const task = await store.createTask(binding, 's', { ...spec, deferStart: true });
+            await store.cancelTask(binding, task.id);
+            ids.push(task.id);
+        }
+        await fs.meta.seq!.transaction!(async tx => {
+            const prefixes: Array<string | undefined> = [];
+            const tracked = new Proxy(tx, { get(target, key) {
+                if (key !== 'walkEntries') return Reflect.get(target, key);
+                return (...args: Parameters<typeof tx.walkEntries>) => {
+                    prefixes.push(args[2]?.keyPrefix);
+                    return tx.walkEntries(...args);
+                };
+            } });
+            await recoverWaitGraphTx(tracked, binding.rootPath, ids);
+            expect(prefixes.filter(prefix => prefix === 'edge/')).toHaveLength(1);
+            expect(prefixes.filter(prefix => prefix === 'wait/task/')).toHaveLength(1);
+            expect(prefixes.some(prefix => prefix?.startsWith('edge/') && prefix !== 'edge/')).toBe(false);
+            expect(prefixes.some(prefix => prefix?.startsWith('wait/task/') && prefix !== 'wait/task/')).toBe(false);
+        });
+    });
+
     it('repairs lost wait and dependency indexes from durable records', async () => {
         const target = await store.createTask(binding, 's', { ...spec, deferStart: true });
         const dependent = await store.createTask(binding, 's', { ...spec, dependsOn: [{ task: target.id, condition: 'terminal' }] });

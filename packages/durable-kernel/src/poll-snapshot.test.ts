@@ -17,7 +17,7 @@ beforeEach(async () => {
     await kernel.waitIdle();
     internals = kernel as unknown as typeof internals;
     internals.poller.dispose(); internals.resourcePoller.dispose();
-    vi.spyOn(internals.store, 'sweep').mockResolvedValue(undefined);
+    vi.spyOn(internals.store, 'sweep').mockResolvedValue(null);
 });
 afterEach(async () => { vi.restoreAllMocks(); kernel.dispose(); await kernel.waitIdle(); await manager.dispose(); });
 
@@ -32,6 +32,26 @@ it('reuses an unchanged poll snapshot for wake calculation', async () => {
     const reads = scan.mock.calls.length;
     await internals.nextWakeDelay('s');
     expect(scan.mock.calls.length).toBe(reads);
+});
+
+it('reuses the sweep scan when no task changed during the tick', async () => {
+    const waiting = waitingTask();
+    vi.mocked(internals.store.sweep).mockResolvedValue([waiting]);
+    const scan = vi.spyOn(internals.store, 'listTasks');
+    await internals.poll('s');
+    expect(scan).not.toHaveBeenCalled();
+    expect(await internals.nextWakeDelay('s')).toBeGreaterThan(9000);
+});
+
+it('rechecks tasks when a commit invalidates the sweep scan', async () => {
+    vi.mocked(internals.store.sweep).mockImplementation(async () => {
+        internals.notify('s');
+        return [];
+    });
+    const scan = vi.spyOn(internals.store, 'listTasks').mockResolvedValue([waitingTask()]);
+    await internals.poll('s');
+    expect(scan).toHaveBeenCalledTimes(1);
+    expect(await internals.nextWakeDelay('s')).toBeGreaterThan(9000);
 });
 
 it.each(['during-read', 'after-poll'])('observes a new timer notified %s instead of sleeping indefinitely', async timing => {

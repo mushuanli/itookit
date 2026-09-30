@@ -9,7 +9,7 @@ export const STORE_TAGS = 'tags';
 
 export const ALL_STORES = [STORE_NODES, STORE_RECORDS, STORE_TAGS] as const;
 export const REQUIRED_STORES = [STORE_NODES, STORE_TAGS, STORE_RECORDS] as readonly string[];
-export const DB_VERSION = 3;
+export const DB_VERSION = 5;
 
 // ── IDB Promise Wrappers ────────────────────────────────────────────
 

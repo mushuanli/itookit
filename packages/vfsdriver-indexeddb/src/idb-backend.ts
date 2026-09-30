@@ -7,6 +7,7 @@
 import type {
     IStorageBackend,
     FSNode,
+    DirEntry,
     FSFileNode,
     FSDirectoryNode,
     FSDeviceNode,
@@ -26,6 +27,7 @@ import { STORE_RECORDS } from './utils';
 
 interface NodeEntry {
     path: string;
+    parentPath?: string | null;
     type: 'file' | 'directory';
     content: ArrayBuffer;
     size: number;
@@ -80,8 +82,11 @@ export class IndexedDBBackend implements IStorageBackend {
     async init(): Promise<void> {
         if (this.db) return;
         this.db = await openDB(this.dbName, DB_VERSION, (db, tx, oldVersion) => {
-            if (oldVersion !== 0) throw new Error('Filesystem database version incompatible');
+            if (oldVersion !== 0 && (![3, 4].includes(oldVersion) || REQUIRED_STORES.some(store => !db.objectStoreNames.contains(store)))) {
+                throw new Error('Filesystem database version incompatible');
+            }
             ensureSchema(db, tx);
+            if (oldVersion === 3) backfillParentPaths(tx.objectStore(STORE_NODES));
         });
         if (needsSchemaRepair(this.db)) {
             this.db.close(); this.db = null;
@@ -106,25 +111,31 @@ export class IndexedDBBackend implements IStorageBackend {
         return entry ? toFSNode(entry) : null;
     }
 
+    async statType(path: string): Promise<Pick<FSNode, 'type'> | null> {
+        const tx = this._db().transaction(STORE_NODES, 'readonly');
+        const range = IDBKeyRange.bound([path, ''], [path, []], false, true);
+        const cursor = await req(tx.objectStore(STORE_NODES).index('pathType').openKeyCursor(range));
+        return cursor ? { type: (cursor.key as [string, NodeEntry['type']])[1] } : null;
+    }
+
     async list(dirPath: string): Promise<FSNode[]> {
-        const prefix = dirPath === '/' ? '/' : dirPath + '/';
+        return (await this.childrenRows(dirPath)).map(toFSNode);
+    }
+
+    async listEntries(dirPath: string): Promise<DirEntry[]> {
+        return (await this.childrenRows(dirPath)).map(entry => ({
+            path: entry.path,
+            name: entry.path.slice(entry.path.lastIndexOf('/') + 1),
+            type: entry.type,
+            modifiedAt: entry.modifiedAt,
+            ...(entry.type === 'file' ? { size: entry.size } : {}),
+        }));
+    }
+
+    private async childrenRows(dirPath: string): Promise<NodeEntry[]> {
         const db = this._db();
         const tx = db.transaction(STORE_NODES, 'readonly');
-        const entries = await collectCursor<NodeEntry>(
-            tx.objectStore(STORE_NODES).openCursor(),
-            (c) => c.value,
-        );
-        const seen = new Set<string>();
-        return entries
-            .filter(e => {
-                if (e.path === dirPath || !e.path.startsWith(prefix)) return false;
-                const rest = e.path.slice(prefix.length);
-                if (rest.includes('/')) return false;
-                if (seen.has(e.path)) return false;
-                seen.add(e.path);
-                return true;
-            })
-            .map(toFSNode);
+        return req<NodeEntry[]>(tx.objectStore(STORE_NODES).index('parentPath').getAll(IDBKeyRange.only(dirPath)));
     }
 
     async mkdir(path: string): Promise<FSNode> {
@@ -205,7 +216,8 @@ export class IndexedDBBackend implements IStorageBackend {
 
             for (const e of sourceNodes) {
                 nodes.delete(e.path);
-                await req(nodes.add({ ...e, path: mappedPath(e.path), modifiedAt: Date.now() }));
+                const path = mappedPath(e.path);
+                await req(nodes.add({ ...e, path, parentPath: parentPathOf(path), modifiedAt: Date.now() }));
             }
             for (const ref of allTags) {
                 if (isSourcePath(ref.path)) await req(tags.put({ ...ref, path: mappedPath(ref.path) }));
@@ -447,7 +459,7 @@ export class IndexedDBBackend implements IStorageBackend {
     private async _putEntry(entry: NodeEntry): Promise<void> {
         const db = this._db();
         const tx = db.transaction(STORE_NODES, 'readwrite');
-        await req(tx.objectStore(STORE_NODES).put(entry));
+        await req(tx.objectStore(STORE_NODES).put({ ...entry, parentPath: parentPathOf(entry.path) }));
     }
 
     private async _deleteTagRefs(tx: IDBTransaction, path: string): Promise<void> {
@@ -477,6 +489,9 @@ class LazyRecordStore implements IRecordStore {
 
     async getRecordField(path: string, field: string): Promise<RecordValue | undefined> {
         return new IDBRecordStore(this.roStore()).getRecordField(path, field);
+    }
+    async getRecordFields(path: string, fields: string[]): Promise<Record<string, RecordValue>> {
+        return new IDBRecordStore(this.roStore()).getRecordFields(path, fields);
     }
     async getRecordFieldsMany(requests: ReadonlyArray<{ path: string; field: string }>): Promise<Array<RecordValue | undefined>> {
         return new IDBRecordStore(this.roStore()).getRecordFieldsMany(requests);
@@ -546,15 +561,32 @@ function waitForTransaction(transaction: IDBTransaction): Promise<void> {
 }
 
 const REQUIRED_INDEXES: Readonly<Record<string, readonly string[]>> = {
-    [STORE_NODES]: ['type', 'modifiedAt'],
+    [STORE_NODES]: ['type', 'modifiedAt', 'parentPath', 'pathType'],
     [STORE_TAGS]: ['tag', 'path'],
     [STORE_RECORDS]: ['idx_path'],
 };
+
+function parentPathOf(path: string): string | null {
+    return path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/';
+}
+
+function backfillParentPaths(store: IDBObjectStore): void {
+    const request = store.openCursor();
+    request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        const entry = cursor.value as NodeEntry;
+        cursor.update({ ...entry, parentPath: parentPathOf(entry.path) });
+        cursor.continue();
+    };
+}
 
 function ensureSchema(db: IDBDatabase, transaction: IDBTransaction): void {
     const nodes = getOrCreateNodesStore(db, transaction);
     ensureIndex(nodes, 'type', 'type');
     ensureIndex(nodes, 'modifiedAt', 'modifiedAt');
+    ensureIndex(nodes, 'parentPath', 'parentPath');
+    ensureIndex(nodes, 'pathType', ['path', 'type']);
 
     const tags = getOrCreateTagsStore(db, transaction);
     ensureIndex(tags, 'tag', 'tag');
@@ -587,7 +619,7 @@ function getOrCreateTagsStore(
     return db.createObjectStore(STORE_TAGS, { keyPath: 'id', autoIncrement: true });
 }
 
-function ensureIndex(store: IDBObjectStore, name: string, keyPath: string): void {
+function ensureIndex(store: IDBObjectStore, name: string, keyPath: string | string[]): void {
     if (!store.indexNames.contains(name)) {
         store.createIndex(name, keyPath);
     }

@@ -14,7 +14,7 @@ src/
 
 ## object store 模型
 
-数据库名默认 `MindOS-v4`(`IndexedDBBackendOptions.dbName` 可覆盖),`DB_VERSION = 3`:
+数据库名默认 `MindOS-v4`(`IndexedDBBackendOptions.dbName` 可覆盖),`DB_VERSION = 5`:
 
 | Store | Key Path | 存储内容 |
 |---|---|---|
@@ -38,12 +38,13 @@ const { manager } = await createVFS({ rootBackend: backend });
 
 ## 关键约束
 
-- 单一 `nodes` store 承载节点数据,path 为主键(不再有 inode/meta/content 分层)。
+- 单一 `nodes` store 承载节点数据,path 为主键(不再有 inode/meta/content 分层)。`parentPath` 索引按父目录查询直属子节点，`list()` / `listEntries()` 不再全表扫描；`pathType` 复合索引让 `statType()` 通过 `openKeyCursor` 读取类型，无需克隆节点内容。
 - `write()` / `mkdir()` 通过 `_ensureParents()` 自动补齐缺失父目录。
-- `init()` 遇到旧版本或不兼容 schema 直接抛错(`Filesystem database version/schema incompatible`),**不会**自动删库重建;`VerifyResult.missingStores` 需要重建数据库处理。
+- `init()` 将完整的 v3/v4 schema 升至 v5；v3 在升级事务中回填 `parentPath`，v4 添加 `pathType` 索引。更旧版本或缺少必需 store 的 schema 仍报错，**不会**自动删库重建。`VerifyResult.missingStores` 需要重建数据库处理。
 - `verify()` 返回 `{ healthy, missingStores, orphanNodes, missingParents, orphanTags, totalNodes, totalTags }`;`repair()` 目前只清理孤儿 tag,返回 `{ fixedOrphanTags }`。
 - 可选 Record Store:后端 `records` 属性是 `LazyRecordStore`(按需取 IDB 事务),内部委托 `IDBRecordStore`。
 - 跨文件批量读:`IDBRecordStore.getRecordFieldsMany(requests)` 在**同一条 readonly 事务**内同步发起全部 `get`(请求必须在 await 之前全部发出,否则 IDB 会自动提交),`LazyRecordStore` 转发该能力。SeqFile 的 `getEntriesMany` 优先走它,未实现时逐条回退。
+- 单节点遍历(`walkRecordFields`)按复合主键 `['path','field']` 取 `IDBKeyRange.bound([path,prefix],[path,prefix+'\uffff'])` 后**一次 `getAll`** 取回,不再逐行 `cursor.continue()`(每行一次请求是浏览器启动的主要开销);字段顺序仍按 `localeCompare` 排序以保持既有语义,`offset`/`limit`/提前中止在内存结果上执行。旧键布局抛 `DataError` 时回退到游标扫描。
 
 ## 测试
 

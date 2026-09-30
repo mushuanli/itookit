@@ -973,9 +973,11 @@ export async function recoverWaitGraphTx(tx: ISeqFileTransaction, root: string, 
     await tx.walkEntries(graphPath(root), row => { keys.push(row.key); return true; }, { keyPrefix: 'wait/' });
     for (const key of keys) await tx.deleteEntry(graphPath(root), key);
     const read = async (id: string): Promise<TaskRecord | null> => records?.get(id) ?? await readTaskTx(tx, root, id);
+    const completed: TaskRecord[] = [];
     for (const id of allIds) {
         const task = await read(id);
         if (!task) continue;
+        if (isTerminal(task.status)) completed.push(task);
         if (task.dependencies) await writeDependencyEdges(tx, root, id, task.dependencies);
         if (task.status === 'waiting') {
             const next = await registerTaskWaitTx(tx, root, task);
@@ -989,12 +991,13 @@ export async function recoverWaitGraphTx(tx: ISeqFileTransaction, root: string, 
             }
         }
     }
-    for (const id of allIds) {
-        const task = await read(id);
-        if (task && isTerminal(task.status)) {
-            await advanceDependants(tx, root, task);
-            await wakeTaskWaiters(tx, root, task);
-        }
+    if (!completed.length) return;
+    const edgeSources = new Set<string>(), waitTargets = new Set<string>();
+    await tx.walkEntries(graphPath(root), row => { edgeSources.add(row.key.split('/')[1]); return true; }, { keyPrefix: 'edge/' });
+    await tx.walkEntries(graphPath(root), row => { waitTargets.add(row.key.split('/')[2]); return true; }, { keyPrefix: 'wait/task/' });
+    for (const task of completed) {
+        if (edgeSources.has(task.id)) await advanceDependants(tx, root, task);
+        if (waitTargets.has(task.id)) await wakeTaskWaiters(tx, root, task);
     }
 }
 

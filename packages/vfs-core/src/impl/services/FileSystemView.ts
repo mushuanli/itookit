@@ -164,7 +164,8 @@ export class FileSystemView implements IFileSystem {
         if (write && m.access === 'ro') throw new FSError('EROFS', 'Read-only mount', undefined, path);
         return m;
     }
-    private async noLinks(m: Binding, path: string, options?: OperationOptions): Promise<Pick<FSNode, 'type'> | null | undefined> {
+    private async noLinks(m: Binding, path: string, options?: OperationOptions,
+        probes?: Map<string, Promise<Pick<FSNode, 'type'> | null>>): Promise<Pick<FSNode, 'type'> | null | undefined> {
         checkOperation(options);
         const source = this.sourcePath(m, path);
         // The prefix walk only needs the node type. Prefer the driver's type-only lookup so a
@@ -179,9 +180,14 @@ export class FileSystemView implements IFileSystem {
         }
         const checked = await Promise.all(segments.map(async segment => {
             try {
-                return { node: typeof driver.getNodeType === 'function'
-                    ? await this.invoke(m, driver, 'getNodeType', [segment, options])
-                    : await this.invoke(m, m.fs.driver, 'getNode', [segment, options]) };
+                let request = probes?.get(segment);
+                if (!request) {
+                    request = typeof driver.getNodeType === 'function'
+                        ? this.invoke(m, driver, 'getNodeType', [segment, options])
+                        : this.invoke(m, m.fs.driver, 'getNode', [segment, options]);
+                    probes?.set(segment, request);
+                }
+                return { node: await request };
             } catch (error) {
                 // Settle every check: a rejected sibling must not escape as an unhandled rejection.
                 return { error };
@@ -265,19 +271,23 @@ export class FileSystemView implements IFileSystem {
         if (!this.visible(path)) throw new FSError('EACCES', 'Path is outside the system projection');
         const m = this.find(path);
         if (m) {
-            const checked = await this.noLinks(m, path, options);
-            if (checked) return { type: checked.type };
-            if (checked === undefined) {
-                const source = this.sourcePath(m, path);
-                const driver = m.fs.driver as unknown as { getNodeType?: (p: string) => Promise<Pick<FSNode, 'type'> | null> };
-                const node = typeof driver.getNodeType === 'function'
-                    ? await this.invoke(m, driver, 'getNodeType', [source, options])
-                    : await this.invoke(m, m.fs.driver, 'getNode', [source, options]);
-                if (node) return { type: node.type };
-            }
+            const sourceType = await this.mountedType(m, path, options);
+            if (sourceType) return sourceType;
         }
         const synthetic = this.synthetic(path);
         return synthetic ? { type: synthetic.type } : null;
+    }
+
+    private async mountedType(m: Binding, path: string, options?: OperationOptions): Promise<Pick<FSNode, 'type'> | null> {
+        const checked = await this.noLinks(m, path, options);
+        if (checked) return { type: checked.type };
+        if (checked === null) return null;
+        const source = this.sourcePath(m, path);
+        const driver = m.fs.driver as unknown as { getNodeType?: (p: string) => Promise<Pick<FSNode, 'type'> | null> };
+        const node = typeof driver.getNodeType === 'function'
+            ? await this.invoke(m, driver, 'getNodeType', [source, options])
+            : await this.invoke(m, m.fs.driver, 'getNode', [source, options]);
+        return node ? { type: node.type } : null;
     }
     private entry(m: Binding, node: DirEntry): DirEntry {
         const path = this.virtualPath(m, node.path);
@@ -288,12 +298,15 @@ export class FileSystemView implements IFileSystem {
 
     private async children(input: string, options?: ListOptions): Promise<Array<FSNode | DirEntry>> {
         const path = normalizeVirtualPath(input);
-        const parent = await this.statType(path, options);
+        if (!this.visible(path)) throw new FSError('EACCES', 'Path is outside the system projection');
+        const m = this.find(path);
+        const sourceType = m ? await this.mountedType(m, path, options) : null;
+        const synthetic = sourceType ? null : this.synthetic(path);
+        const parent = sourceType ?? (synthetic ? { type: synthetic.type } : null);
         if (!parent) throw new FSError('ENOENT', 'Directory not found', 'list', path);
         if (parent.type !== 'directory') throw new FSError('ENOTDIR', 'Not a directory', 'list', path);
         const entries = new Map<string, FSNode | DirEntry>();
-        const m = this.find(path);
-        if (m && await m.fs.driver.exists(this.sourcePath(m, path), options)) {
+        if (m && sourceType) {
             const nodes: Array<FSNode | DirEntry> = await this.invoke(m, m.fs.driver, 'getChildren', [this.sourcePath(m, path), options]);
             for (const n of nodes) {
                 if (!P.isUnder(n.path, m.root) || P.dirname(n.path) !== this.sourcePath(m, path)) throw new FSError('EACCES', 'Invalid source listing');
@@ -427,6 +440,7 @@ export class FileSystemView implements IFileSystem {
     ): Promise<Array<string | null>> {
         if (!requests.length) return [];
         const mapped: Array<{ fileIdOrPath: string; key: string }> = [];
+        const paths: string[] = [];
         let owner: Binding | undefined = expected;
         for (const request of requests) {
             const path = normalizeVirtualPath(request.fileIdOrPath);
@@ -434,8 +448,14 @@ export class FileSystemView implements IFileSystem {
             const mount = this.binding(path, false);
             if (owner && owner !== mount) throw new FSError('EXMOUNT', 'Record transaction crossed a mount');
             owner = mount;
-            if (!api) await this.noLinks(mount, path);
+            if (!api) paths.push(path);
             mapped.push({ fileIdOrPath: this.sourcePath(mount, path), key: request.key });
+        }
+        if (paths.length) {
+            const probes = new Map<string, Promise<Pick<FSNode, 'type'> | null>>();
+            const checked = await Promise.allSettled(paths.map(path => this.noLinks(owner!, path, undefined, probes)));
+            const failed = checked.find(result => result.status === 'rejected');
+            if (failed?.status === 'rejected') throw failed.reason;
         }
         const target = (api ?? owner?.fs.meta?.seq) as { getEntriesMany?: unknown } | undefined;
         if (!target?.getEntriesMany) throw new FSCapabilityError('seq.getEntriesMany');

@@ -81,6 +81,8 @@ SeqFile 的 `getEntries` 在事务内优先调用记录后端可选的 `getRecor
 
 **多路径批量读 `getEntriesMany(requests)`**：一次读多个文件的同名/异名键，是「扫描 N 个 Task 记录」这类循环的正解。契约：结果顺序与 `requests` 一致，文件或键缺失返回 `null`（后端 ENOENT 也降级为 `null`，不抛错）；路径解析失败之外的错误照常抛出。优先用后端可选的 `getRecordFieldsMany`，未实现时退化为逐条读取，因此**后端可以逐步接入**（`MemoryRecordStore` / localfs `BetterSqliteSidecarDb` / CLI `NodeSqliteSidecarDb` / `IDBRecordStore` / 桌面 `TauriSqlSidecarDb` 均已实现）。`mapRecordPaths`、`FileSystemView`（虚拟路径 → 挂载源路径，含挂载/EACCES 校验）都必须转发，否则批量能力会在视图层丢失。收益（CLI 引导成本 fixture，3 Session + 9 终态 Task）：`994 → 814` 次 sidecar 调用，`220 → 175` 个事务。回归：`tests/06-seq-file.test.ts`「getEntriesMany reads many files in request order…」「issues one backend batch call and falls back…」。
 
+`FileSystemView` 对非事务的 `getEntriesMany` 在一次调用内共用前缀类型检查 Promise；相同父路径与重复目标只检查一次，仍逐请求校验读权限及挂载，调用结束即丢弃结果。事务内继续使用同步路径/挂载校验，不在 IndexedDB 事务中等待节点 IO。回归见 `tests/23-io-stats.test.ts`。
+
 对桌面 LocalFS,前缀检查原本每次要付一次 `getMetaExt` IPC(且计入 `ioStats.stat`);实测一次聊天发送的前缀检查从 653 次 VFS stat 降到 114,合并 IPC 后发送延迟从 5.66s 降到 4.21s。**新增后端时若 `stat` 有远程/侧车往返,应实现 `statType`(并让 `fsOps` 提供批量 `statMany`);新增 driver 时实现 `getNodeType`。** 语义不变:类型仍来自与 `stat` 相同的底层调用,只是不取元数据、并把同 tick 的调用合并成一次往返。
 
 ## 消费关系

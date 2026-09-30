@@ -58,6 +58,42 @@ describe('IndexedDBBackend lifecycle', () => {
     });
 });
 
+describe('IndexedDBBackend directory entries', () => {
+    it('reads node types from index keys without loading node contents', async () => {
+        const backend = freshIDB('type-only');
+        await backend.init();
+        try {
+            await backend.write('/folder/file.md', encoder.encode('large content'));
+            const fullReads = vi.spyOn(IDBObjectStore.prototype, 'get');
+            try {
+                expect(await backend.statType('/folder')).toEqual({ type: 'directory' });
+                expect(await backend.statType('/folder/file.md')).toEqual({ type: 'file' });
+                expect(await backend.statType('/missing')).toBeNull();
+                expect(fullReads).not.toHaveBeenCalled();
+            } finally { fullReads.mockRestore(); }
+            await backend.rename('/folder/file.md', '/folder/renamed.md');
+            expect(await backend.statType('/folder/file.md')).toBeNull();
+            expect(await backend.statType('/folder/renamed.md')).toEqual({ type: 'file' });
+            await backend.delete('/folder/renamed.md');
+            expect(await backend.statType('/folder/renamed.md')).toBeNull();
+        } finally { await backend.close(); }
+    });
+
+    it('returns direct children without sibling or descendant paths', async () => {
+        const backend = freshIDB('direct-children');
+        await backend.init();
+        try {
+            await backend.write('/tasks/one/task.seq', encoder.encode('one'));
+            await backend.write('/tasks/two/task.seq', encoder.encode('two'));
+            await backend.write('/tasks-other/file', encoder.encode('other'));
+            expect((await backend.listEntries('/tasks')).map(entry => entry.path).sort())
+                .toEqual(['/tasks/one', '/tasks/two']);
+            expect((await backend.list('/tasks/one')).map(node => node.path))
+                .toEqual(['/tasks/one/task.seq']);
+        } finally { await backend.close(); }
+    });
+});
+
 describe('IndexedDBBackend records', () => {
     it('supports field operations without leaking records between paths', async () => {
         const backend = freshIDB('records');
@@ -100,6 +136,46 @@ describe('IndexedDBBackend records', () => {
         expect(fields.sort()).toEqual(['meta:count', 'meta:title']);
         expect(matches).toEqual([{ field: 'meta:count', value: 3 }]);
         await backend.close();
+    });
+
+    it('reads a field prefix in one ranged request instead of one request per row', async () => {
+        const backend = freshIDB('record-range');
+        await backend.init();
+        try {
+            await backend.records.setAllRecordFields('/big', Object.fromEntries(
+                Array.from({ length: 200 }, (_, index) => [`event/${String(index).padStart(3, '0')}`, index])));
+            await backend.records.setRecordField('/big', 'meta', 'kept');
+            await backend.records.setRecordField('/other', 'event/000', 'foreign');
+
+            const getAll = vi.spyOn(IDBObjectStore.prototype, 'getAll');
+            const openCursor = vi.spyOn(IDBObjectStore.prototype, 'openCursor');
+            try {
+                const cursorsBefore = openCursor.mock.calls.length;
+                const seen: string[] = [];
+                const result = await backend.records.walkRecordFields('/big', field => { seen.push(field); return true; },
+                    { prefix: 'event/', offset: 2, limit: 3 });
+
+                expect(result).toEqual({ total: 200, processed: 3 });
+                expect(seen).toEqual(['event/002', 'event/003', 'event/004']);
+                expect(openCursor.mock.calls.length).toBe(cursorsBefore);
+                const ranged = getAll.mock.calls.filter(([query]) => Array.isArray((query as IDBKeyRange).lower));
+                expect(ranged.length).toBe(1);
+                expect((ranged[0][0] as IDBKeyRange).lower).toEqual(['/big', 'event/']);
+                expect((ranged[0][0] as IDBKeyRange).upper).toEqual(['/big', 'event/\uffff']);
+            } finally { getAll.mockRestore(); openCursor.mockRestore(); }
+
+            const stops: string[] = [];
+            const stopped = await backend.records.walkRecordFields('/big',
+                field => { stops.push(field); return false; }, { prefix: 'event/' });
+            expect(stopped).toEqual({ total: 200, processed: 0 });
+            expect(stops).toEqual(['event/000']);
+
+            const everything: string[] = [];
+            await backend.records.walkRecordFields('/big', field => { everything.push(field); return true; });
+            expect(everything.length).toBe(201);
+            expect(everything[0]).toBe('event/000');
+            expect(everything.at(-1)).toBe('meta');
+        } finally { await backend.close(); }
     });
 });
 

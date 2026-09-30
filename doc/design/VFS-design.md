@@ -125,7 +125,7 @@ Session 默认只暴露 `/attachments`，显式授权后增加 `/workspace` 等�
 | 可选能力 | records、search、symlink/readlink、transaction |
 | 生命周期 | init、close |
 
-MemoryBackend 使用内存记录；IndexedDBBackend 使用 nodes/tags/records stores；LocalFSBackend 使用真实文件和 SQLite sidecar 元数据/records。LocalFS 的 `__tests__` 等目录保持原位置，不因名称前缀重定向到侧车。当前 IndexedDB schema 3、SQLite schema 4 拒绝旧结构，未提供自动迁移。
+MemoryBackend 使用内存记录；IndexedDBBackend 使用 nodes/tags/records stores；LocalFSBackend 使用真实文件和 SQLite sidecar 元数据/records。LocalFS 的 `__tests__` 等目录保持原位置，不因名称前缀重定向到侧车。当前 IndexedDB schema 5 支持完整 v3/v4 数据库升级，补齐目录父路径和类型查询索引；更旧或缺失必需 store 的结构报错。SQLite schema 4 仍拒绝旧结构。
 
 宿主 backend 挂载和用户视图挂载是两层路由。引擎将系统路径转换成 backend-local path；DirectoryContext/SeqFileOps 对 records 同样使用该 backend 的本地坐标。跨后端操作不能因为虚拟路径相邻而获得原子性。
 

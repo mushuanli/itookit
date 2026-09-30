@@ -41,10 +41,39 @@ export class IDBRecordStore implements IRecordStore {
         return row?.value;
     }
 
-    /** Every `get` is issued synchronously, so one readonly transaction serves the whole batch. */
+    async getRecordFields(path: string, fields: string[]): Promise<Record<string, RecordValue>> {
+        const unique = [...new Set(fields)];
+        if (!unique.length) return {};
+        if (unique.length === 1) {
+            const value = await this.getRecordField(path, unique[0]);
+            return value === undefined ? {} : { [unique[0]]: value };
+        }
+        const requested = new Set(unique);
+        const rows = await this.readRows(path);
+        return Object.fromEntries(rows
+            .filter(row => requested.has(row.field))
+            .map(row => [row.field, row.value]));
+    }
+
+    /** Batch fields sharing a path into one range read; issue independent point reads otherwise. */
     async getRecordFieldsMany(requests: ReadonlyArray<RecordFieldRequest>): Promise<Array<RecordValue | undefined>> {
-        return Promise.all(requests.map(async request =>
-            (await req<RecordRow | undefined>(this.records.get(IDBKeyRange.only([request.path, request.field]))))?.value));
+        const groups = new Map<string, Array<{ field: string; index: number }>>();
+        requests.forEach((request, index) => {
+            const group = groups.get(request.path) ?? [];
+            group.push({ field: request.field, index });
+            groups.set(request.path, group);
+        });
+        const values: Array<RecordValue | undefined> = new Array(requests.length);
+        await Promise.all([...groups].map(async ([path, group]) => {
+            if (group.length > 1) {
+                const fields = await this.getRecordFields(path, group.map(item => item.field));
+                group.forEach(item => { values[item.index] = fields[item.field]; });
+                return;
+            }
+            const item = group[0]!;
+            values[item.index] = await this.getRecordField(path, item.field);
+        }));
+        return values;
     }
 
     async setRecordField(path: string, field: string, value: RecordValue): Promise<void> {
@@ -57,12 +86,19 @@ export class IDBRecordStore implements IRecordStore {
 
     async setAllRecordFields(path: string, fields: Record<string, RecordValue>): Promise<void> {
         await this.clearRecordFields(path);
-        for (const [field, value] of Object.entries(fields)) {
-            await req(this.records.put({ path, field, value }));
-        }
+        await Promise.all(Object.entries(fields).map(([field, value]) =>
+            req(this.records.put({ path, field, value }))));
     }
 
     async clearRecordFields(path: string): Promise<void> {
+        if (Array.isArray(this.records.keyPath)) {
+            try {
+                await req(this.records.delete(IDBKeyRange.bound([path, ''], [path, []])));
+                return;
+            } catch (error) {
+                if ((error as { name?: string } | undefined)?.name !== 'DataError') throw error;
+            }
+        }
         const hasPathIndex = this.records.indexNames.contains('idx_path');
         const cursor = hasPathIndex
             ? this.records.index('idx_path').openCursor(IDBKeyRange.only(path))
@@ -78,6 +114,42 @@ export class IDBRecordStore implements IRecordStore {
         callback: (field: string, value: RecordValue) => boolean | Promise<boolean>,
         options?: RecordWalkOptions,
     ): Promise<{ total: number; processed: number }> {
+        const prefix = options?.prefix;
+        const rows = (await this.readRows(path, prefix))
+            .sort((left, right) => left.field.localeCompare(right.field));
+        const total = rows.length;
+        let processed = 0;
+        const offset = options?.offset ?? 0;
+        const limit = options?.limit ?? Infinity;
+        for (let i = offset; i < rows.length && processed < limit; i++) {
+            if (!(await callback(rows[i].field, rows[i].value))) break;
+            processed++;
+        }
+        return { total, processed };
+    }
+
+    /**
+     * Every row of one node — or of one field prefix — in a single `getAll` request.
+     *
+     * The store key is exactly `(path, field)`, so a bounded key range replaces the per-row
+     * cursor round trip that used to dominate large SeqFile scans.
+     */
+    private async readRows(path: string, prefix?: string): Promise<RecordRow[]> {
+        const lower = prefix ?? '';
+        try {
+            const upper: IDBValidKey = prefix === undefined
+                ? [path, []]
+                : [path, `${lower}\uffff`];
+            return await req<RecordRow[]>(this.records.getAll(
+                IDBKeyRange.bound([path, lower], upper, false, prefix !== undefined)));
+        } catch (error) {
+            // A legacy store without the compound key cannot be ranged; fall back to a scan.
+            if ((error as { name?: string } | undefined)?.name !== 'DataError') throw error;
+            return await this.scanRows(path, prefix);
+        }
+    }
+
+    private async scanRows(path: string, prefix?: string): Promise<RecordRow[]> {
         const hasPathIndex = this.records.indexNames.contains('idx_path');
         const cursor = hasPathIndex
             ? this.records.index('idx_path').openCursor(IDBKeyRange.only(path))
@@ -86,21 +158,8 @@ export class IDBRecordStore implements IRecordStore {
             cursor as IDBRequest<IDBCursorWithValue | null>,
             c => c.value as RecordRow,
         );
-        const pathRows = (hasPathIndex ? rows : rows.filter(row => row.path === path))
-            .sort((left, right) => left.field.localeCompare(right.field));
-        const prefix = options?.prefix;
-        const filtered = prefix
-            ? pathRows.filter(row => row.field.startsWith(prefix))
-            : pathRows;
-        const total = filtered.length;
-        let processed = 0;
-        const offset = options?.offset ?? 0;
-        const limit = options?.limit ?? Infinity;
-        for (let i = offset; i < filtered.length && processed < limit; i++) {
-            if (!(await callback(filtered[i].field, filtered[i].value))) break;
-            processed++;
-        }
-        return { total, processed };
+        return rows.filter(row => (hasPathIndex || isRecordPath(row, path))
+            && (prefix === undefined || row.field.startsWith(prefix)));
     }
 
     async walkRecordFieldNames(

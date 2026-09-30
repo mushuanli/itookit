@@ -19,6 +19,7 @@ describe('Kernel durable kernel', () => {
     let manager: IVFSManager;
     let fs: IFileSystem;
     let kernel: Kernel;
+    let backend: MemoryBackend;
 
     it('inspects without activation and restores only selected Sessions before starting their resource workers', async () => {
         for (const id of ['one', 'two', 'other']) {
@@ -51,8 +52,75 @@ describe('Kernel durable kernel', () => {
         expect([...internals.sessions.keys()]).toEqual(['one', 'two']);
     });
 
+    it('reports one recovery timing sample per Session without changing the recovered set', async () => {
+        for (const id of ['one', 'two']) {
+            const session = await kernel.createSession({ id, storage: { kind: 'test', locator: { rootPath: `/sessions/${id}/.kernel` } } });
+            await session.setShared('probe', { id });
+        }
+        kernel.dispose(); await kernel.waitIdle();
+        const reader = await configuredKernel(fs, { maxConcurrent: 0, pollMs: 0 });
+        const samples: Array<{ id: string; state: number; resources: number }> = [];
+        await reader.recoverSessions(['one', 'two'], { takeover: true,
+            onSessionRecovered: (id, timing) => samples.push({ id, ...timing }) });
+        expect(samples.map(sample => sample.id)).toEqual(['one', 'two']);
+        for (const sample of samples) {
+            expect(sample.state).toBeGreaterThanOrEqual(0);
+            expect(sample.resources).toBeGreaterThanOrEqual(0);
+        }
+    });
+
+    it('repairs a stale catalog task mapping during recovery', async () => {
+        const first = await kernel.createSession({ id: 'one', storage: { kind: 'test', locator: { rootPath: '/sessions/one/.kernel' } } });
+        const second = await kernel.createSession({ id: 'two', storage: { kind: 'test', locator: { rootPath: '/sessions/two/.kernel' } } });
+        const task = await first.submit({ program: { kind: 'test.manual', version: '1' }, input: 'first', deferStart: true });
+        await second.submit({ program: { kind: 'test.manual', version: '1' }, input: 'second', deferStart: true });
+
+        const catalog = '/.config/kernel/catalog.seq';
+        await fs.meta.seq!.transaction!(tx => tx.setEntry(catalog, `task/${task.id}`, 'two'));
+        const store = (kernel as unknown as { store: { locateTask(id: string): Promise<string> } }).store;
+        expect(await store.locateTask(task.id)).toBe('two');
+
+        await kernel.recoverSession('one');
+
+        expect(await store.locateTask(task.id)).toBe('one');
+    });
+
+    it('recovers a Session by keyed catalog reads instead of scanning foreign task rows', async () => {
+        const first = await kernel.createSession({ id: 'one', storage: { kind: 'test', locator: { rootPath: '/sessions/one/.kernel' } } });
+        const second = await kernel.createSession({ id: 'two', storage: { kind: 'test', locator: { rootPath: '/sessions/two/.kernel' } } });
+        const task = await first.submit({ program: { kind: 'test.manual', version: '1' }, input: 'first', deferStart: true });
+        for (let index = 0; index < 50; index++) {
+            await second.submit({ program: { kind: 'test.manual', version: '1' }, input: index, deferStart: true });
+        }
+
+        const reads: Array<{ op: string; path: string; key: string }> = [];
+        const records = backend.records as unknown as {
+            getRecordField(path: string, field: string): Promise<unknown>;
+            walkRecordFields(path: string, callback: (field: string, value: unknown) => boolean | Promise<boolean>,
+                options?: { prefix?: string }): Promise<{ total: number; processed: number }>;
+        };
+        const get = records.getRecordField.bind(records), walk = records.walkRecordFields.bind(records);
+        records.getRecordField = async (path, field) => { reads.push({ op: 'get', path, key: field }); return get(path, field); };
+        records.walkRecordFields = async (path, callback, options) => {
+            reads.push({ op: 'walk', path, key: options?.prefix ?? '' });
+            return walk(path, callback, options);
+        };
+        try { await kernel.recoverSession('one'); } finally {
+            records.getRecordField = get; records.walkRecordFields = walk;
+        }
+
+        const catalog = reads.filter(read => read.path.endsWith('catalog.seq'));
+        expect(catalog.filter(read => read.op === 'walk')).toEqual([]);
+        expect(catalog.some(read => read.key.includes('session/one'))).toBe(true);
+        expect(catalog.filter(read => read.key.includes(`task/${task.id}`))).toHaveLength(1);
+        // Foreign Tasks must not add catalog reads: recovery stays O(this Session's Tasks).
+        expect(catalog.filter(read => /task\//.test(read.key)).length).toBeLessThanOrEqual(2);
+        expect(catalog.length).toBeLessThanOrEqual(4);
+    });
+
     beforeEach(async () => {
-        ({ manager } = await createVFS({ rootBackend: new MemoryBackend(),}));
+        backend = new MemoryBackend();
+        ({ manager } = await createVFS({ rootBackend: backend,}));
         fs = await manager.openFileSystem('/data/test');
         kernel = new Kernel({ catalog: { fs }, pollMs: 0 });
         kernel.registerStorageResolver({

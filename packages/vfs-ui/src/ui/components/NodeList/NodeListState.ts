@@ -118,21 +118,27 @@ export class NodeListStateTransformer {
     uiSettings: UISettings,
     isReadOnly: boolean
   ): VFSNodeUI[] {
-    let processedItems: VFSNodeUI[] = JSON.parse(JSON.stringify(items));
     const hasQuery =
       queries.textQueries.length > 0 ||
       queries.tagQueries.length > 0 ||
       queries.typeQueries.length > 0;
 
-    if (hasQuery) {
-      processedItems = this.filterRecursively(processedItems, queries);
-    }
+    const shouldSort = !isReadOnly || this.fixedCompare || this.compareItems;
+    const processedItems = hasQuery
+      ? this.filterRecursively(items, queries)
+      : shouldSort ? this.copyTree(items) : items;
 
-    if (!isReadOnly || this.fixedCompare || this.compareItems) {
+    if (shouldSort) {
       this.sortRecursively(processedItems, uiSettings);
     }
 
     return processedItems;
+  }
+
+  private copyTree(items: VFSNodeUI[]): VFSNodeUI[] {
+    return items.map(item => item.type === 'directory' && item.children
+      ? { ...item, children: this.copyTree(item.children) }
+      : item);
   }
 
   private filterRecursively(

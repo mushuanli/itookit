@@ -11,7 +11,7 @@
 - 公开 `EditorOptions.nodeId/ownerNodeId` 已移除；文件、Session、实体通过 `EditorTarget` 区分。历史、上传、资产管理和打印使用明确的 Session 附件来源。
 - `SessionManager.bindSession`、Session runtime/TaskInput 仅保留真实 Session ID；Flow 创建会话返回 `{ sessionId }`。消息和 DAG 的节点 ID 保留其业务含义。
 - 文件元数据、records、搜索、事件和附件均经过视图边界；backend records 使用 backend-local 坐标。内部模块字段统一为 viewId。
-- SQLite schema 4、IndexedDB schema 3 拒绝旧版本。旧目录/表结构迁移器已删除，运行时没有兼容探测分支。
+- SQLite schema 4 拒绝旧版本；IndexedDB schema 5 可从完整 v3/v4 数据库升级，补齐目录父路径与类型查询索引，更旧或缺失必需 store 的结构报错。
 - Web/Tauri/CLI 接入新目录和来源。Tauri 外部目录独立于全局根；卸载先销毁工作区，应用关闭先释放消费者再释放来源。启动失败清理已打开的来源。
 - `/add-dir <dir> [r|w]` 默认 rw，`r` 只读；`/set-home <dir>` 只保存偏好。files 的“＋”和主视图共用挂载弹窗，支持应用目录选择、默认目录、权限/cwd、卸载和重连。默认目录显式挂到 `/workspace`。
 - 授权变更使旧工具/编辑器上下文失效，清理 adapter 缓存，重载聊天保留当前 branch 和草稿；存在非终态 Task 时拒绝变更。来源失效保留挂载身份并拒绝内容访问。

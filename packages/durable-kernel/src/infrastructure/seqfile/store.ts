@@ -1098,20 +1098,21 @@ export class SeqFileKernelStore {
         });
     }
 
-    private async acknowledgeControl(binding: ResolvedStorageBinding, id: string): Promise<void> {
-        await transaction(binding.fs, async tx => {
+    private async acknowledgeControl(binding: ResolvedStorageBinding, id: string): Promise<boolean> {
+        return transaction(binding.fs, async tx => {
             const task = await requireTaskTx(tx, binding.rootPath, id);
-            if (!task.control || task.control.acknowledged) return;
+            if (!task.control || task.control.acknowledged) return false;
             const descendants: TaskRecord[] = [];
             await tx.walkEntries(indexPath(binding.rootPath), async row => {
                 const t = await requireTaskTx(tx, binding.rootPath, row.key.slice(5));
                 if (t.id === id || t.controlHolds?.includes(id)) descendants.push(t);
                 return true;
             }, { keyPrefix: 'task/' });
-            if (descendants.some(t => Object.values(t.effects).some(e => e.status === 'leased' || e.status === 'indeterminate'))) return;
+            if (descendants.some(t => Object.values(t.effects).some(e => e.status === 'leased' || e.status === 'indeterminate'))) return false;
             const next = { ...task, control: { ...task.control, acknowledged: true }, version: task.version + 1 };
             await writeTaskTx(tx, binding.rootPath, next);
             await appendEventTx(tx, binding.rootPath, task.sessionId, id, 'task.control.acknowledged', next.control);
+            return true;
         });
     }
 
@@ -1501,16 +1502,20 @@ export class SeqFileKernelStore {
         return pending;
     }
 
-    async sweep(binding: ResolvedStorageBinding): Promise<void> {
+    async sweep(binding: ResolvedStorageBinding): Promise<TaskRecord[] | null> {
         await transaction(binding.fs, tx => refreshWaiters(tx, binding.rootPath));
-        for (const task of await this.listTasks(binding)) {
-            if (await this.cancelFromAncestor(binding, task)) continue;
-            await this.recoverExpiredEffects(binding, task);
-            await this.acknowledgeControl(binding, task.id);
+        const tasks = await this.listTasks(binding);
+        let changed = false;
+        for (const task of tasks) {
+            if (await this.cancelFromAncestor(binding, task)) { changed = true; continue; }
+            if (await this.recoverExpiredEffects(binding, task)) changed = true;
+            if (task.control && !task.control.acknowledged && await this.acknowledgeControl(binding, task.id)) changed = true;
             if (task.status === 'running' && task.currentAttempt && task.currentAttempt.leaseUntil <= Date.now()) {
                 await this.requeueExpired(binding, task);
+                changed = true;
             }
         }
+        return changed ? null : tasks;
     }
 
     async recover(binding: ResolvedStorageBinding, options: import('../../domain/types').RecoveryOptions = {},
@@ -1630,19 +1635,18 @@ export class SeqFileKernelStore {
     /**
      * Repair the catalog in one transaction.
      *
-     * Unlike the Task index, reading first is *not* cheaper here: every non-transactional read is
-     * its own transaction on the local filesystem backend, so a compare-then-write would cost two
-     * read transactions to save one write transaction. The transaction only writes what differs,
-     * which keeps catalog subscribers asleep without adding round trips.
+     * Reads are bounded by this Session's Tasks: a keyed read per Task replaces a full scan of
+     * the catalog's `task/` rows, which made recovery cost `sessions × (sessions + tasks)` and
+     * dominated browser boot on IndexedDB. The transaction only writes what differs, which keeps
+     * catalog subscribers asleep without adding round trips.
      */
     private async repairCatalog(session: SessionRecord, taskIds: string[]): Promise<void> {
         await transaction(this.catalog.fs, async tx => {
             const path = catalogPath(this.catalog.rootPath), key = `session/${session.id}`, value = encode(session);
             if (await tx.getEntry(path, key) !== value) await tx.setEntry(path, key, value);
-            const rows = new Map<string, string>();
-            await tx.walkEntries(path, row => { rows.set(row.key, row.value); return true; }, { keyPrefix: 'task/' });
             for (const taskId of taskIds) {
-                if (rows.get(`task/${taskId}`) !== session.id) await tx.setEntry(path, `task/${taskId}`, session.id);
+                const taskKey = `task/${taskId}`;
+                if (await tx.getEntry(path, taskKey) !== session.id) await tx.setEntry(path, taskKey, session.id);
             }
         });
     }

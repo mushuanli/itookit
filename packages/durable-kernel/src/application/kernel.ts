@@ -361,14 +361,19 @@ export class Kernel implements KernelRegistration {
         };
         if (options.takeover && (this.active || this.activeEffects || this.draining.size || !this.poller.isIdle))
             throw new Error('Takeover recovery requires an idle Kernel before opening sessions');
-        const restored: Array<{ id: string; binding: ResolvedStorageBinding }> = [];
+        const restored: Array<{ id: string; binding: ResolvedStorageBinding; stateMs: number }> = [];
         for (const id of new Set(sessionIds)) {
+            const started = performance.now();
             const opened = await this.store.openSession(id);
             mergeReport(total, await this.store.recover(opened.binding, options, opened.record));
-            restored.push({ id, binding: opened.binding });
+            restored.push({ id, binding: opened.binding, stateMs: performance.now() - started });
         }
         await this.managedResources.recover('kernel', options.takeover);
-        for (const { id } of restored) await this.managedResources.recover(`session:${id}`, options.takeover);
+        for (const { id, stateMs } of restored) {
+            const started = performance.now();
+            await this.managedResources.recover(`session:${id}`, options.takeover);
+            options.onSessionRecovered?.(id, { state: stateMs, resources: performance.now() - started });
+        }
         for (const { id, binding } of restored) {
             this.rememberBinding(id, binding);
             this.schedulePoll(id);
@@ -887,15 +892,19 @@ export class Kernel implements KernelRegistration {
         const binding = await this.binding(sessionId);
         const session = await this.store.sessionRecord(binding);
         const status = session.status;
-        await this.store.sweep(binding);
+        const sweepMarker: TaskRecord[] = [];
+        this.tickTasks.set(sessionId, sweepMarker);
+        const sweptTasks = await this.store.sweep(binding);
         await this.abortFencedReducers(sessionId);
-        for (const message of await this.store.pendingOutbox(binding, Date.now())) {
+        const dueMessages = await this.store.pendingOutbox(binding, Date.now());
+        for (const message of dueMessages) {
             try { await this.relayMessage(binding, message); } catch { /* Persisted outbox is retried by polling. */ }
         }
-        // Install before awaiting: a notification during the scan invalidates this holder.
-        const snapshot: TaskRecord[] = [];
-        this.tickTasks.set(sessionId, snapshot);
-        const tasks = await this.store.listTasks(binding);
+        const reuseSweep = sweptTasks && !dueMessages.length && this.tickTasks.get(sessionId) === sweepMarker;
+        // Install before a fallback read so concurrent commits invalidate that snapshot too.
+        const snapshot = reuseSweep ? sweepMarker : [];
+        if (!reuseSweep) this.tickTasks.set(sessionId, snapshot);
+        const tasks = reuseSweep ? sweptTasks : await this.store.listTasks(binding);
         if (this.tickTasks.get(sessionId) === snapshot) this.tickTasks.set(sessionId, tasks);
         // Any write below makes the snapshot stale for nextWakeDelay(); the common idle
         // tick mutates nothing and reuses it, a mutating tick re-reads instead.

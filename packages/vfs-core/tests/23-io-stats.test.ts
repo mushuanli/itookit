@@ -4,6 +4,31 @@ import { IO_OPERATIONS } from '../src/protocol';
 import { freshMem, setupVFS } from './helpers';
 
 describe('VFS IO statistics', () => {
+    it('checks shared path prefixes once for a batch of SeqFile reads', async () => {
+        const backend = new MemoryBackend();
+        const { manager } = await createVFS({ rootBackend: backend });
+        const base = await manager.openFileSystem('/');
+        const typeProbe = vi.spyOn(base.driver, 'getNodeType');
+        const view = createFileSystemView({ viewId: 'batch-prefixes', mounts: [
+            { mountId: 'root', at: '/', root: '/', fs: base, access: 'ro' },
+        ] });
+        try {
+            await base.driver.createFile({ name: 'one.seq', parentPath: '/folder', type: 'seqfile', recursive: true });
+            await base.driver.createFile({ name: 'two.seq', parentPath: '/folder', type: 'seqfile' });
+            await base.meta.seq!.setEntry('/folder/one.seq', 'state', 'one');
+            await base.meta.seq!.setEntry('/folder/two.seq', 'state', 'two');
+            typeProbe.mockClear();
+            expect(await view.meta.seq!.getEntriesMany([
+                { fileIdOrPath: '/folder/one.seq', key: 'state' },
+                { fileIdOrPath: '/folder/two.seq', key: 'state' },
+                { fileIdOrPath: '/folder/one.seq', key: 'missing' },
+            ])).toEqual(['one', 'two', null]);
+            expect(typeProbe.mock.calls.filter(([path]) => path === '/folder')).toHaveLength(1);
+            expect(typeProbe.mock.calls.filter(([path]) => path === '/folder/one.seq')).toHaveLength(1);
+            expect(typeProbe.mock.calls.filter(([path]) => path === '/folder/two.seq')).toHaveLength(1);
+        } finally { await view.dispose(); await manager.dispose(); }
+    });
+
     it('uses type-only probes through nested views without caching existence or losing virtual parents', async () => {
         const backend = new MemoryBackend(), stat = backend.stat.bind(backend);
         const statType = async (path: string) => { const node = await stat(path); return node ? { type: node.type } : null; };

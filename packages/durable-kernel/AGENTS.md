@@ -62,6 +62,8 @@ const harness = createHarness(options);
 - **预算结算幂等**：`chargeBudget(..., { usageId })` 与 `resources.seq.usage/<usageId>` 回执同事务写入；同 id 重放返回记录回执、不再扣费，金额/资源/维度不同即冲突。Effect 路径默认按逻辑 Effect 结算。
 - **authority fence**：`managed/authority/<id>` 保存 `ownerEpoch`；`claimAuthority` 接管须 CAS 递增，写命令携带 `authority: {authorityId, epoch}` 时在权威事务内校验，过期 leader 的新写入被拒（已受理请求的重放仍返回原结果）。
 - **retention/GC**：`compactTaskHistory`（`snapshot/<version>`）、`pruneTaskEvents`（`events.seq`，带 resync 水位）、`pruneSessionMessages`（只删已终结出箱与已消费回执）；裁剪不得删除活跃引用、Effect 幂等事实与未交付 receipt。
+- **恢复读取成本**：`repairCatalog` 只按 `task/<id>` 键读取该 Session 自己的 Task 映射；每个 Session 全量扫描 catalog 的 `task/` 行会让恢复成本变成 `sessions × (sessions + tasks)`，在浏览器 IndexedDB 上主导启动耗时。`recoverSessions(ids, { onSessionRecovered })` 提供只读观察钩子（每 Session 的 state/resources 耗时），恢复决策不得依赖它。回归 `src/kernel.test.ts`「recovers a Session by keyed catalog reads instead of scanning foreign task rows」——该守卫在旧的 catalog 全扫实现上会失败。
+- **等待图恢复**：`recoverWaitGraphTx` 在重建关系后各扫描一次 `edge/` 与 `wait/task/` 键，仅对有关系的终态 Task 执行原有递归推进/唤醒；无终态 Task 时跳过这两次读取。不能恢复成每个终态 Task 各做两次空范围查询。回归见 `src/protocol.test.ts`「does not probe empty dependency and wait prefixes for every terminal Task」。
 - **Session layout manifest**：`session.seq` 的 `record.layout`（`layoutVersion`/`recordSchemas`/`requiredCapabilities`/`migration`）在 `openSession` 与 `requireSessionTx` fail closed；旧记录按 legacy 读取。
 
 ## 运行

@@ -27,7 +27,15 @@ export interface SessionStorageResolver {
 }
 
 /** takeover requires the caller to have stopped the previous execution instance. */
-export interface RecoveryOptions { takeover?: boolean; }
+export interface RecoveryOptions {
+    takeover?: boolean;
+    /**
+     * Observation only: milliseconds spent on one Session, split between its own Kernel state
+     * and its managed resources. Recovery decisions never read this timing.
+     */
+    onSessionRecovered?: (sessionId: SessionId, timing: RecoveryTiming) => void;
+}
+export interface RecoveryTiming { state: number; resources: number }
 
 /**
  * Storage §5 manifest: what a writer relied on, so a reader never guesses a newer or
