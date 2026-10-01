@@ -16,6 +16,7 @@
         "tauri:build": "pnpm build:libs && pnpm --filter tauri-app tauri:build",
         "cli": "node apps/cli/dist/cli.js",
         "cli:build": "pnpm --filter @itookit/cli build",
+        "migrate:legacy-chats": "pnpm --filter @itookit/cli exec tsx scripts/migrate-legacy-chats.ts",
         "clean": "pnpm -r clean && rm -rf node_modules",
         "typecheck": "pnpm -r typecheck",
         "docs:check": "node scripts/check-docs.mjs",

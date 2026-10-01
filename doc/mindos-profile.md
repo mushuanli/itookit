@@ -64,6 +64,21 @@ MINDOS_ROOT
 
 换机器时，先退出使用该 profile 的 Tauri/CLI，再复制整个 `mindos/`（包括数据、元数据和配置）；若 `rootDir` 指向目录外，还需复制该数据根并调整配置。宿主项目目录是外部引用，需要在新机器上保留或重新配置其路径。Web 的 IndexedDB 存储属于浏览器来源（协议、地址和端口），不会自动读取宿主的 `~/.config/mindos`。
 
+### 旧版聊天（`<rootDir>/module/chats`）
+
+早期版本把每个会话写成 `<rootDir>/module/chats/<名称>.chat`（ChatNode 清单）+ 同级 `_<名称>.chat/` 目录下「一条消息一个文件」的 round。现布局不再读取 `module/`：模块文件树在 `/home/admin/<name>`，会话则是 `_meta` SQLite 里的 Round DAG 记录。因此 `module/` 下的旧聊天不会自动出现，需要一次性迁移。
+
+工具：[apps/cli/scripts/migrate-legacy-chats.ts](../apps/cli/scripts/migrate-legacy-chats.ts)。默认 dry-run，只扫描、转换并在内存校验；`--apply` 才写入，并把每个来源记进 `<rootDir>/etc/legacy-chat-import.json`，重复执行是幂等的。
+
+```bash
+pnpm migrate:legacy-chats --root <数据根>            # 先看清单
+pnpm migrate:legacy-chats --root <数据根> --apply    # 退出应用后写入
+```
+
+脚本放在 `apps/cli/` 内而不是顶层 `scripts/`：工作区依赖（`@itookit/*`）只链接在各包的 `node_modules` 下，模块解析锚定脚本自身位置，才能从仓库任意目录调用（顶层 `scripts/` 下没有这些链接，`pnpm dlx tsx scripts/...` 会报 `Cannot find module '@itookit/vfs-core'`）。
+
+转换沿用仓库自身历史上的 ChatNode → Round 迁移算法：按命名分支从 head 回溯到 root，共享前缀复用同一 Round，用户消息与其回答合成一轮，重新生成的回答成为同父的兄弟 Round。旧系统轮只承载默认问候语，由会话设置取代，直接丢弃；`status: deleted` 的消息一并丢弃并重新挂接其子节点。`module/` 其余目录（`projects`/`agents`/`flows` 等）与 `/home/admin/<name>` 内容一致，无需搬运——`chats` 之外不要整体搬迁，以免覆盖 9 月之后的新内容。
+
 ## CLI profile 选择
 
 ```bash
