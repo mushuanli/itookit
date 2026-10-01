@@ -7,8 +7,6 @@ import { createSessionAttachmentMounts } from '@itookit/app-core';
 import { SessionWorkbench } from '../src/projects/SessionWorkbench';
 
 it('routes a real vfs-ui tree to chat, Task history and the Session mapped file context', async () => {
-    const storage = new Map<string, string>();
-    vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) });
     vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => setTimeout(fn, 0));
     vi.stubGlobal('cancelAnimationFrame', clearTimeout);
     const createURL = vi.fn(() => 'blob:test-preview'), revokeURL = vi.fn();
@@ -42,9 +40,8 @@ it('routes a real vfs-ui tree to chat, Task history and the Session mapped file 
     const file = vi.fn(async () => ({ destroy: vi.fn() }));
     const mounts = new DirectoryMountService(root, files); await mounts.init();
     const sessionSkills = { mountByGlob: vi.fn(async () => {}), unmountByGlob: vi.fn(async () => {}), list: vi.fn(), load: vi.fn(), listLoaded: vi.fn(), unload: vi.fn() };
-    const workbench = new SessionWorkbench({ sidebar: sidebar, container: main, repository: repository, files: files, factory: chat as any, onSelect: () => {}, hostContext: undefined, kernel: kernel as any, fileFactory: file as any, directoryMounts: mounts, sessionSkills: sessionSkills as any });
-    storage.set('vfs_ui_state_session-browser:v1:admin', JSON.stringify({ activeId: '/' + id,
-        expandedFolderIds: ['/' + id, `/${id}/files`, `/${id}/files/workspace`], selectedItemIds: [] }));
+    const restored = { activeId: '/' + id, expandedFolderIds: ['/' + id, `/${id}/files`, `/${id}/files/workspace`], selectedItemIds: [] };
+    const workbench = new SessionWorkbench({ sidebar: sidebar, container: main, repository: repository, files: files, factory: chat as any, onSelect: () => {}, hostContext: undefined, kernel: kernel as any, fileFactory: file as any, directoryMounts: mounts, sessionSkills: sessionSkills as any, uiPersistence: { load: () => restored } });
     const listMountedFiles = vi.spyOn(home.driver, 'getChildren');
     try {
         await workbench.start();

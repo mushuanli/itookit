@@ -21,13 +21,12 @@ let runtime: ApplicationRuntime;
 const cleanup: Array<() => unknown> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); await runtime?.dispose(); document.body.replaceChildren(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 class Editor extends BaseSettingsEditor<object> { async render() { this.container.textContent = editorResourceId(this.options) ?? ''; } }
-async function setup(ocr?: import('../src/configuration/ocr-controls').OcrConfigurationControls) {
+async function setup(ocr?: import('../src/configuration/ocr-controls').OcrConfigurationControls,
+    uiPreferences?: import('../src/toolbox/ToolboxWorkbench').ToolboxPreferencesPort) {
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0));
     vi.stubGlobal('cancelAnimationFrame', clearTimeout);
     HTMLDialogElement.prototype.showModal ??= function () { this.setAttribute('open', ''); };
     HTMLDialogElement.prototype.close ??= function () { this.removeAttribute('open'); };
-    const storage = new Map<string, string>();
-    vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) });
     runtime = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'web' });
     await runtime.agentService.saveAgent({ id: 'english', name: 'English teacher', type: 'agent', description: 'language', config: { connectionId: 'default', modelName: '' } });
     await runtime.agentService.saveSkill({ id: 'phrases', name: 'English phrases', type: 'prompt', description: 'extract phrases', enabled: false,
@@ -45,10 +44,21 @@ async function setup(ocr?: import('../src/configuration/ocr-controls').OcrConfig
         connections: async (container: HTMLElement, options: EditorOptions) => { const editor = new ConnectionSettingsEditor(container, runtime.agentService, options); await editor.init(container); return editor; },
         mcp: async (container: HTMLElement, options: EditorOptions) => { const editor = new MCPSettingsEditor(container, runtime.agentService, options); await editor.init(container); return editor; },
         tools: async (container: HTMLElement, options: EditorOptions) => { const editor = new ToolDetailsEditor(container, inventory, options, resources); await editor.init(container); return editor; } };
-    const workbench = new ToolboxWorkbench({ ocr, sidebar, editor: main, resources, inventory, configuration: runtime.configuration, factories, flowMenu: {}, navigate: vi.fn(), selected: vi.fn() });
+    const workbench = new ToolboxWorkbench({ ocr, sidebar, editor: main, resources, inventory, configuration: runtime.configuration, factories, flowMenu: {}, navigate: vi.fn(), selected: vi.fn(), uiPreferences });
     cleanup.push(() => workbench.destroy()); await workbench.start();
     return { workbench, sidebar, main, factory, resources, inventory };
 }
+it('restores and persists toolbox preferences through the host port', async () => {
+    const saved: Array<{ filter: string; queries: Record<string, string> }> = [];
+    const f = await setup(undefined, { load: () => ({ filter: 'mcp', queries: { mcp: 'docs', bogus: 'ignored' } }), save: value => saved.push(value as never) });
+    const query = f.sidebar.querySelector<HTMLInputElement>('input[type="search"]')!;
+    expect(query.value).toBe('docs');
+    f.workbench.setFilter('agents');
+    expect(saved.at(-1)).toMatchObject({ filter: 'agents' });
+    // Unknown filter kinds and non-string queries from a hand-edited document are dropped.
+    expect(Object.keys(saved.at(-1)!.queries)).toEqual(['mcp']);
+});
+
 it('unifies resource kinds, filters in place and passes original source identities to editors', async () => {
     const f = await setup();
     expect(f.sidebar.querySelectorAll('.vfs-node-list')).toHaveLength(1);

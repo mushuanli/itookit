@@ -9,7 +9,7 @@ import { drawerKind, ungroupedId, type Drawer } from '@itookit/app-core';
 import { resourceDrawers } from './resource-drawers';
 import { resourceIcon } from './resource-icons';
 import { modelDrawers, compareModelItems, modelDrawerId, modelDrawerProvider } from './model-drawers';
-import { createVFSUI, type VFSUIShell, type VFSNodeUI, type VFSToolbarContext } from '@itookit/vfs-ui';
+import { createVFSUI, type VFSUIShell, type VFSNodeUI, type VFSToolbarContext, type UIPersistencePort } from '@itookit/vfs-ui';
 import { createFileSystemView, type FileSystemView } from '@itookit/vfs-core';
 import { t, type NavigationRequest } from '@itookit/common';
 import { editorResourceId, type EditorFactory, type MenuItem, type ContextMenuConfig } from '@itookit/ui-common';
@@ -26,15 +26,29 @@ interface Options {
     configuration: ModelConfigurationCommands;
     factories: Record<ToolboxKind, EditorFactory>; flowMenu: ContextMenuConfig<VFSNodeUI>;
     navigate(request: NavigationRequest): Promise<void>; selected(path: string | null): void;
+    /** Host-owned snapshot storage; omitted means the toolbox restores nothing. */
+    uiPersistence?: UIPersistencePort;
+    /** Host-owned preference storage; omitted means the toolbox starts from defaults. */
+    uiPreferences?: ToolboxPreferencesPort;
 }
-interface Preferences { filter: ToolboxFilter; queries: Partial<Record<ToolboxFilter, string>> }
-const key = 'mindos:toolbox:v1';
-function preferences(): Preferences {
-    try {
-        const data = JSON.parse(localStorage.getItem(key) ?? '{}');
-        return { filter: (TOOLBOX_FILTERS as readonly string[]).includes(data.filter) ? data.filter : 'all', queries: Object.fromEntries(Object.entries(data.queries ?? {}).filter(([kind, query]) => (TOOLBOX_FILTERS as readonly string[]).includes(kind) && typeof query === 'string')),
-        };
-    } catch { return { filter: 'all', queries: {} }; }
+export interface ToolboxPreferences { filter: ToolboxFilter; queries: Partial<Record<ToolboxFilter, string>> }
+/**
+ * The toolbox's own filter/query memory. `load` is synchronous because the workbench
+ * reads it at construction, so the host prefetches the document first.
+ */
+export interface ToolboxPreferencesPort { load(): unknown; save(preferences: ToolboxPreferences): void }
+/** Document name under `etc:/ui` for {@link ToolboxPreferences}. */
+export const TOOLBOX_PREFERENCES_DOC = 'mindos_toolbox_v1.preferences';
+/** Browser snapshot scope; kept separate from the preference document. */
+export const TOOLBOX_SCOPE = 'mindos:toolbox:v1';
+
+/** Tolerate a missing or hand-edited document: unknown fields fall back to defaults. */
+function preferences(data: unknown): ToolboxPreferences {
+    const record = data && typeof data === 'object' ? data as Record<string, unknown> : {};
+    const filter = record.filter;
+    return { filter: (TOOLBOX_FILTERS as readonly string[]).includes(filter as string) ? filter as ToolboxFilter : 'all',
+        queries: Object.fromEntries(Object.entries(record.queries && typeof record.queries === 'object' ? record.queries as Record<string, unknown> : {})
+            .filter(([kind, query]) => (TOOLBOX_FILTERS as readonly string[]).includes(kind) && typeof query === 'string')) };
 }
 
 /** One resource list; each editor receives its original, authorized source context. */
@@ -46,7 +60,7 @@ export class ToolboxWorkbench implements WorkspaceController {
     private drawerActions!: DrawerActions;
     private titles = new Map<string, string>();
     private readonly abort = new AbortController();
-    private readonly prefs = preferences();
+    private readonly prefs: ToolboxPreferences;
     private readonly filters = document.createElement('div');
     private descriptions = new Map<string, { name: string; description?: string }>();
     private cleanups: Array<() => void> = [];
@@ -54,7 +68,7 @@ export class ToolboxWorkbench implements WorkspaceController {
     private closed = false;
     private timer?: ReturnType<typeof setTimeout>;
     private refreshTail: Promise<void> = Promise.resolve();
-    constructor(private readonly options: Options) {}
+    constructor(private readonly options: Options) { this.prefs = preferences(this.options.uiPreferences?.load()); }
     async start(): Promise<void> {
         const { resources, sidebar } = this.options;
         sidebar.classList.add('toolbox-navigation');
@@ -66,7 +80,7 @@ export class ToolboxWorkbench implements WorkspaceController {
         this.descriptions = await resources.descriptions();
         await this.loadDirectories();
         this.buildFilters();
-        this.ui = createVFSUI({ sessionListContainer: sidebar, title: t('toolbox.title'), scopeId: key, autoSelectFirst: false,
+        this.ui = createVFSUI({ sessionListContainer: sidebar, title: t('toolbox.title'), scopeId: TOOLBOX_SCOPE, persistence: this.options.uiPersistence, autoSelectFirst: false,
             searchPlaceholder: t('toolbox.search'), listHeader: this.filters, listItems: items => this.project(items),
             alwaysLoadedDirectories: this.loadedDirectories,
             defaultUiSettings: { showSummary: true, showTags: true, showBadges: false, sortBy: 'title' },
@@ -238,7 +252,7 @@ export class ToolboxWorkbench implements WorkspaceController {
     private selected(path: string | null): void {
         this.options.selected(path);
     }
-    private persist(): void { try { localStorage.setItem(key, JSON.stringify(this.prefs)); } catch { /* Preferences are optional. */ } }
+    private persist(): void { this.options.uiPreferences?.save(this.prefs); }
     private scheduleRefresh(): void {
         if (this.closed) return;
         clearTimeout(this.timer); this.timer = setTimeout(() => { void this.refresh().catch(error => alert(String(error))); }, 100);

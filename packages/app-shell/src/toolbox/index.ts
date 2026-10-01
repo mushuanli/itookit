@@ -3,9 +3,9 @@ import type { IFileSystem } from '@itookit/vfs-core';
 import type { NavigationRequest } from '@itookit/common';
 import type { EditorFactory } from '@itookit/ui-common';
 import type { AppUI } from '../types';
-import type { VFSNodeUI } from '@itookit/vfs-ui';
+import type { VFSNodeUI, UIPersistencePort } from '@itookit/vfs-ui';
 import { ToolboxInventory } from '@itookit/app-core';
-import { ToolboxWorkbench } from './ToolboxWorkbench';
+import { ToolboxWorkbench, type ToolboxPreferencesPort } from './ToolboxWorkbench';
 import { ToolDetailsEditor } from './ToolDetailsEditor';
 import { createWorkspaceModule, type WorkspaceModule } from '../workspaces/module';
 
@@ -16,6 +16,8 @@ interface Options {
     sidebar: HTMLElement; editor: HTMLElement; skills: IFileSystem;
     factories: Record<'agents' | 'skills' | 'flows', EditorFactory>;
     navigate(request: NavigationRequest): Promise<void>; selected(path: string | null): void;
+    uiPersistence?: UIPersistencePort;
+    uiPreferences?: ToolboxPreferencesPort;
 }
 /** The toolbox owns its projection lifetime and editor wiring as one module. */
 export async function createToolboxModule(options: Options): Promise<WorkspaceModule> {

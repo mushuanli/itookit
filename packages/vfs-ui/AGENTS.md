@@ -16,9 +16,10 @@ pnpm --filter @itookit/vfs-ui test         # vitest run
 src/
 ├── shell/          ← VFSUIShell、双列布局、Assembler (DI)
 ├── services/       ← VFSService, VFSStore, EngineAdapter, NodeMapper,
-│                     FileTypeRegistry, StatePersistence
+│                     FileTypeRegistry
 ├── ui/             ← NodeList, FileOutline, MoveToModal, TagEditor 及 items/handlers/popovers
-├── contracts/      ← types (VFSNodeUI/VFSUIState/UISettings), ports, commands, events
+├── contracts/      ← types (VFSNodeUI/VFSUIState/UISettings), ports, commands, events,
+│                     persistence (UISnapshot / UIPersistencePort / localStorage adapter)
 ├── interaction/    ← CommandBus, ActionRunner, EventBus, handlers/(File/Bulk/Navigation/
 │                     Selection/UI/Import/Export/CustomMenu CommandHandler)
 ├── browser/        ← Browser、fromVFS、SourceAdapter、actions

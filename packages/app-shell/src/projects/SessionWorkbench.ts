@@ -19,7 +19,7 @@ import { localizeMountError } from '../files/localize-mount-error';
 import type { EditorFactory, IEditor, EditorHostContext, ContextMenuConfig } from '@itookit/ui-common';
 import type { ISessionRepository } from '@itookit/llm-session';
 import type { Kernel } from '@itookit/durable-kernel';
-import { filterGitignoredFiles, createVFSUI, type VFSToolbarContext, type VFSUIShell, type VFSNodeUI } from '@itookit/vfs-ui';
+import { filterGitignoredFiles, createVFSUI, type VFSToolbarContext, type VFSUIShell, type VFSNodeUI, type UIPersistencePort } from '@itookit/vfs-ui';
 import { FSError, createFileSystemView, type IFileSystem, type FileSystemContextOwner, type FileSystemView } from '@itookit/vfs-core';
 
 
@@ -34,6 +34,9 @@ function debugEnabled(): boolean {
 }
 
 const fileNames = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
+
+/** Stable identity of the sidebar's restored UI state; the host persists it per scope. */
+export const SESSION_BROWSER_SCOPE = 'session-browser:v1:admin';
 
 /** One navigation request. `fileNavigation` decides how the content column follows a file. */
 export interface OpenResourceOptions {
@@ -77,6 +80,8 @@ export interface SessionWorkbenchOptions {
     projects?: ProjectService;
     onSidebarReady?: () => boolean;
     initialResourceId?: string;
+    /** Host-owned snapshot storage; omitted means the sidebar restores nothing. */
+    uiPersistence?: UIPersistencePort;
 }
 
 function afterSidebarPaint(): Promise<void> {
@@ -139,6 +144,7 @@ export class SessionWorkbench implements WorkspaceController {
     private readonly projects: SessionWorkbenchOptions['projects'];
     private readonly onSidebarReady: SessionWorkbenchOptions['onSidebarReady'];
     private readonly initialResourceId: SessionWorkbenchOptions['initialResourceId'];
+    private readonly uiPersistence: SessionWorkbenchOptions['uiPersistence'];
     private readonly sessions: ProjectSessions;
     constructor(options: SessionWorkbenchOptions) {
         this.sidebar = options.sidebar;
@@ -157,6 +163,7 @@ export class SessionWorkbench implements WorkspaceController {
         this.projects = options.projects;
         this.onSidebarReady = options.onSidebarReady;
         this.initialResourceId = options.initialResourceId;
+        this.uiPersistence = options.uiPersistence;
         this.sessions = options.projects?.sessions ?? new ProjectSessions(options.repository);
     }
     async start(): Promise<void> {
@@ -170,12 +177,13 @@ export class SessionWorkbench implements WorkspaceController {
         const tree = document.createElement('div'); tree.className = 'project-workbench__tree';
         this.sidebar.append(tree);
         if (this.projects) this.installProjectNavigation();
-        this.sidebarUI = createVFSUI({ sessionListContainer: tree, title: this.projects ? t('project.workspace') : '会话', scopeId: 'session-browser:v1:admin',
+        this.sidebarUI = createVFSUI({ sessionListContainer: tree, title: this.projects ? t('project.workspace') : '会话', scopeId: SESSION_BROWSER_SCOPE,
+            persistence: this.uiPersistence,
             columns: this.projectNavigation?.options, toolbar: 'full', hideGitignored: false,
             searchPlaceholder: t(this.projects ? 'project.searchContents' : 'project.search'), showFileExtensions: !this.projects,
             readOnly: false, activateDirectories: true, autoSelectFirst: !this.projects, defaultUiSettings: { sortBy: 'lastModified' },
             compareItems: compareSessionEntries,
-            restoreExpandedDirectory: path => isFlowPath(path) || resolveBrowserTarget(path).kind === 'folder',
+            restoreExpandedDirectory: isExpandableDirectory,
             exportDirectories: true,
             exportItem: item => this.exportSessionItem(item),
             favoriteAction: this.projects ? projectFavoriteAction(this.projects, this.repository) : undefined,
@@ -1072,3 +1080,8 @@ function sessionCreationParent(path: string | null): string | null {
 }
 
 function isFlowPath(path: string): boolean { return path === '/@flows' || path.startsWith('/@flows/'); }
+/** Persisted expansion can name routes this build no longer serves; drop those instead of failing boot. */
+function isExpandableDirectory(path: string): boolean {
+    if (isFlowPath(path)) return true;
+    try { return resolveBrowserTarget(path).kind === 'folder'; } catch { return false; }
+}

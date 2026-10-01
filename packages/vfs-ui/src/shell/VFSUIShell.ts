@@ -30,7 +30,7 @@ import type { PublicEventMap, PublicEventName } from '../contracts/events';
 
 import type { FileTypeDefinition } from '../services/FileTypeRegistry';
 import type { EngineAdapter } from '../services/EngineAdapter';
-import type { StatePersistence } from '../services/StatePersistence';
+import type { UIPersistencePort } from '../contracts/persistence';
 
 import { VFSService } from '../services/VFSService';
 import { assemble } from './Assembler';
@@ -46,7 +46,12 @@ import { findNodeById } from '../utils/helpers';
 
 export interface VFSUIShellOptions extends BrowserBaseOptions, VFSRowActionOptions {
   onError?: (error: unknown) => void;
-  persistence?: boolean;
+  /**
+   * Where the versioned UI snapshot is kept. `true` opts into the bundled
+   * localStorage adapter, an object is a host-owned port. Omitted means the
+   * browser persists nothing (see `contracts/persistence.ts`).
+   */
+  persistence?: boolean | UIPersistencePort;
   source?: import('../contracts/source').BrowserSource;
   initialState?: Partial<VFSUIState>;
   columns?: import('./ColumnLayout').VFSColumnsOptions;
@@ -99,7 +104,8 @@ export class VFSUIShell {
   // Services (保留具体类型仅因为 public API 需要返回)
   private readonly vfsService?: VFSService;
   private readonly engineAdapter: EngineAdapter | SourceAdapter;
-  private readonly persistence: StatePersistence;
+  private readonly persistence?: UIPersistencePort;
+  private readonly disconnectPersistence: () => void;
   private readonly destroyHandlers: () => void;
 
   // UI Components
@@ -143,7 +149,8 @@ export class VFSUIShell {
     this.eventPort = parts.eventBus;
     this.vfsService = parts.service;
     this.engineAdapter = parts.engineAdapter;
-    this.persistence = parts.persistence;
+    this.persistence = typeof options.persistence === 'object' && options.persistence ? options.persistence : undefined;
+    this.disconnectPersistence = parts.disconnectPersistence;
     this.destroyHandlers = parts.destroyHandlers;
 
     this.lastActiveId = this.statePort.getState().activeId;
@@ -415,7 +422,8 @@ export class VFSUIShell {
 
     this.destroyHandlers();
     this.engineAdapter.destroy();
-    this.persistence.destroy();
+    this.disconnectPersistence();
+    this.persistence?.destroy?.();
   }
 
   // ===== Private Methods =====

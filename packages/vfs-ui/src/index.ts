@@ -7,6 +7,7 @@ export { VFSUIShell };
 export { VFSService } from './services/VFSService';
 export type { FileTypeDefinition } from './services/FileTypeRegistry';
 export * from './contracts/types';
+export { createLocalStorageUIPersistence, readUISnapshot, uiSnapshot, UI_STATE_VERSION, type UISnapshot, type RestoredUISnapshot, type UIPersistencePort } from './contracts/persistence';
 export type { FileCreationConfig, DirectoryAction, VFSRowActionOptions } from './contracts/options';
 export type { VFSColumnsOptions } from './shell/ColumnLayout';
 export type { VFSToolbarOptions, VFSToolbarContext, VFSToolbarAction } from './ui/components/NodeList/toolbar';

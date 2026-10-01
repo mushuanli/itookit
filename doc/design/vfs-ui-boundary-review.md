@@ -8,6 +8,10 @@
 
 已实施：编辑器装配移到 app-shell，设置文件浏览器通过注入接入；移除重复 Options、文件类型接口及旧 Coordinator；宿主用语义方法替代 store.dispatch；新增 BrowserSource/BrowserNode/BrowserAction 与简明入口；源 ID 和 ResourceRef 分离，抽屉显式标识 group；统一动作执行边界并堵住底栏、行内删除和拖拽绕过菜单策略的路径；保留异步 Promise；版本化持久化和快照去重；作用域内 CSS reset；业务状态转为通用 presentation。
 
+持久化边界（2026-10-01 落地）：`VFSUIOptions.persistence` 接受 `boolean | UIPersistencePort`。默认不写任何存储；`true` 显式选用包内 localStorage adapter（`createLocalStorageUIPersistence`），对象则由宿主提供 VFS / Tauri store 等实现。快照只含 `activeId` / `expandedFolderIds` / `selectedItemIds` / `uiSettings` / `isSidebarCollapsed` 并带 `version`，`readUISnapshot` 丢弃版本不符或字段损坏的记录。
+
+宿主侧统一经 app-shell 的 `VfsJsonStore` 落到 `etc:/ui/`，与 `/ui/theme.json`、`/ui/toolbox-drawers.json` 同一处，可查看、可备份、可手工修复：浏览器快照 `/ui/<scope>.ui.json`（Session 侧栏、标准工作区、工具箱），工具箱过滤器与查询记忆 `/ui/mindos_toolbox_v1.preferences.json`，日志级别覆盖 `/ui/log-levels.json`。写入按文档串行排队；读取时逐字段校验，未知版本、损坏 JSON 与非法条目一律丢弃（日志级别只接受已知模块名与 `LogLevel`）。
+
 原有项目/工具箱的高级配置保留，使用同一底层列表和状态。简明 source 入口适合新资源浏览；没有另起一套渲染器，也没有移除既有文件操作。当前具体 API 见 [组件接口](../../packages/vfs-ui/doc/components.md)。
 
 以下保留原审查依据与后续演进取舍；其中“唯一直接依赖”“移除 immer”“所有高级调用改为 panes”不再属于本轮目标，也不是当前实现事实。
@@ -23,7 +27,7 @@
 | 中 | [入口](../../packages/vfs-ui/src/index.ts)、[shell 入口](../../packages/vfs-ui/src/shell/index.ts)、[Shell](../../packages/vfs-ui/src/shell/VFSUIShell.ts) | Options 三处声明且字段不同；还有两套 FileTypeDefinition/ParseResult。上层直接访问 store.dispatch，内部 action 字符串成为事实上的 API。 |
 | 中 | [ColumnLayout](../../packages/vfs-ui/src/shell/ColumnLayout.ts)、[templates](../../packages/vfs-ui/src/ui/components/NodeList/items/itemTemplates.ts)、[helpers](../../packages/vfs-ui/src/utils/helpers.ts) | 返回按钮使用“项目”，菜单使用 toolbox 翻译 key；隐藏所有单下划线前缀路径等规则内置在映射器中。业务词汇、资产目录约定与展示机制耦合。 |
 | 中 | [main.css](../../packages/vfs-ui/src/styles/main.css) | 设置全局 `:root` 变量及 body/button/ul 等样式，会影响宿主；部分菜单依赖 Font Awesome 类名。仅拆 TS 依赖不足以成为独立控件。 |
-| 中 | [StatePersistence](../../packages/vfs-ui/src/services/StatePersistence.ts)、[Assembler](../../packages/vfs-ui/src/shell/Assembler.ts) | 默认读写 localStorage，存内部状态结构，每次 store 更新都保存；持久化规则和状态版本应有明确边界。 |
+| 中 | [persistence](../../packages/vfs-ui/src/contracts/persistence.ts)、[Assembler](../../packages/vfs-ui/src/shell/Assembler.ts) | 默认读写 localStorage，存内部状态结构，每次 store 更新都保存；持久化规则和状态版本应有明确边界。**已修正**：`persistence` 改为可注入端口，默认不写任何存储，宿主经 `etc:/ui/<scope>.ui.json` 持久化版本化快照。 |
 
 已有的好基础：VFS 事件适配、懒加载目录、独立列选择、自然排序、批量选择、宿主投影和菜单注入都可复用。项目和工具箱的主要业务逻辑已在 app-shell 中，迁移应修正边界，而非推倒重写。
 

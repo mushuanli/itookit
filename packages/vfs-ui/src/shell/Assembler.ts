@@ -13,7 +13,7 @@ import { VFSStore } from '../services/VFSStore';
 import { VFSService } from '../services/VFSService';
 import { FileTypeRegistry } from '../services/FileTypeRegistry';
 import { EngineAdapter } from '../services/EngineAdapter';
-import { StatePersistence } from '../services/StatePersistence';
+import { createLocalStorageUIPersistence, readUISnapshot, uiSnapshot, type RestoredUISnapshot, type UIPersistencePort } from '../contracts/persistence';
 
 import { CommandBus } from '../interaction/CommandBus';
 import { EventBus } from '../interaction/EventBus';
@@ -39,7 +39,8 @@ export interface AssembledParts {
     fileTypePort: IFileTypePort;
     service?: VFSService;
     engineAdapter: EngineAdapter | SourceAdapter;
-    persistence: StatePersistence;
+    /** Disconnect the persistence subscription; the port's own `destroy` is called by the shell. */
+    disconnectPersistence: () => void;
 
     // Handler 析构列表
     destroyHandlers: () => void;
@@ -53,22 +54,55 @@ const DEFAULT_SETTINGS = {
     showBadges: true,
 };
 
+/**
+ * Persistence is off unless the host asks for it: `true` uses the bundled
+ * localStorage adapter, an object is a host-owned port (VFS, Tauri store).
+ */
+function resolvePersistence(persistence: VFSUIShellOptions['persistence'], scopeId: string): UIPersistencePort | undefined {
+    if (persistence === true) return createLocalStorageUIPersistence(scopeId);
+    return persistence && typeof persistence === 'object' ? persistence : undefined;
+}
+
+/** A host port may throw or hand back junk; a broken record must not block the browser. */
+function loadPersisted(port?: UIPersistencePort): RestoredUISnapshot {
+    if (!port?.load) return {};
+    try { return readUISnapshot(port.load()) ?? {}; }
+    catch (error) { console.error('[vfs-ui] Failed to read persisted UI state:', error); return {}; }
+}
+
+/** Persist the projected snapshot after each real state change, not per field. */
+function connectPersistence(store: IStatePort, port: UIPersistencePort): () => void {
+    let previous = '';
+    return store.subscribe(state => {
+        let snapshot: ReturnType<typeof uiSnapshot>;
+        try { snapshot = uiSnapshot(state); } catch { return; }
+        const json = JSON.stringify(snapshot);
+        if (json === previous) return;
+        previous = json;
+        try { port.save(snapshot); }
+        catch (error) { console.error('[vfs-ui] Failed to persist UI state:', error); }
+    });
+}
+
 export function assemble(
     options: VFSUIShellOptions,
     engine?: IFileSystem
 ): AssembledParts {
     // --- Services ---
     const scopeId = options.scopeId || engine?.viewId || 'default';
-    const persistence = new StatePersistence(scopeId, options.persistence !== false);
-    const persisted = persistence.load();
+    const persistence = resolvePersistence(options.persistence, scopeId);
+    const persisted = loadPersisted(persistence);
+    const restoredExpansion = persisted.expandedFolderIds ?? options.initialState?.expandedFolderIds ?? [];
 
     const store = new VFSStore({
         ...options.initialState,
-        ...persisted,
-        ...(options.restoreExpandedDirectory ? { expandedFolderIds: new Set(
-            [...new Set(persisted.expandedFolderIds ?? options.initialState?.expandedFolderIds ?? [])]
-                .filter(options.restoreExpandedDirectory),
-        ) } : {}),
+        // A restored snapshot always wins over the caller's default, including an
+        // explicit `null` that clears the previous selection.
+        ...(persisted.activeId !== undefined ? { activeId: persisted.activeId } : {}),
+        ...(persisted.selectedItemIds ? { selectedItemIds: new Set(persisted.selectedItemIds) } : {}),
+        ...(options.restoreExpandedDirectory
+            ? { expandedFolderIds: new Set([...new Set(restoredExpansion)].filter(options.restoreExpandedDirectory)) }
+            : persisted.expandedFolderIds ? { expandedFolderIds: new Set(persisted.expandedFolderIds) } : {}),
         uiSettings: {
             ...DEFAULT_SETTINGS,
             ...options.defaultUiSettings,
@@ -129,7 +163,7 @@ export function assemble(
     ];
 
     // --- Lifecycle ---
-    persistence.connectAutoSave(store);
+    const disconnectPersistence = persistence ? connectPersistence(store, persistence) : () => {};
 
     return {
         store,
@@ -138,7 +172,7 @@ export function assemble(
         fileTypePort: registry,
         service,
         engineAdapter,
-        persistence,
+        disconnectPersistence,
         destroyHandlers: () => handlers.forEach(h => h.destroy()),
     };
 }

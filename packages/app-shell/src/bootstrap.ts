@@ -4,8 +4,13 @@ import { createOcrControls } from './configuration/ocr-controls';
 import { OcrService } from '@itookit/app-core';
 import { ConfigurationDeletionDialog } from './configuration/delete-dialog';
 import { createToolboxModule } from './toolbox';
+import { TOOLBOX_SCOPE } from './toolbox/ToolboxWorkbench';
 import { TOOLBOX_KINDS, legacyToolboxRoute, toolboxSettingsRoute } from './toolbox/routes';
 import { createProjectModule } from './projects';
+import { SESSION_BROWSER_SCOPE } from './projects/SessionWorkbench';
+import { VfsUIPersistence } from './persistence/vfs-ui-state-store';
+import { VfsJsonStore } from './persistence/vfs-json-store';
+import { TOOLBOX_PREFERENCES_DOC } from './toolbox/ToolboxWorkbench';
 import { setupHitlVfsBridge } from './workspaces/hitl-bridge';
 import { createWorkspaceModule, restoreWorkspaceResource, type WorkspaceHandle } from './workspaces/module';
 import { createApplicationRuntime, PrivilegedCommandService, workspaceRoot, type WorkspaceController, type WorkspaceCreation } from '@itookit/app-core';
@@ -98,8 +103,14 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     if (ownsRuntime) cleanupFns.push(() => runtime.dispose());
     const { vfs, llmDriver, agentService, sessionRepository, flowEngine, sessionFiles,
         kernel, sessionManager, commandBus } = runtime;
-    await themeService.init(await vfs.openFileSystem('/etc'));
+    // UI state lives beside the theme in `etc:/ui`, so Web and Tauri share one
+    // inspectable store instead of the webview's localStorage.
+    const etc = await vfs.openFileSystem('/etc');
+    await themeService.init(etc);
     cleanupFns.push(() => themeService.destroy());
+    const uiDocs = new VfsJsonStore(etc);
+    const uiState = new VfsUIPersistence(uiDocs);
+    cleanupFns.push(() => uiState.flush());
     logStep('初始化界面服务…');
     const settingsSources = await Promise.all(workspaces.filter(workspace => !['settings', 'skills', 'toolbox'].includes(workspace.type ?? '')).map(async workspace => ({
         name: workspace.workspaceName, description: workspace.title,
@@ -262,8 +273,11 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         if (!files) throw new Error(`Workspace files not configured: ${elementId}`);
 
         if (strategyType === 'toolbox') {
+            const storedPreferences = await uiDocs.read(TOOLBOX_PREFERENCES_DOC);
             const module = await createToolboxModule({ runtime, ocr, ui: options.ui, sidebar: sidebarEl, editor: editorEl,
                 skills: skillsEngine, factories: { agents: agentFactory, skills: skillsFactory, flows: flowsFactory },
+                uiPersistence: await uiState.port(TOOLBOX_SCOPE),
+                uiPreferences: { load: () => storedPreferences, save: value => uiDocs.write(TOOLBOX_PREFERENCES_DOC, value) },
                 navigate: handleNavigationRequest, selected: path => updateHistory(elementId, path, 'replace') });
             const toolbox = module.workbench;
             cleanupFns.push(module.dispose); await toolbox.start(); managerCache.set(elementId, toolbox);
@@ -285,6 +299,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             const module = createProjectModule({ runtime, sessionSkills, sidebar: sidebarEl, container: editorEl,
                 factory, fileFactory: defaultEditorFactory, createFlowContextMenu: options.ui.createFlowContextMenu,
                 initialResourceId, onSidebarReady: revealSidebar,
+                uiPersistence: await uiState.port(SESSION_BROWSER_SCOPE),
                 onSelect: (id, mode = 'replace') => updateHistory(elementId, id, mode),
                 hostContext: { chatFromFile, toggleSidebar: collapsed => sidebarEl.classList.toggle('is-collapsed', collapsed ?? !sidebarEl.classList.contains('is-collapsed')), navigate: handleNavigationRequest } });
             cleanupFns.push(module.dispose);
@@ -353,6 +368,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             files,
             editorFactory: factory,
             scopeId:       elementId,
+            uiPersistence: await uiState.port(elementId),
             fileTypes,
             uiOptions,
             showFileExtensions,

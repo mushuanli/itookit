@@ -5,46 +5,61 @@
 
 import {getLogger, LogLevel, LogLevelNames, escapeHTML} from '@itookit/common';
 import { Toast } from '@itookit/ui-common';
+import type { IFileSystem } from '@itookit/vfs-core';
+import { writeWorkspaceFile } from '../../services/workspace-files';
 
 interface ModuleLevelConfig {
     module: string;
     level: LogLevel;
 }
 
+/** Overrides live with the rest of the host UI state, not in the webview's localStorage. */
+const LOG_LEVELS_PATH = '/ui/log-levels.json';
+
+/** A hand-edited or outdated file must not disable logging for a bogus module. */
+function readConfigs(value: unknown): ModuleLevelConfig[] {
+    if (!Array.isArray(value)) return [];
+    return value.flatMap(entry => {
+        if (!entry || typeof entry !== 'object') return [];
+        const { module, level } = entry as { module?: unknown; level?: unknown };
+        return typeof module === 'string' && module.trim() && typeof level === 'number' && level in LogLevelNames
+            ? [{ module: module.trim(), level: level as LogLevel }] : [];
+    });
+}
+
 export class LogLevelConfigSection {
     private container: HTMLElement;
+    private fs: IFileSystem;
     private moduleConfigs: ModuleLevelConfig[] = [];
+    private writes: Promise<unknown> = Promise.resolve();
 
-    constructor(container: HTMLElement) {
+    constructor(container: HTMLElement, fs: IFileSystem) {
         this.container = container;
+        this.fs = fs;
     }
 
     async init(): Promise<void> {
-        this.loadExistingConfigs();
+        await this.loadExistingConfigs();
         this.render();
     }
 
-    private loadExistingConfigs(): void {
-        // 从 localStorage 加载已保存的配置
+    private async loadExistingConfigs(): Promise<void> {
         try {
-            const saved = localStorage.getItem('log_level_configs');
-            if (saved) {
-                this.moduleConfigs = JSON.parse(saved);
-                // 应用到 logger
-                const logger = getLogger();
-                this.moduleConfigs.forEach(c => logger.setLevel(c.module, c.level));
-            }
+            const raw = await this.fs.driver.readContent(LOG_LEVELS_PATH);
+            const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
+            this.moduleConfigs = readConfigs(JSON.parse(text));
+            // Applied as loaded: the previous run's overrides keep working before the page renders.
+            const logger = getLogger();
+            this.moduleConfigs.forEach(c => logger.setLevel(c.module, c.level));
         } catch (e) {
             console.warn('Failed to load log level configs:', e);
         }
     }
 
+    /** Serialized so rapid changes cannot interleave the exists/create step. */
     private saveConfigs(): void {
-        try {
-            localStorage.setItem('log_level_configs', JSON.stringify(this.moduleConfigs));
-        } catch (e) {
-            console.warn('Failed to save log level configs:', e);
-        }
+        this.writes = this.writes.then(() => writeWorkspaceFile(this.fs, LOG_LEVELS_PATH, JSON.stringify(this.moduleConfigs, null, 2)))
+            .catch(e => console.warn('Failed to save log level configs:', e));
     }
 
     render(): void {

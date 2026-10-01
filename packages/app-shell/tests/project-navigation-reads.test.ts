@@ -37,9 +37,36 @@ it('resolves project folders from one organization snapshot per sync and refresh
     } finally { await repository.dispose(); await manager.dispose(); }
 });
 
+it('boots when the persisted selection names a route this build no longer serves', async () => {
+    vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => setTimeout(fn, 0));
+    vi.stubGlobal('cancelAnimationFrame', clearTimeout);
+    const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+    const root = await manager.openFileSystem('/');
+    const repository = new SessionRepository(root); await repository.init();
+    const files = new SessionFilesService(root); await files.initialize();
+    files.registerSource('admin-home', await manager.openFileSystem('/home/admin'));
+    const mounts = new DirectoryMountService(root, files); await mounts.init();
+    const projects = new ProjectService(root, repository, mounts, files); await projects.ensureStartup();
+    // `/@flows` was only a route while Flows were mounted at the root without a project service.
+    const restored = { activeId: '/@flows', expandedFolderIds: ['/@flows'], selectedItemIds: [] };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const sidebar = document.createElement('div'), main = document.createElement('div'); document.body.append(sidebar, main);
+    const factory = vi.fn(async () => ({ destroy: vi.fn() }));
+    const kernel = { onChanged: () => () => {}, async *listSessions() {} };
+    const workbench = new SessionWorkbench({ sidebar: sidebar, container: main, repository: repository, files: files,
+        factory: factory as never, onSelect: () => {}, hostContext: undefined, kernel: kernel as never,
+        fileFactory: factory as never, directoryMounts: mounts, projects: projects, uiPersistence: { load: () => restored } });
+    try {
+        await workbench.start();
+        expect(sidebar.querySelector('.vfs-columns')).toBeTruthy();
+        expect(warn).toHaveBeenCalledWith('[project-navigation] ignoring unresolvable browser path', '/@flows');
+    } finally {
+        await workbench.destroy(); await mounts.dispose(); await files.dispose(); await repository.dispose(); await manager.dispose();
+        document.body.replaceChildren(); warn.mockRestore(); vi.unstubAllGlobals();
+    }
+});
+
 it('opens project files before blocked navigation and discards stale navigation on another route', async () => {
-    const storage = new Map<string, string>();
-    vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) });
     vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => setTimeout(fn, 0));
     vi.stubGlobal('cancelAnimationFrame', clearTimeout);
     const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
@@ -51,9 +78,7 @@ it('opens project files before blocked navigation and discards stale navigation 
     const projects = new ProjectService(root, repository, mounts, files); await projects.ensureStartup();
     const startupProject = (await projects.current())!;
     const startupPath = folderBrowserPath(startupProject.path);
-    storage.set('vfs_ui_state_session-browser:v1:admin', JSON.stringify({
-        expandedFolderIds: [startupPath, startupPath + '/@files', startupPath + '/@files/old'], selectedItemIds: [],
-    }));
+    const restored = { expandedFolderIds: [startupPath, startupPath + '/@files', startupPath + '/@files/old'], selectedItemIds: [] };
     const openFiles = vi.spyOn(projects, 'openFiles');
     const sidebar = document.createElement('div'), main = document.createElement('div'); document.body.append(sidebar, main);
     const factory = vi.fn(async () => ({ destroy: vi.fn() }));
@@ -63,7 +88,7 @@ it('opens project files before blocked navigation and discards stale navigation 
     const blocked = new Promise<void>(resolve => { releaseNavigation = resolve; });
     const workbench = new SessionWorkbench({ sidebar: sidebar, container: main, repository: repository, files: files,
         factory: factory as never, onSelect: () => {}, hostContext: undefined, kernel: kernel as never,
-        fileFactory: factory as never, directoryMounts: mounts, projects: projects });
+        fileFactory: factory as never, directoryMounts: mounts, projects: projects, uiPersistence: { load: () => restored } });
     try {
         await workbench.start();
         // Inspect root capabilities for the fixed Files entry without enumerating its children.

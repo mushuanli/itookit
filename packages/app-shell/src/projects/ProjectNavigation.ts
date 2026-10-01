@@ -13,6 +13,22 @@ interface Actions {
 /** How the content column follows a file opened inside a project. */
 export type ProjectFileView = 'preserve' | 'directory';
 
+/** Projection runs on every state change; report each stale path once. */
+const warnedPaths = new Set<string>();
+/**
+ * Persisted selection can outlive the routes that produced it (e.g. a Flow path
+ * remembered while Flows were mounted at `/@flows`). Mapping the canonical
+ * activeId onto a column is presentation, so an unknown id degrades to "no
+ * selection" instead of aborting bootstrap.
+ */
+function tryResolveBrowserTarget(path: string): ReturnType<typeof resolveBrowserTarget> | undefined {
+    try { return resolveBrowserTarget(path); }
+    catch {
+        if (!warnedPaths.has(path)) { warnedPaths.add(path); console.warn('[project-navigation] ignoring unresolvable browser path', path); }
+        return undefined;
+    }
+}
+
 export interface ProjectNavigationOptions {
     reveal?: boolean;
     project?: ProjectFolder;
@@ -42,7 +58,8 @@ export class ProjectNavigation {
         this.options = { navigationTitle: t('vfs.toolbar.projects'), navigationSearchPlaceholder: t('project.searchProjects'), navigationItems: projectItems,
             navigationActiveId: id => {
                 if (!id) return id;
-                const target = resolveBrowserTarget(id);
+                const target = tryResolveBrowserTarget(id);
+                if (!target) return null;
                 if (target.kind === 'project-files') return folderBrowserPath(target.folder) + '/@files';
                 return target.kind === 'session' && this.family && target.sessionId === this.session ? id.slice(0, id.lastIndexOf('/') + 1) + this.family : id;
             },

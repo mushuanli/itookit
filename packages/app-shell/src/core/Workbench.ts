@@ -33,6 +33,7 @@ export class Workbench {
             {
                 ...config.uiOptions,
                 scopeId,
+                persistence: config.uiPersistence,
                 sessionListContainer: config.sidebarContainer,
                 fileCreation: {
                     ...config.uiOptions?.fileCreation,

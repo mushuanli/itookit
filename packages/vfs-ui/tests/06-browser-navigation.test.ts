@@ -46,7 +46,7 @@ it('does not restore Session descendants, and only enumerates directories explic
     const list = vi.spyOn(fs.driver, 'getChildren');
     const container = document.createElement('div'); document.body.append(container);
     const shell = createVFSUI({ sessionListContainer: container, scopeId: 'lazy-session', readOnly: true,
-        activateDirectories: true, restoreExpandedDirectory: () => false }, fs) as VFSUIShell;
+        activateDirectories: true, restoreExpandedDirectory: () => false, persistence: true }, fs) as VFSUIShell;
     try {
         await shell.start(); await shell.selectPath('/s'); await shell.refresh();
         expect(list.mock.calls.every(([path]) => path === '/')).toBe(true);

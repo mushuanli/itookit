@@ -30,6 +30,9 @@ src/
 │   ├── mount-dialog.ts       宿主目录挂载对话框
 │   └── localize-mount-error.ts 把 app-core 结构化错误映射为 i18n 文案
 ├── config/               ← file-registry.ts (FILE_REGISTRY) + templates.ts
+├── persistence/
+│   ├── vfs-json-store.ts     ← 串行化的 etc:/ui JSON 文档存储
+│   └── vfs-ui-state-store.ts ← VfsUIPersistence：浏览器 UI 快照落到 etc:/ui/<scope>.ui.json
 └── styles/workspace.css
 ```
 

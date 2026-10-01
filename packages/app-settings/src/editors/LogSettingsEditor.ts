@@ -44,7 +44,7 @@ export class LogSettingsEditor extends BaseSettingsEditor<SettingsService> {
         const viewerEl = this.container.querySelector('#section-log-viewer') as HTMLElement;
 
         const overviewSection = new LogOverviewSection(overviewEl);
-        const levelSection = new LogLevelConfigSection(levelEl);
+        const levelSection = new LogLevelConfigSection(levelEl, this.service.configFiles);
         const viewerSection = new LogViewerSection(viewerEl);
 
         this.sections = [overviewSection, levelSection, viewerSection];

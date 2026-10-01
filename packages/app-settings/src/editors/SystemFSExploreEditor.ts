@@ -90,6 +90,8 @@ export class SystemFSExploreEditor extends BaseSettingsEditor<SettingsService> {
                 title: 'Files',
                 searchPlaceholder: 'Search files…',
                 initialSidebarCollapsed: false,
+                // A read-only inspection surface: remember nothing between visits.
+                persistence: false,
                 sessionListContainer: sidebarEl,
             },
             engine,
