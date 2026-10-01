@@ -67,14 +67,15 @@ export function resolveBrowserTarget(path: string): BrowserTarget {
     if (segments[index] === '@favorites' && index > 0) {
         const favoriteId = segments[index + 1];
         if (segments.length > index + 2 || favoriteId && !/^[a-zA-Z0-9_-]{1,128}$/.test(favoriteId))
-            throw new FSError('EINVAL', 'Invalid favorite browser path');
+            throw new FSError('EINVAL', 'Invalid favorite browser path', undefined, normalized);
         const folder = folderPathFromBrowserPath(folderPrefix)!;
         return favoriteId ? { kind: 'favorite', folder, favoriteId } : { kind: 'favorites', folder };
     }
     if (segments[index] === '@files' && index > 0) return { kind: 'project-files',
         folder: folderPathFromBrowserPath(folderPrefix)!, path: workspacePath('/' + segments.slice(index + 1).join('/')) };
     const sessionId = segments[index];
-    if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) throw new FSError('EINVAL', 'Invalid Session browser path');
+    if (!/^[a-zA-Z0-9_-]+$/.test(sessionId))
+        throw new FSError('EINVAL', `Invalid Session browser segment "${sessionId}"`, undefined, normalized);
     const area = segments[index + 1];
     const rest = segments.slice(index + 2);
     if (!area) return { kind: 'session', sessionId };
@@ -85,7 +86,7 @@ export function resolveBrowserTarget(path: string): BrowserTarget {
     if (area === 'tasks' && !rest.length) return { kind: 'tasks', sessionId };
     if (area === 'tasks' && rest.length === 1 && rest[0] === '@more') return { kind: 'tasks', sessionId };
     if (area === 'tasks' && rest.length === 1 && /^[a-zA-Z0-9_-]+$/.test(rest[0])) return { kind: 'task', sessionId, taskId: rest[0] };
-    throw new FSError('ENOENT', 'Session browser entry not found');
+    throw new FSError('ENOENT', 'Session browser entry not found', undefined, normalized);
 }
 /**
  * Folder that owns a browser target.
