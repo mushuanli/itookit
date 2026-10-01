@@ -44,4 +44,5 @@ src/
 文件树的 `.gitignore` 过滤属于 UI 展示，位于 `utils/gitignore-visibility.ts`；默认不额外排除 node_modules 等目录，不更改原始 VFS、工具或服务端行为。合成导航使用 `hideGitignored: false`，实际文件通过宿主注入的展示回调过滤；规则变更重新加载已展开分支。
 
 - 行内删除/移动通过 `RowMutationPort` 分派；目录按钮由 `DirectoryActions` 管理进行中状态。菜单呈现不是授权，执行前通过 `allowsRowAction` 和最新节点重新检查。
+- 内置「新建文件/新建目录」的目标目录：有选中时取首个选中项（目录→自身，文件→其父目录），否则取**当前激活行**（同上），再退回列根。激活一行会清掉单条选中，所以不能只看 `selectedItemIds`——否则"点开一个文件夹再新建"会落到列根。宿主给同名动作提供了自定义 `actions` 时仍以宿主语义为准。
 - `FileSystemView` 把 provider 消息统一成 `Source operation failed: <method>`，原文只在 `cause` 里。面向用户的报错路径（`CommandBus` 日志、`ActionRunner` 默认 reporter、宿主 report）统一用 `utils/error-detail.ts` 的 `describeErrorReason()`（日志可用 `describeCauseChain()`） 取最内层原因，否则「跨项目移动」这类可操作解释永远不会显示。

@@ -324,18 +324,29 @@ export class NodeList extends BaseComponent<NodeListState> {
       }
     } else if (action === 'create-file' || action === 'create-directory') {
       const type = action.split('-')[1] as 'file' | 'directory';
+      // Activating a row drops a single-item selection, so the built-in create controls fall
+      // back to the activated row: a directory itself, or a file's parent. Without this,
+      // "select a folder, then create" landed in the column root instead of that folder.
+      const destination = parentPath ?? this.activeTargetParent();
       if (type === 'file' && this.fileCreation?.instant) {
         // Instant create: skip inline name-prompt, let service generate a unique timestamped name
         this.commandBus.execute('file:create', {
           type: 'file',
           title: '',
-          parentPath,
+          parentPath: destination,
         });
       } else {
-        this.commandBus.execute('ui:startCreating', { type, parentPath });
+        this.commandBus.execute('ui:startCreating', { type, parentPath: destination });
       }
     }
   };
+
+  /** Destination for the built-in create controls when nothing is multi-selected. */
+  private activeTargetParent(): string | null {
+    const activeId = this.state.activeId;
+    if (!activeId) return null;
+    return this.itemActionHandler.getTargetParentId(new Set([activeId]), id => this.findItemById(id));
+  }
 
   private handleItemClick = (event: MouseEvent): void => {
     const target = event.target as Element;
