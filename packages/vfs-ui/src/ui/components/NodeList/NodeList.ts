@@ -126,7 +126,6 @@ export class NodeList extends BaseComponent<NodeListState> {
       find: id => this.findItemById(id), readOnly: () => this.state.readOnly,
       sorted: !!options.sort, onQuickDelete: options.onQuickDelete,
       allows: (action, node) => this.contextMenuHandler.allows(action, node),
-      delete: node => this.contextMenuHandler.run('delete', node),
     });
     this.dragDropHandler = new DragDropHandler(
       options.instanceId,

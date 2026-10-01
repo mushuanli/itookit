@@ -12,7 +12,6 @@ interface RowMutationContext {
     sorted: boolean;
     onQuickDelete?: VFSRowActionOptions['onQuickDelete'];
     allows(action: string, node: VFSNodeUI): boolean;
-    delete(node: VFSNodeUI): Promise<void>;
 }
 
 /** Resolve current nodes at dispatch time; DOM flags are presentation, not authority. */
@@ -32,12 +31,19 @@ function deleteRow(context: RowMutationContext, payload: { itemIds: string[] }):
     if (!node) return;
     const policy = resolveRowPolicy(context.readOnly(), node);
     if (!policy.inlineDelete) return;
-    if (!policy.hostOwnedDelete) return context.delete(node);
+    // The row's own control is the confirmation: its first click arms, the second one
+    // runs. Re-entering the context-menu action here would ask the very same question
+    // again, so the click goes straight to the deletion pipeline. Menu availability
+    // still gates ordinary files; host-owned entries carry their policy through
+    // `onQuickDelete` instead.
+    if (!policy.hostOwnedDelete && !context.allows('delete', node)) return;
     return context.actions.run(`delete:${node.id}`, async () => {
         const current = context.find(node.id);
-        if (!current || !resolveRowPolicy(context.readOnly(), current).inlineDelete) return;
-        if (context.onQuickDelete) await context.onQuickDelete(current);
-        else await context.commands.execute('file:delete', payload);
+        if (!current) return;
+        const currentPolicy = resolveRowPolicy(context.readOnly(), current);
+        if (!currentPolicy.inlineDelete) return;
+        if (currentPolicy.hostOwnedDelete && context.onQuickDelete) await context.onQuickDelete(current);
+        else await context.commands.execute('file:delete', { itemIds: [current.id] });
     });
 }
 

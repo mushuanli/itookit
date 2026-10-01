@@ -34,7 +34,7 @@ src/
 - common/ui-common 契约保持唯一来源；不要为减少依赖复制定义。
 - 宿主使用语义 API，不能访问内部 store.dispatch。
 - 行级读写策略只在 `utils/row-policy.ts` 定义（`resolveRowPolicy` / `resolveColumnReadOnly` / `ROW_FLAGS`）；renderer、右键菜单、拖拽与行处理器都是机制，禁止各自重新推导 `_readOnly` / `_fixedEntry` / `quickDelete`。
-- 虚拟目录可通过 `presentation.quickDelete` 开启两步行内删除；`onQuickDelete(node)` 接入宿主生命周期，在第二次确认后执行。未提供回调时走普通文件删除；固定入口及只读条目不开放。右键菜单策略独立于显式开启的行内操作，且收藏项进入默认菜单，宿主仍可过滤。
+- 虚拟目录可通过 `presentation.quickDelete` 开启两步行内删除；`onQuickDelete(node)` 接入宿主生命周期，在第二次确认后执行。未提供回调时走普通文件删除；固定入口及只读条目不开放。行内控件的两次点击本身就是确认，第二次点击直接进删除管线，不再复用右键菜单动作（否则会再问一次）；菜单与批量删除各自的确认保持不变。右键菜单策略独立于显式开启的行内操作，且收藏项进入默认菜单，宿主仍可过滤。
 - 收藏是宿主持久化的状态：`favoriteAction.state(node)` 只读（返回 `undefined` 隐藏控件），`favoriteAction.toggle(node)` 执行；本包不保存收藏。
 - 状态管理使用 `immer`(`VFSStore` 内 `produce`)进行不可变更新
 - 节点操作经 `VFSService`(createFile / createDirectory / renameItem / updateMultipleItemsTags 等),事件经 `contracts/events.ts` 的映射表处理

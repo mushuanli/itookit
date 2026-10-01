@@ -49,6 +49,19 @@ it('delegates inline deletion of host-owned entries and keeps plain files on the
     } finally { await f.destroy(); }
 });
 
+it('deletes a plain file from the inline control without asking a second time', async () => {
+    const confirmSpy = vi.fn(() => true);
+    vi.stubGlobal('confirm', confirmSpy);
+    const f = await fixture();
+    try {
+        const remove = vi.spyOn(f.fs.driver, 'delete');
+        toggleThenConfirm(f.container, '/notes.md');
+        await vi.waitFor(() => expect(remove).toHaveBeenCalledWith(['/notes.md']));
+        // The X → delete pair is the confirmation; the context-menu prompt must not run.
+        expect(confirmSpy).not.toHaveBeenCalled();
+    } finally { await f.destroy(); }
+});
+
 it('falls back to the standard file deletion when a virtual entry has no host callback', async () => {
     const f = await fixture({ listItems: virtualSession });
     try {
