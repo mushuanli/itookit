@@ -27,6 +27,8 @@ import { log } from '../utils/logger';
  */
 export class LLMDriver {
     private provider: BaseProvider;
+    private readonly providerConfig: LLMProviderConfig;
+    private readonly modelProviders = new Map<string, BaseProvider>();
     private config: Required<Pick<LLMClientConfig, 'maxRetries' | 'retryDelay' | 'timeout'>> & LLMClientConfig;
     
     constructor(config: LLMClientConfig) {
@@ -68,6 +70,7 @@ export class LLMDriver {
         };
         
         // 5. 创建 Provider
+        this.providerConfig = providerConfig;
         this.provider = createProvider(providerConfig, config.customProviderDefaults);
         
         // ✅ 简洁调用
@@ -105,20 +108,28 @@ export class LLMDriver {
      * 释放 Provider 持有的资源（如 Codex app-server 子进程）。
      */
     async dispose(): Promise<void> {
-        await this.provider.dispose();
+        await Promise.all([this.provider, ...this.modelProviders.values()].map(provider => provider.dispose()));
     }
 
     /**
      * 推断当前 provider 的格式标识，用于 attachment 展开
      */
-    private get providerFormat(): 'openai' | 'anthropic' | 'gemini' | undefined {
-        const name = this.providerName.toLowerCase();
-        if (name.includes('anthropic') || name.includes('claude')) return 'anthropic';
-        if (name.includes('gemini') || name.includes('google')) return 'gemini';
-        // OpenAI 及兼容实现均使用 openai 格式
+    private providerFormat(provider: BaseProvider): 'openai' | 'anthropic' | 'gemini' {
+        if (provider.name.includes('anthropic')) return 'anthropic';
+        if (provider.name.includes('gemini')) return 'gemini';
         return 'openai';
     }
-    
+
+    private providerForModel(model?: string): BaseProvider {
+        if (!model || model === this.providerConfig.model || this.providerConfig.provider === 'codex') return this.provider;
+        let provider = this.modelProviders.get(model);
+        if (!provider) {
+            provider = createProvider({ ...this.providerConfig, model }, this.config.customProviderDefaults);
+            this.modelProviders.set(model, provider);
+        }
+        return provider;
+    }
+
     // ============== 主入口 ==============
     
     /**
@@ -140,7 +151,9 @@ export class LLMDriver {
             messageCount: params.messages.length
         });
 
-        let finalParams = { ...params };
+        const modelEffort = this.providerConfig.metadata?.modelReasoningEfforts?.[params.model || this.providerConfig.model || ''];
+        let finalParams: ChatCompletionParams = { ...params, reasoningEffort: params.reasoningEffort ?? modelEffort };
+        const requestProvider = this.providerForModel(params.model);
 
         // ── 自动展开 attachments ──
         const hasAttachments = finalParams.messages.some(m => m.attachments && m.attachments.length > 0);
@@ -149,7 +162,7 @@ export class LLMDriver {
             try {
                 finalParams.messages = await expandMessagesAttachments(
                     finalParams.messages,
-                    this.providerFormat,
+                    this.providerFormat(requestProvider),
                 );
                 log.debug('Attachments expanded', { requestId });
             } catch (err: any) {
@@ -171,13 +184,13 @@ export class LLMDriver {
             finalParams.signal.throwIfAborted();
             if (finalParams.stream) {
                 // 流式响应
-                const stream = this.provider.stream(finalParams);
+                const stream = requestProvider.stream(finalParams);
                 log.debug('Stream started', { requestId });
                 return this.wrapStreamWithTimeout(stream, cancellation, requestId);
             } else {
                 const startTime = Date.now();
                 const response = await this.executeWithRetry(
-                    () => this.provider.create(finalParams),
+                    () => requestProvider.create(finalParams),
                     requestId, finalParams.signal, 1, finalParams._maxAttempts ?? this.config.maxRetries
                 );
                 cancellation.dispose();

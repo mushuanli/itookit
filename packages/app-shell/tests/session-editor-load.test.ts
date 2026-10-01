@@ -202,3 +202,25 @@ it('profiles complete editor initialization with LocalFS history and preserves s
     expect(await f.repository.getManifest(f.id)).toEqual(before);
     expect(await f.repository.getSessionSettings(f.id)).toEqual(settings);
 });
+
+
+it('persists Agent and Connection changes to the original Session before disposal or debounce', async () => {
+    const f = await fixture();
+    vi.spyOn(f.agents, 'findAgent').mockReturnValue({ id: 'chosen', name: 'Chosen' } as never);
+    const container = document.createElement('div'); document.body.append(container);
+    const editor = new LLMWorkspaceEditor(container, { sessionId: f.id, sessionRepository: f.repository,
+        commandBus: f.commandBus, agentService: f.agents as never });
+    cleanup.push(() => editor.destroy()); await editor.init(container);
+    const input = (editor as unknown as { chatInput: {
+        setConfig: (config: unknown) => void; selectAgent: (id: string) => void;
+    } }).chatInput;
+    input.setConfig({ settings: { connectionId: 'chosen-connection', modelTier: 'fast' } });
+    input.selectAgent('chosen');
+    const otherId = await f.repository.createSession('Other');
+    await f.execute(SessionCommand.Bind, { sessionId: otherId });
+    await editor.flushPendingSave();
+    const fresh = new SessionRepository(f.fs);
+    expect((await fresh.getSessionSettings(f.id))).toMatchObject({ connectionId: 'chosen-connection', modelTier: 'fast' });
+    expect((await fresh.getUIState(f.id))?.branchDrafts?.main?.inputAgentId).toBe('chosen');
+    expect((await fresh.getSessionSettings(otherId)).connectionId).not.toBe('chosen-connection');
+});

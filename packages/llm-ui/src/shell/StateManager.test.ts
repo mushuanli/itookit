@@ -56,3 +56,28 @@ it('keeps Stop available when generation starts during branch draft restoration'
     expect(input.setLoading).toHaveBeenLastCalledWith(true);
     manager.cleanup();
 });
+
+
+it('immediately serializes configuration snapshots against their original Session and retries failures', async () => {
+    let finish!: () => void;
+    const firstWrite = new Promise<void>(resolve => { finish = resolve; });
+    const saved: unknown[] = [];
+    const saveSessionSettings = vi.fn().mockImplementationOnce(() => firstWrite).mockResolvedValue(undefined);
+    const service = { saveSessionSettings, saveUIState: vi.fn(async (id, state, branch) => { saved.push({ id, state, branch }); }) };
+    const manager = new StateManager(service as unknown as StateService, { isGenerating: () => true } as SessionManager, 'original', id => id);
+    const config = { text: 'draft', agentId: 'agent-a', settings: { connectionId: 'a' } };
+    const first = manager.saveInputConfiguration(config);
+    await Promise.resolve(); expect(saveSessionSettings).toHaveBeenCalledWith('original', { connectionId: 'a' });
+    config.agentId = 'agent-b'; config.settings.connectionId = 'b';
+    const second = manager.saveInputConfiguration(config);
+    manager.cleanup(); expect(saveSessionSettings).toHaveBeenCalledOnce();
+    finish(); await Promise.all([first, second]); await manager.waitForDrafts();
+    expect(saved).toEqual([
+        expect.objectContaining({ id: 'original', branch: 'main', state: expect.objectContaining({ input_agent_id: 'agent-a' }) }),
+        expect.objectContaining({ id: 'original', branch: 'main', state: expect.objectContaining({ input_agent_id: 'agent-b' }) }),
+    ]);
+    await manager.saveInputConfiguration(config); expect(saveSessionSettings).toHaveBeenCalledTimes(2);
+    config.settings.connectionId = 'retry'; saveSessionSettings.mockRejectedValueOnce(new Error('disk'));
+    await expect(manager.saveInputConfiguration(config)).rejects.toThrow('disk');
+    await manager.saveInputConfiguration(config); expect(saveSessionSettings).toHaveBeenLastCalledWith('original', { connectionId: 'retry' });
+});

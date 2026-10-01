@@ -67,6 +67,7 @@ function isDirectInvocation(skill: SlashSkillDefinition): boolean {
 
 export interface SlashCommandRouterDeps {
     onFlow?: (args: string) => Promise<boolean>;
+    saveConfiguration?: () => Promise<void>;
     commands: ICommandBus;
     chatInput: IChatInputPresenter;
     bus: IEditorEventBus;
@@ -102,6 +103,10 @@ export interface SlashCommandRouterDeps {
  * Handles: Common, Refine, Context, View, Tools, Branch, Settings, Help, and Kernel commands.
  */
 export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandCallbacks {
+    const saveConfiguration = () => {
+        if (deps.saveConfiguration) void deps.saveConfiguration();
+        else deps.bus.emit('state:inputChanged', {});
+    };
     return {
         onFlow: deps.onFlow,
         // ── Common ──────────────────────────────────────────
@@ -296,7 +301,7 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
             deps.chatInput.setConfig({
                 settings: { historyLength: value },
             });
-            deps.bus.emit('state:inputChanged', {});
+            saveConfiguration();
 
             const label = value === -1 ? 'unlimited'
                 : value === 0 ? 'none'
@@ -308,7 +313,7 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
             deps.chatInput.setConfig({
                 settings: { historyLength: 0 },
             });
-            deps.bus.emit('state:inputChanged', {});
+            saveConfiguration();
             Toast.info('Next message will be sent without history context');
         },
 
@@ -430,7 +435,7 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
                 );
             }
             deps.chatInput.setConfig({ agentId });
-            deps.bus.emit('state:inputChanged', {});
+            saveConfiguration();
         },
 
         onConnection: async args => {
@@ -442,16 +447,17 @@ export function buildSlashCallbacks(deps: SlashCommandRouterDeps): SlashCommandC
                     throw new Error(t('connection.unavailable', { id }));
             }
             const connectionId = id === '--reset' ? undefined : id;
-            await deps.commands.execute(SessionCommand.SaveSettings, { connectionId });
+            if (!deps.saveConfiguration) await deps.commands.execute(SessionCommand.SaveSettings, { connectionId });
             deps.chatInput.setConfig({ settings: { connectionId } });
-            deps.bus.emit('state:inputChanged', {});
+            if (deps.saveConfiguration) await deps.saveConfiguration();
+            else deps.bus.emit('state:inputChanged', {});
         },
 
         onModel: (modelId: string) => {
             deps.chatInput.setConfig({
                 settings: { modelId },
             });
-            deps.bus.emit('state:inputChanged', {});
+            saveConfiguration();
             Toast.info(`Model switched to ${modelId}`);
         },
 

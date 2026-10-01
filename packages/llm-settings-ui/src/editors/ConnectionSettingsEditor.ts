@@ -1,3 +1,6 @@
+import { SettingsValidationError } from '@itookit/ui-common';
+import { renderProtocolOptions } from './provider-form';
+import { getProviderProtocols, resolveModelForTier } from '@itookit/llm-common';
 import { showConfigurationForm, addConfigurationAction, addConfigurationEnabled } from './configuration-form';
 import { t } from '@itookit/common';
 // @file: llm-ui/editors/ConnectionSettingsEditor.ts
@@ -6,7 +9,7 @@ import { t } from '@itookit/common';
 // 此编辑器负责 Connection 层：绑定 Provider + 配置 apiKey + 自定义 tier 映射。
 // 模型目录由 Provider 统一管理，不在 Connection 中存储/编辑。
 
-import {generateShortUUID, ENTITY_ICONS} from '@itookit/common';
+import {generateShortUUID} from '@itookit/common';
 import { BaseSettingsEditor } from '@itookit/ui-common';
 import type { IConnectionService,
     ConnectionMeta,
@@ -18,12 +21,12 @@ import type { IConnectionService,
 import { Toast } from '@itookit/ui-common';
 import { fromConnectionDef, serializeLLMConfig } from '@itookit/device-llm';
 import { runLLMImport } from './llm-import';
-import { renderModelCapabilityBadges } from '../utils/modelBadges';
+import { escapeAttr, escapeHTML } from '@itookit/common';
 
 export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionService> {
     private defaultConnectionId?: string;
     private currentEditTiers: Partial<Record<ModelTier, string>> = {};
-    private currentEditTierThinking: Partial<Record<ModelTier, boolean>> = {};
+    private currentEditModelEfforts: Record<string, string> = {};
     private providers: Record<string, LLMProvider> = {};
     private _checkedIds = new Set<string>();
     private _selectedProviderId: string | null = null;
@@ -31,6 +34,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
     private get formOnly(): boolean { return this.options.target?.kind === 'entity' && this.options.target.entityType === 'connection'; }
 
     async render() {
+        if (!await this.prepareRender()) return;
         this.providers = Object.fromEntries(
             this.service.getProviders().map(p => [p.id, p])
         );
@@ -482,12 +486,20 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
     // ── Edit modal ─────────────────────────────────────────────────────────────
 
     private showEditModal(connection: LLMConnection | null) {
+        let savedConnection = connection;
+        const connectionId = connection?.id ?? `conn-${generateShortUUID()}`;
         const providerKeys = Object.keys(this.providers);
         const initialPid = connection?.providerId ?? this._selectedProviderId ?? providerKeys[0];
         const initialProvider = this.providers[initialPid] ?? this.providers[providerKeys[0]];
 
         this.currentEditTiers = connection?.tiers ? { ...connection.tiers } : {};
-        this.currentEditTierThinking = (connection?.metadata?.tierThinking as Record<string, boolean>) || {};
+        this.currentEditModelEfforts = { ...(connection?.metadata?.modelReasoningEfforts ?? {}) };
+        if (connection?.metadata?.reasoningEffort) {
+            for (const tier of ['optimal', 'standard', 'fast'] as ModelTier[]) {
+                const modelId = this.tierModelId(tier, initialProvider);
+                if (modelId && !this.currentEditModelEfforts[modelId]) this.currentEditModelEfforts[modelId] = connection.metadata.reasoningEffort;
+            }
+        }
 
         const modalContent = `
             <form id="connection-form" class="settings-form">
@@ -539,60 +551,36 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                     <div class="settings-tier-config" id="tier-config-section">
                         ${this.renderTierForm(initialProvider)}
                     </div>
+                    <small class="settings-form__help">${t('connection.reasoningHelp')}</small>
                     <small class="settings-form__help">
                         API Key 和模型列表在 <strong>${this.formOnly ? t('toolbox.providerLocation') : '设置 → LLM Providers'}</strong> 中管理。
                     </small>
                 </div>
 
-                <!-- Reasoning Effort -->
                 <div class="settings-form__group">
-                    <label class="settings-form__label">推理强度</label>
-                    <select class="settings-form__select" name="reasoningEffort" style="max-width:160px">
-                        <option value="">未设置（默认 xhigh）</option>
-                        <option value="low"    ${connection?.metadata?.reasoningEffort === 'low'    ? 'selected' : ''}>Low — 短思考</option>
-                        <option value="medium" ${connection?.metadata?.reasoningEffort === 'medium' ? 'selected' : ''}>Medium — 中等思考</option>
-                        <option value="high"   ${connection?.metadata?.reasoningEffort === 'high'   ? 'selected' : ''}>High — 深度思考</option>
-                        <option value="xhigh"  ${connection?.metadata?.reasoningEffort === 'xhigh'  ? 'selected' : ''}>xHigh — 最深思考</option>
+                    <label class="settings-form__label">${t('provider.protocol.connection')}</label>
+                    <select class="settings-form__select" name="protocol">
+                        ${initialProvider ? renderProtocolOptions(initialProvider, connection?.protocol) : ''}
                     </select>
-                    <small class="settings-form__help">
-                        仅对支持 thinking 的模型生效（DeepSeek V4 Pro 等）。设置后自动带入请求。
-                    </small>
-                </div>
-
-                <!-- API 协议（Claude CLI / Anthropic Messages API 支持） -->
-                <div class="settings-form__group">
-                    <label class="settings-form__label" style="display:flex;align-items:center;gap:6px">
-                        API 协议
-                        <span class="settings-help-icon"
-                              title="同一 Provider 可通过不同 URL 提供多种协议：&#10;• 自动推断 — 按 Provider 类型和 URL 自动判断&#10;• OpenAI Chat — /v1/chat/completions 标准格式&#10;• OpenAI Responses — /responses 格式，DeepSeek 官方支持（input items + 语义化流式 + 联网搜索）&#10;• Anthropic Messages — /v1/messages 格式，支持 Claude CLI / thinking block&#10;• Gemini Generate — Google Gemini generateContent">?</span>
-                    </label>
-                    <select class="settings-form__select" name="protocol" style="max-width:260px">
-                        <option value="" ${!connection?.protocol ? 'selected' : ''}>自动推断（按 Provider 类型）</option>
-                        <option value="openai-chat"        ${connection?.protocol === 'openai-chat'        ? 'selected' : ''}>OpenAI Chat Completions</option>
-                        <option value="openai-responses"   ${connection?.protocol === 'openai-responses'   ? 'selected' : ''}>OpenAI Responses API（DeepSeek 模式）</option>
-                        <option value="anthropic-messages" ${connection?.protocol === 'anthropic-messages' ? 'selected' : ''}>Anthropic Messages（Claude CLI 兼容）</option>
-                        <option value="gemini-generate"    ${connection?.protocol === 'gemini-generate'    ? 'selected' : ''}>Gemini generateContent</option>
-                    </select>
-                    <small class="settings-form__help">
-                        选择 <strong>Anthropic Messages</strong> 可让 DeepSeek / OpenRouter 等兼容厂商走
-                        Claude Code Agent Loop（支持 thinking block 和工具循环）。
-                        <br/><strong>OpenAI Responses（DeepSeek 模式）</strong> 走 DeepSeek 官方 /responses 接口
-                        （base_url <code>https://api.deepseek.com</code>，支持 reasoning.effort 思考控制与内置联网搜索工具）。
-                    </small>
+                    <small class="settings-form__help">${t('provider.protocol.connectionHelp')}</small>
                 </div>
             </form>
         `;
 
         showConfigurationForm(this.container, connection?.name ?? '添加连接', modalContent, {
             width: '560px',
-            confirmText: '保存',
+            confirmText: '',
+            onAutoSave: save => this.trackAutoSave(save),
+            onClose: () => { void this.render(); },
             onConfirm: async () => {
                 const form = document.getElementById('connection-form') as HTMLFormElement;
-                if (!form.checkValidity()) { form.reportValidity(); return false; }
+                if (!form.checkValidity()) return false;
 
                 const formData = new FormData(form);
                 const data = Object.fromEntries(formData) as Record<string, string>;
+                if (!data.name.trim()) throw new SettingsValidationError(t('settings.autosave.invalid'));
                 const pid = data.providerId;
+                data.protocol = form.querySelector<HTMLSelectElement>('[name="protocol"]')!.value;
 
                 // Read all three tier selections
                 const tierOptimal  = (document.getElementById('tier-optimal')  as HTMLSelectElement)?.value || '';
@@ -604,28 +592,20 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                 if (tierFast)     tiers.fast     = tierFast;
 
                 const tempVal = parseFloat(data.temperature);
-                const reasoningEffort = data.reasoningEffort || undefined;
-                const metadata: Record<string, unknown> = { ...(connection?.metadata ?? {}) };
-                if (reasoningEffort) {
-                    metadata.reasoningEffort = reasoningEffort;
-                } else {
-                    delete metadata.reasoningEffort;
-                }
-                // Per-tier thinking overrides (only store explicit overrides)
-                const tierThinking: Record<string, boolean> = {};
-                for (const [tier, enabled] of Object.entries(this.currentEditTierThinking)) {
-                    if (enabled !== undefined) tierThinking[tier] = enabled;
-                }
-                if (Object.keys(tierThinking).length > 0) {
-                    metadata.tierThinking = tierThinking;
-                } else {
-                    delete metadata.tierThinking;
+                const metadata: Record<string, unknown> = { ...(savedConnection?.metadata ?? {}) };
+                delete metadata.reasoningEffort;
+                delete metadata.tierThinking;
+                const efforts = Object.fromEntries(Object.entries(this.currentEditModelEfforts).filter(([, value]) => value));
+                if (Object.keys(efforts).length) metadata.modelReasoningEfforts = efforts;
+                else delete metadata.modelReasoningEfforts;
+                if (data.protocol && !getProviderProtocols(this.providers[pid]).includes(data.protocol as ApiProtocol)) {
+                    throw new SettingsValidationError(t('provider.protocol.unavailable'));
                 }
                 const newConn: LLMConnection = {
-                    ...connection,
+                    ...savedConnection,
                     enabled: this.formOnly ? data.enabled === 'on' : connection?.enabled,
-                    id: connection?.id || `conn-${generateShortUUID()}`,
-                    name: data.name,
+                    id: connectionId,
+                    name: data.name.trim(),
                     providerId: pid,
                     tiers: Object.keys(tiers).length > 0 ? tiers : undefined,
                     temperature: !isNaN(tempVal) ? tempVal : undefined,
@@ -635,8 +615,9 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                 };
 
                 await this.service.saveConnection(newConn);
-                Toast.success('连接配置已保存');
-                this.render();
+                savedConnection = structuredClone(newConn);
+                const heading = this.container.querySelector('.settings-page__title');
+                if (this.formOnly && heading) heading.textContent = newConn.name;
             },
         }, this.formOnly);
 
@@ -656,41 +637,35 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         } else setTimeout(() => this.bindModalEvents(connection, initialPid), 100);
     }
 
-    /** 渲染单个 tier 的 thinking 开关 HTML（有 modelId 时显示，否则返回空字符串） */
-    private renderTierThinkingToggle(tier: ModelTier, modelId: string, thinkingOn: boolean): string {
-        if (!modelId) return '';
-        const title = thinkingOn ? '关闭思考' : '开启思考';
-        return `
-            <label class="llm-enable-toggle" title="${title}" style="margin-left:8px;display:flex;align-items:center;gap:4px;cursor:pointer;font-size:0.75rem;">
-                <input type="checkbox" class="chk-tier-thinking" data-tier="${tier}" ${thinkingOn ? 'checked' : ''} style="display:none">
-                <span class="llm-enable-toggle__track ${thinkingOn ? 'llm-enable-toggle__track--on' : ''}" style="width:32px;height:18px;">
-                    <span class="llm-enable-toggle__thumb"></span>
-                </span>
-                <span style="font-size:12px;">${ENTITY_ICONS.llm}</span>
-            </label>`;
+    private tierModelId(tier: ModelTier, provider: LLMProvider | undefined): string {
+        return resolveModelForTier({ tiers: this.currentEditTiers,
+            model: provider?.models.find(model => (model.category ?? 'chat') === 'chat')?.id || '' }, tier);
     }
 
-    /** 渲染 tier 配置三行（optimal/standard/fast 全部可选），每行带 thinking 开关 + 能力 badges */
+    private renderModelEffort(tier: ModelTier, provider: LLMProvider | undefined): string {
+        const modelId = this.tierModelId(tier, provider);
+        if (!modelId) return '';
+        const value = this.currentEditModelEfforts[modelId] || '';
+        const options = ['', 'low', 'medium', 'high', 'xhigh'].map(effort =>
+            `<option value="${effort}" ${value === effort ? 'selected' : ''}>${effort || t('connection.reasoningDefault')}</option>`).join('');
+        return `<select class="settings-form__select settings-form__select--sm" data-effort-tier="${tier}"
+            aria-label="${t('connection.reasoningEffort')}" title="${t('connection.reasoningEffort')}">${options}</select>`;
+    }
+
     private renderTierForm(provider: LLMProvider | undefined): string {
         // tier 是对话质量分层，只列 chat 类模型（缺省 category 视为 chat）
         const models = (provider?.models ?? []).filter(m => (m.category ?? 'chat') === 'chat');
         const noneOpt = '<option value="">— 未指定（使用 Provider 首个模型）—</option>';
         const modelOpts = models.map(m =>
-            `<option value="${m.id}">${m.name}</option>`
+            `<option value="${escapeAttr(m.id)}">${escapeHTML(m.name)}</option>`
         ).join('');
 
         const tierRow = (tier: ModelTier, label: string, badgeClass: string) => {
-            const modelId = this.currentEditTiers[tier] || '';
-            const modelDef = models.find(m => m.id === modelId);
-            const thinkingOn = this.currentEditTierThinking[tier] ??
-                (modelDef?.supportsThinking ?? false);
-
             return `
                 <div class="settings-tier-row">
                     <span class="settings-tier-badge ${badgeClass}">${label}</span>
                     <select class="settings-form__select settings-form__select--sm" id="tier-${tier}" data-tier="${tier}" style="flex:1">${noneOpt}${modelOpts}</select>
-                    <div class="tier-thinking-slot" id="tier-thinking-${tier}">${this.renderTierThinkingToggle(tier, modelId, thinkingOn)}</div>
-                    <div class="tier-cap-slot" id="tier-caps-${tier}" style="display:flex;gap:2px;align-items:center">${modelDef ? renderModelCapabilityBadges(modelDef) : ''}</div>
+                    <div id="tier-effort-${tier}">${this.renderModelEffort(tier, provider)}</div>
                 </div>`;
         };
 
@@ -705,18 +680,11 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         const providerSelect = document.getElementById('conn-provider') as HTMLSelectElement | null;
         const tierSection    = document.getElementById('tier-config-section') as HTMLElement | null;
 
-        const refreshTierThinkingSlot = (tier: ModelTier, provider: LLMProvider | undefined) => {
-            const slot = document.getElementById(`tier-thinking-${tier}`);
-            const modelId = this.currentEditTiers[tier] ?? '';
-            const modelDef = provider?.models.find(m => m.id === modelId);
-            if (slot) {
-                const thinkingOn = this.currentEditTierThinking[tier] ??
-                    (modelDef?.supportsThinking ?? false);
-                slot.innerHTML = this.renderTierThinkingToggle(tier, modelId, thinkingOn);
+        const refreshEffortSlots = (provider: LLMProvider | undefined) => {
+            for (const tier of ['optimal', 'standard', 'fast'] as ModelTier[]) {
+                const slot = this.container.querySelector(`#tier-effort-${tier}`);
+                if (slot) slot.innerHTML = this.renderModelEffort(tier, provider);
             }
-            // Refresh capability badges alongside thinking toggle
-            const capSlot = document.getElementById(`tier-caps-${tier}`);
-            if (capSlot) capSlot.innerHTML = modelDef ? renderModelCapabilityBadges(modelDef) : '';
         };
 
         const refreshTierSelects = (provider: LLMProvider | undefined, tiers: Partial<Record<ModelTier, string>>) => {
@@ -728,10 +696,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
             if (optSel  && tiers.optimal)  optSel.value  = tiers.optimal;
             if (stdSel  && tiers.standard) stdSel.value  = tiers.standard;
             if (fastSel && tiers.fast)     fastSel.value = tiers.fast;
-            // Refresh thinking slots for tiers that have preselected models
-            for (const t of ['optimal', 'standard', 'fast'] as ModelTier[]) {
-                if (tiers[t]) refreshTierThinkingSlot(t, provider);
-            }
+            refreshEffortSlots(provider);
         };
 
         // Initialize tier selects with current connection tiers
@@ -745,25 +710,29 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
             if (sel) {
                 const tier = sel.dataset.tier as ModelTier;
                 this.currentEditTiers[tier] = sel.value || undefined;
-                if (!sel.value) delete this.currentEditTierThinking[tier];
                 const pid = providerSelect?.value || initialPid;
-                refreshTierThinkingSlot(tier, this.providers[pid]);
+                refreshEffortSlots(this.providers[pid]);
                 return;
             }
-            const chk = target.closest('.chk-tier-thinking') as HTMLInputElement | null;
-            if (chk?.dataset.tier) {
-                const tier = chk.dataset.tier as ModelTier;
-                this.currentEditTierThinking[tier] = chk.checked;
-                const pid = providerSelect?.value || initialPid;
-                refreshTierThinkingSlot(tier, this.providers[pid]);
+            const effort = target.closest('select[data-effort-tier]') as HTMLSelectElement | null;
+            if (effort) {
+                const provider = this.providers[providerSelect?.value || initialPid];
+                const modelId = this.tierModelId(effort.dataset.effortTier as ModelTier, provider);
+                if (modelId) this.currentEditModelEfforts[modelId] = effort.value;
+                for (const select of tierSection!.querySelectorAll<HTMLSelectElement>('select[data-effort-tier]')) {
+                    const id = this.tierModelId(select.dataset.effortTier as ModelTier, provider);
+                    select.value = this.currentEditModelEfforts[id] || '';
+                }
             }
         });
 
         // Provider switch → refresh tier selects
         providerSelect?.addEventListener('change', () => {
             const provider = this.providers[providerSelect.value];
+            const protocolSelect = document.querySelector<HTMLSelectElement>('#connection-form [name="protocol"]');
+            if (protocolSelect && provider) protocolSelect.innerHTML = renderProtocolOptions(provider);
             this.currentEditTiers = {};
-            this.currentEditTierThinking = {};
+            this.currentEditModelEfforts = {};
             refreshTierSelects(provider, this.currentEditTiers);
         });
 
@@ -777,6 +746,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
     }
 
     private async deleteConnection(id: string, _name: string): Promise<void> {
+        await this.discardAutoSave();
         const request = this.options.hostContext?.requestDelete;
         if (!request) throw new Error('Configuration deletion is not connected');
         await request([{ kind: 'entity', entityType: 'connection', id }]);

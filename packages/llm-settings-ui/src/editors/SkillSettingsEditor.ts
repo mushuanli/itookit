@@ -1,10 +1,10 @@
 import { editorResourceId } from '@itookit/ui-common';
 // @file llm-ui/editors/SkillSettingsEditor.ts
 import {t} from '@itookit/common';
-import { BaseSettingsEditor } from '@itookit/ui-common';
-import type { LLMSkill, SkillType, IAgentManagementService } from '@itookit/common';
+import { BaseSettingsEditor, SettingsValidationError, requestSettingsSave } from '@itookit/ui-common';
+import type { LLMSkill, IAgentManagementService } from '@itookit/common';
 import yaml from 'js-yaml';
-import { readSkillSupportFields } from './skill/SkillSupportFields';
+import { readSkillDraft } from './skill/skill-draft';
 
 // Render helpers
 import {
@@ -20,8 +20,7 @@ import {
 
 // CRUD operations
 import {
-    addNew, saveCurrent, deleteCurrent, testCurrent,
-    saveNameOnly, saveIconOnly,
+    addNew, deleteCurrent, testCurrent,
     type SkillOperationsDeps,
 } from './skill/SkillOperations';
 
@@ -66,47 +65,28 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
     // ── IEditor: getText() — returns skill YAML for auto-save ──
 
     getText(): string {
-        // Without a rendered snapshot there is no current skill to save safely.
-        if (!this._formOnly || !this.selectedId || !this.renderedSkill) return '';
-        const type = this.val('type') as SkillType;
-        let parameters: Record<string, unknown> | undefined;
-        const rawParams = this.val('parameters').trim();
-        if (rawParams) { try { parameters = JSON.parse(rawParams); } catch { /* invalid */ } }
+        if (!this._formOnly || !this.renderedSkill) return '';
+        return yaml.dump(this.readDraft(), { lineWidth: -1, noRefs: true });
+    }
 
-        const authVal = this.val('auth-header').trim();
-        const rawHdrs = this.val('headers').trim();
-        let headers: Record<string, string> | undefined;
-        if (rawHdrs) { try { headers = JSON.parse(rawHdrs); } catch { /* invalid */ } }
-        if (authVal) headers = { ...(headers ?? {}), Authorization: authVal };
+    private readDraft(): LLMSkill {
+        if (!this.renderedSkill) throw new SettingsValidationError(t('settings.autosave.invalid'));
+        return readSkillDraft(this.renderedSkill, name => this.val(name), name => this.chk(name));
+    }
 
-        const globs = this.val('globs').split('\n').map(s => s.trim()).filter(Boolean);
-        const skill: LLMSkill = {
-            ...this.renderedSkill,
-            id:           this.selectedId,
-            name:         this.val('header-name') || this.selectedId,
-            icon:         this.val('header-icon') || undefined,
-            description:  this.val('description') || '',
-            type,
-            enabled:      this.chk('enabled'),
-            instructions: type === 'prompt' ? (this.val('instructions') || '') : '',
-            command:      type === 'shell'  ? (this.val('command')      || undefined) : undefined,
-            mcpServerId:  type === 'mcp'    ? (this.val('mcpServerId')  || undefined) : undefined,
-            mcpToolName:  type === 'mcp'    ? (this.val('mcpToolName')  || undefined) : undefined,
-            endpoint:     type === 'http'   ? (this.val('endpoint')     || undefined) : undefined,
-            method:       type === 'http'   ? ((this.val('method') || 'POST') as LLMSkill['method']) : undefined,
-            headers:      type === 'http'   ? headers : undefined,
-            parameters:   (type !== 'prompt' && type !== 'mcp') ? parameters : undefined,
-            triggerStrategy: (this.val('triggerStrategy') || 'reference') as LLMSkill['triggerStrategy'],
-            autoLoad:     this.chk('autoLoad'),
-            priority:     parseInt(this.val('priority') || '50', 10),
-            globs:        globs.length > 0 ? globs : undefined,
-            tools:             this.renderedSkill?.tools ?? [],
-            triggerPatterns:   this.renderedSkill?.triggerPatterns ?? [],
-            ...readSkillSupportFields(name => this.val(name), name => this.chk(name)),
-            disableModelInvocation: this.chk('disableModelInvocation') || undefined,
-            modifiedAt:   Date.now(),
-        };
-        return yaml.dump(skill, { lineWidth: -1, noRefs: true });
+    private async saveDraft(): Promise<void> {
+        const existing = this.renderedSkill!;
+        const draft = structuredClone(this.readDraft());
+        const skills = await this.service.getSkills();
+        if (draft.id !== existing.id && skills.some(skill => skill.id === draft.id)) {
+            throw new SettingsValidationError(t('settings.autosave.invalid'));
+        }
+        await this.service.saveSkill(draft);
+        if (draft.id !== existing.id) await this.service.deleteSkill(existing.id);
+        this.renderedSkill = draft;
+        if (this.selectedId === existing.id) this.selectedId = draft.id;
+        const title = [...this.container.querySelectorAll<HTMLElement>('[data-name-for]')].find(element => element.dataset.nameFor === existing.id);
+        if (title && !title.querySelector('input')) title.textContent = draft.name;
     }
 
     // ── build deps for extracted modules ──
@@ -129,21 +109,20 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         const self = this;
         return {
             service: this.service,
+            beforeDelete: () => this.discardAutoSave(),
             container: this.container,
             render: () => this.render(),
             val: (name) => this.val(name),
             chk: (name) => this.chk(name),
             get selectedId() { return self.selectedId; },
             set selectedId(id: string | null) { self.selectedId = id; },
-            syncMetadata: (patch) => this.syncMetadata(patch),
-            syncName: (newName) => this.syncName(newName),
-            resizeHeaderInput: (input) => this.resizeHeaderInput(input),
         };
     }
 
     // ── Render ────────────────────────────────────────────────────────────
 
     async render() {
+        if (!await this.prepareRender()) return;
         if (this._importing) return;
 
         if (this._formOnly) {
@@ -249,8 +228,10 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
 
         // ── Header icon + name: auto-save on blur ─────────────────────────────
         this.bindEntityHeaderEvents({
-            onIconSave: (icon) => saveIconOnly(ops, icon),
-            onNameSave: (name) => saveNameOnly(ops, name),
+            onIconSave: async () => {
+                const root = this.container.querySelector<HTMLElement>('.settings-split__content') ?? this.container;
+                requestSettingsSave(root);
+            },
         });
 
         // ── triggerStrategy: show/hide disableModelInvocation ─────────────
@@ -267,9 +248,10 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         this.bindAction('import',       () => showImport(imp));
         this.bindAction('import-paste', () => showPasteImport(imp));
         this.bindAction('export',       () => exportAll(imp));
-        this.bindAction('save',   () => saveCurrent(ops));
+
         this.bindAction('delete', () => deleteCurrent(ops));
         this.bindAction('test',   () => testCurrent(ops));
+        if (this.renderedSkill) this.bindAutoSave(this.container.querySelector<HTMLElement>('.settings-split__content') ?? this.container, () => this.saveDraft());
 
         // ── Type select: show/hide config sections ─────────────────────────────
         const typeSelect = this.container.querySelector<HTMLSelectElement>('[name="type"]');

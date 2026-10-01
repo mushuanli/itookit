@@ -247,3 +247,16 @@ it('persists the first admitted mode and rejects stale changes without unlocking
     const reopened = new SessionRepository(fs);
     expect((await reopened.getLoadState(id)).settings).toMatchObject({ executionMode: 'agent', executionModeLocked: true, temperature: 0.2 });
 });
+
+
+it('notifies settings changes and restores input preferences from a fresh repository', async () => {
+    const id = await repository.createSession('Preferences');
+    const changed = vi.fn(), unsubscribe = repository.subscribe(changed);
+    await repository.saveSessionSettings(id, { connectionId: 'new-connection', modelTier: 'fast', temperature: 0.4 });
+    expect(changed).toHaveBeenCalledWith({ sessionId: id, kind: 'session' });
+    await repository.updateUIState(id, { branchDrafts: { main: { inputText: 'draft', inputAgentId: 'new-agent' } } });
+    const fresh = new SessionRepository(fs);
+    expect((await fresh.getLoadState(id)).settings).toMatchObject({ connectionId: 'new-connection', modelTier: 'fast', temperature: 0.4 });
+    expect((await fresh.getUIState(id))?.branchDrafts?.main).toEqual({ inputText: 'draft', inputAgentId: 'new-agent' });
+    unsubscribe();
+});

@@ -1,6 +1,6 @@
 // @file: device-llm/core/api.ts
 
-import type { ConnectionTestResult } from '@itookit/common';
+import type { ConnectionTestResult, ProviderConnectionTestParams } from '@itookit/llm-common';
 import { LLMDriver } from './driver';
 import { LLM_PROVIDERS } from '../constants';
 import { LLMError } from '../errors';
@@ -11,11 +11,7 @@ export type { ConnectionTestResult };
 /**
  * 测试 LLM 连接
  */
-export async function testLLMConnection(config: {
-    provider: string;
-    apiKey?: string;
-    baseURL?: string;
-    model?: string;
+export async function testLLMConnection(config: ProviderConnectionTestParams & {
     timeout?: number;
     codex?: import('../types/provider').CodexCLIConfig;
 }): Promise<ConnectionTestResult> {
@@ -42,6 +38,9 @@ export async function testLLMConnection(config: {
         // 3. 创建 Driver
         const driver = new LLMDriver({
             provider,
+            connection: config.protocol ? { id: 'provider-test', name: 'Provider test', providerId: provider,
+                protocol: config.protocol, apiKey, baseURL, model: testModel } : undefined,
+            customProviderDefaults: config.providerDefinition ? { [provider]: config.providerDefinition } : undefined,
             apiKey,
             apiBaseUrl: baseURL,
             model: testModel,

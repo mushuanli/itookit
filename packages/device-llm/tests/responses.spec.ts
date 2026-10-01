@@ -39,12 +39,25 @@ describe('Responses Provider', () => {
         const body = JSON.parse(globalFetch.mock.calls[0][1].body);
         expect(body.model).toBe('deepseek-v4-flash');
         expect(body.instructions).toBe('You are helpful.');
-        // 单条纯文本 user 消息 → 直接字符串 input
-        expect(body.input).toBe('Hi');
+        expect(body.input).toEqual([{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hi' }] }]);
 
         expect(response.choices[0].message.content).toBe('Hello!');
         expect(response.choices[0].finish_reason).toBe('stop');
         expect(response.usage).toMatchObject({ prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 });
+    });
+
+    it('converts Chat Completions image objects to Responses image URL strings', async () => {
+        const driver = new LLMDriver({ connection: { providerId: 'openai', protocol: 'openai-responses' }, apiKey: 'test', model: 'test' });
+        globalFetch.mockResolvedValue({ ok: true, json: async () => ({ id: 'r', output: [] }) });
+        await driver.chat.create({ messages: [{ role: 'user', content: [
+            { type: 'text', text: 'Describe' },
+            { type: 'image_url', image_url: { url: 'https://example.com/image.png', detail: 'high' } },
+        ] }] });
+        expect(JSON.parse(globalFetch.mock.calls[0][1].body).input[0].content).toEqual([
+            { type: 'input_text', text: 'Describe' },
+            { type: 'input_image', image_url: 'https://example.com/image.png', detail: 'high' },
+        ]);
+        await driver.dispose();
     });
 
     it('flattens tool schema and normalizes function_call output', async () => {
@@ -111,11 +124,14 @@ describe('Responses Provider', () => {
         });
 
         const chunks: any[] = [];
-        for await (const chunk of (await driver.chat.create({ messages: [], stream: true }))) {
+        for await (const chunk of (await driver.chat.create({ messages: [{ role: 'user', content: 'tell 10 word story' }], stream: true }))) {
             chunks.push(chunk);
         }
 
         const content = chunks.flatMap((c: any) => c.choices?.[0]?.delta?.content ?? []);
+        expect(JSON.parse(globalFetch.mock.calls[0][1].body)).toMatchObject({ stream: true,
+            input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'tell 10 word story' }] }] });
+
         expect(content.join('')).toBe('Hello');
         expect(chunks.at(-1).choices[0].finish_reason).toBe('stop');
         expect(chunks.at(-1).usage).toMatchObject({ prompt_tokens: 3, completion_tokens: 2 });

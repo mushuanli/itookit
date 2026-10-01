@@ -213,7 +213,7 @@ export class ResponsesProvider extends BaseProvider {
      * - tool 结果 → { type: 'function_call_output', call_id, output }
      * - assistant 历史 tool_calls → { type: 'function_call', call_id, name, arguments }
      */
-    private convertMessagesToInput(messages: ChatMessage[]): { instructions: string; input: string | any[] } {
+    private convertMessagesToInput(messages: ChatMessage[]): { instructions: string; input: any[] } {
         const instructions = messages
             .filter(m => m.role === 'system')
             .map(m => typeof m.content === 'string' ? m.content : '')
@@ -252,14 +252,8 @@ export class ResponsesProvider extends BaseProvider {
             });
         }
 
-        // 单条纯文本 user 消息可直接传字符串 input；否则保留 item 数组。
-        const singleUser = items.length === 1 && items[0].type === 'message' && items[0].role === 'user';
-        const singleText = singleUser && Array.isArray(items[0].content)
-            && items[0].content.length === 1 && items[0].content[0].type === 'input_text';
-        const input = singleText
-            ? (items[0].content as any[])[0].text
-            : items;
-        return { instructions, input };
+        // Keep input items for gateways that do not accept the string shorthand.
+        return { instructions, input: items };
     }
 
     private convertContent(content: unknown): any[] {
@@ -270,7 +264,9 @@ export class ResponsesProvider extends BaseProvider {
             return content.map(part => {
                 const p = part as any;
                 if (p.type === 'image_url') {
-                    return { type: 'input_image', image_url: p.image_url };
+                    const image = p.image_url;
+                    return { type: 'input_image', image_url: typeof image === 'string' ? image : image?.url,
+                        ...(typeof image === 'object' && image?.detail ? { detail: image.detail } : {}) };
                 }
                 return { type: 'input_text', text: p.text ?? '' };
             });

@@ -1,9 +1,10 @@
+import { SettingsAutoSave, type SettingsSave } from './SettingsAutoSave';
 import { editorFilePath } from '../interfaces/IEditor';
 // @file ui-common/components/BaseSettingsEditor.ts
 /// <reference lib="dom" />
 
 import { IEditor, CollapseExpandResult, EditorOptions, UnifiedSearchResult, Heading, EditorEvent, EditorEventCallback } from '../interfaces/IEditor';
-import { t } from '@itookit/common';
+import { t, escapeAttr } from '@itookit/common';
 
 /**
  * 定义宿主能力接口 (与 MemoryManager 的 EditorHostContext 保持结构兼容)
@@ -40,6 +41,7 @@ const SYSTEM_ICONS = [
 export abstract class BaseSettingsEditor<TService> implements IEditor {
     protected listeners: Array<{ target: EventTarget, type: string, handler: EventListener }> = [];
     protected container!: HTMLElement;
+    private readonly autoSaves = new Set<SettingsAutoSave>();
 
     // [新增] 宿主能力引用
     protected hostContext?: IEditorHostContext;
@@ -64,13 +66,15 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
 
         // Service 变更订阅
         if (isChangeObservable(this.service)) {
-            const unsubscribe = this.service.onChange(() => this.render());
+            const unsubscribe = this.service.onChange(() => {
+                if (![...this.autoSaves].some(save => save.protectsInput)) void this.render();
+            });
 
             // Hook destroy
             const originalDestroy = this.destroy;
             this.destroy = async () => {
-                unsubscribe();
                 await originalDestroy.call(this);
+                unsubscribe();
             };
         }
 
@@ -104,6 +108,26 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
         await engine.driver.rename(nodeId, newName);
     }
 
+    protected trackAutoSave(save: SettingsAutoSave): void { this.autoSaves.add(save); }
+
+    protected bindAutoSave(root: HTMLElement, save: SettingsSave, statusHost?: HTMLElement): SettingsAutoSave {
+        const controller = new SettingsAutoSave(root, save, statusHost);
+        this.trackAutoSave(controller); return controller;
+    }
+
+    protected async prepareRender(): Promise<boolean> {
+        for (const save of this.autoSaves) {
+            if (!await save.dispose()) return false;
+            this.autoSaves.delete(save);
+        }
+        return true;
+    }
+
+    protected async discardAutoSave(): Promise<void> {
+        await Promise.all([...this.autoSaves].map(save => save.dispose(false)));
+        this.autoSaves.clear();
+    }
+
     abstract render(): void | Promise<void>;
 
     focus() { }
@@ -123,7 +147,14 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
     }
 
     // --- IEditor Stubs ---
+    async flushPendingSave(): Promise<void> {
+        for (const save of this.autoSaves) {
+            if (!await save.flush()) throw new Error(t('settings.autosave.leaveFailed'));
+        }
+    }
+
     async destroy() {
+        if (!await this.prepareRender()) throw new Error(t('settings.autosave.leaveFailed'));
         this.clearListeners();
         this.container.innerHTML = '';
     }
@@ -135,7 +166,7 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
     async switchToMode(_mode: 'edit' | 'render') { }
     setTitle(_title: string) { }
     setReadOnly(_readOnly: boolean) { }
-    isDirty() { return false; }
+    isDirty() { return [...this.autoSaves].some(save => save.isDirty); }
     setDirty(_dirty: boolean) { }
 
     get commands() { return {}; }
@@ -192,7 +223,8 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
     }): string {
         const displayIcon = opts.icon || opts.fallbackIcon;
         const iconEl = opts.editableIcon
-            ? `<button type="button" data-action="icon-picker-toggle"
+            ? `<input type="hidden" name="header-icon" value="${escapeAttr(opts.icon)}">
+               <button type="button" data-action="icon-picker-toggle" data-fallback-icon="${escapeAttr(opts.fallbackIcon)}"
                    title="${t('tooltip.clickEditIcon')}"
                    style="font-size:2rem;width:2.75rem;height:2.75rem;text-align:center;
                           border:2px solid transparent;border-radius:8px;background:transparent;
@@ -243,7 +275,7 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
                     <span style="position:relative;display:inline-flex;flex-shrink:0">${iconEl}</span>
                     <div style="min-width:0">
                         <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
-                            <input name="header-name" value="${opts.name}"
+                            <input name="header-name" required value="${opts.name}"
                                 placeholder="${opts.namePlaceholder ?? ''}"
                                 style="font-size:1.125rem;font-weight:700;color:var(--st-text-primary);
                                        background:transparent;border:0;border-bottom:2px solid transparent;
@@ -318,6 +350,9 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
 
         const selectIcon = async (emoji: string) => {
             const trimmed = emoji.trim();
+            const icon = this.container.querySelector<HTMLInputElement>('[name="header-icon"]');
+            if (icon) icon.value = trimmed;
+            toggleBtn.textContent = trimmed || toggleBtn.dataset.fallbackIcon || '';
             close();
             await opts.onIconSave!(trimmed);
         };

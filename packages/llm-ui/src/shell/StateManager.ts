@@ -22,6 +22,8 @@ export class StateManager {
     private branch = 'main';
     private draftTail: Promise<void> = Promise.resolve();
     private draftGeneration = 0;
+    private saveTail: Promise<void> = Promise.resolve();
+    private savedConfiguration?: string;
 
     constructor(
         private stateService: StateService,
@@ -39,13 +41,13 @@ export class StateManager {
         const notGenerating = () => !this.sessionManager.isGenerating();
 
         this.debouncedUIStateSave = createDebouncedSave(
-            () => this.saveUIState(),
+            () => this.saveUIState().catch(error => this.errorHandler.handle(error, 'Save UI state', 'warn')),
             2000,
             notGenerating
         );
 
         this.debouncedInputStateSave = createDebouncedSave(
-            () => this.saveUIState(this.chatInputGetter?.()?.getConfig()),
+            () => this.saveUIState(this.chatInputGetter?.()?.getConfig()).catch(error => this.errorHandler.handle(error, 'Save input draft', 'warn')),
             1000,
             notGenerating
         );
@@ -71,7 +73,7 @@ export class StateManager {
         return operation.finally(() => { if (generation === this.draftGeneration) this.chatInputGetter?.()?.setLoading(this.sessionManager.isGenerating()); });
     }
 
-    async waitForDrafts(): Promise<void> { await this.draftTail; }
+    async waitForDrafts(): Promise<void> { await this.draftTail; await this.saveTail; }
 
     getCollapseStates(): CollapseStateMap { return this.collapseStatesCache; }
 
@@ -104,17 +106,35 @@ export class StateManager {
     ): Promise<void> {
         if (isBeingDeleted || !this.sessionId) return;
 
-        const payload: UIState = {
-            collapse_states: this.collapseStatesCache,
-            input_text: inputConfig?.text,
-            input_agent_id: inputConfig?.agentId,
-            history_visibility: this.historyVisibilityCache,
-        };
+        const payload = this.inputState(inputConfig);
+        const branch = this.branch;
+        await this.enqueueSave(() => this.stateService.saveUIState(this.sessionId, payload, branch));
+    }
 
-        await this.errorHandler.wrap(
-            () => this.stateService.saveUIState(this.sessionId, payload, this.branch),
-            'Save UI state', 'silent'
-        );
+    /** Capture identity, branch and settings before any asynchronous work. */
+    saveInputConfiguration(config: IChatInputConfig): Promise<void> {
+        this.debouncedInputStateSave.cancel();
+        const payload = this.inputState(config);
+        const settings = structuredClone(config.settings);
+        const branch = this.branch;
+        const fingerprint = JSON.stringify({ payload, settings, branch });
+        return this.enqueueSave(async () => {
+            if (fingerprint === this.savedConfiguration) return;
+            await this.stateService.saveSessionSettings(this.sessionId, settings);
+            await this.stateService.saveUIState(this.sessionId, payload, branch);
+            this.savedConfiguration = fingerprint;
+        });
+    }
+
+    private inputState(config?: IChatInputConfig): UIState {
+        return structuredClone({ collapse_states: this.collapseStatesCache, input_text: config?.text,
+            input_agent_id: config?.agentId, history_visibility: this.historyVisibilityCache });
+    }
+
+    private enqueueSave(save: () => Promise<void>): Promise<void> {
+        const operation = this.saveTail.then(save);
+        this.saveTail = operation.catch(() => {});
+        return operation;
     }
 
     async loadUIState(initial?: ConversationManifest): Promise<UIState | null> {

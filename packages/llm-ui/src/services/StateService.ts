@@ -4,6 +4,7 @@ import type {
     ConversationUIState,
     ISessionRepository,
 } from '@itookit/llm-session';
+import type { ChatInputSettings } from '../domain/ports/IChatInputPresenter';
 import type { UIState } from '../domain/types';
 import { ErrorHandler } from '../utils/errorHandler';
 
@@ -27,6 +28,10 @@ export class StateService {
             console.warn('[StateService] Failed to save UI state:', e);
             throw e;
         }
+    }
+
+    async saveSessionSettings(sessionId: string, settings: ChatInputSettings): Promise<void> {
+        await this.engine.saveSessionSettings(sessionId, settings);
     }
 
     /**

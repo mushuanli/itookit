@@ -1,23 +1,42 @@
 import { t } from '@itookit/common';
-import { Modal, Toast } from '@itookit/ui-common';
+import { Modal, SettingsAutoSave } from '@itookit/ui-common';
 
-interface FormOptions { width: string; confirmText: string; onConfirm(): Promise<void | false> }
-/** Reuse the same form and validation in a dialog or a selected-resource editor. */
+interface FormOptions {
+    width: string;
+    confirmText: string;
+    onConfirm(): Promise<void | false>;
+    onAutoSave?(save: SettingsAutoSave): void;
+    onClose?(): void;
+}
+
+/** Preserve the editing DOM while valid configuration changes save automatically. */
 export function showConfigurationForm(container: HTMLElement, title: string, content: string, options: FormOptions, inline: boolean): void {
-    if (!inline) { new Modal(title, content, options).show(); return; }
+    if (!inline) { showAutoSaveModal(title, content, options); return; }
     const page = document.createElement('section'); page.className = 'settings-page';
     const header = document.createElement('div'); header.className = 'settings-page__header';
     const heading = document.createElement('h2'); heading.className = 'settings-page__title'; heading.textContent = title;
     const actions = document.createElement('div'); actions.className = 'settings-page__actions';
-    const save = document.createElement('button'); save.type = 'button'; save.className = 'settings-btn settings-btn--primary'; save.textContent = t('action.save');
     const body = document.createElement('div'); body.innerHTML = content;
-    const submit = async () => {
-        if (save.disabled) return; save.disabled = true;
-        try { await options.onConfirm(); } catch (error) { Toast.error(String(error)); } finally { save.disabled = false; }
-    };
-    save.onclick = () => { void submit(); };
-    body.querySelector('form')?.addEventListener('submit', event => { event.preventDefault(); void submit(); });
-    actions.append(save); header.append(heading, actions); page.append(header, body); container.replaceChildren(page);
+    header.append(heading, actions); page.append(header, body); container.replaceChildren(page);
+    const form = body.querySelector('form')!;
+    const save = new SettingsAutoSave(form, options.onConfirm, actions);
+    options.onAutoSave?.(save);
+}
+
+function showAutoSaveModal(title: string, content: string, options: FormOptions): void {
+    const modal = new Modal(title, content, { width: options.width, cancelText: t('action.close'), onCancel: options.onClose });
+    modal.show();
+    const overlay = document.body.lastElementChild as HTMLElement;
+    overlay.querySelector('.settings-modal-confirm')?.remove();
+    const form = overlay.querySelector('form')!;
+    const save = new SettingsAutoSave(form, options.onConfirm, overlay.querySelector<HTMLElement>('.settings-modal__footer')!);
+    options.onAutoSave?.(save);
+    overlay.addEventListener('click', event => {
+        const target = event.target as HTMLElement;
+        if (target !== overlay && !target.closest('.settings-modal-close, .settings-modal-cancel')) return;
+        event.stopImmediatePropagation();
+        void save.dispose().then(closed => { if (closed) modal.hide(); });
+    }, true);
 }
 
 export function addConfigurationAction(container: HTMLElement, label: string, run: () => void): void {

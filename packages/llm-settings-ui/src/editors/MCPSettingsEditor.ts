@@ -1,3 +1,4 @@
+import { SettingsValidationError } from '@itookit/ui-common';
 // @file llm-ui/editors/MCPSettingsEditor.ts
 import {
     generateShortUUID,
@@ -45,6 +46,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
 
 
     async render() {
+        if (!await this.prepareRender()) return;
         const servers = await this.service.getMCPServers();
 
         if (this.selectedId && !servers.find(s => s.id === this.selectedId)) {
@@ -132,9 +134,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                     <button class="settings-btn settings-btn--secondary" data-action="test">
                         <i class="fas fa-plug"></i> ${t('action.test')}
                     </button>
-                    <button class="settings-btn settings-btn--primary" data-action="save">
-                        <i class="fas fa-save"></i> ${t('action.save')}
-                    </button>
+
                     <button class="settings-btn settings-btn--danger" data-action="delete" title="${t('action.delete')}">
                         <i class="fas fa-trash"></i>
                     </button>`,
@@ -332,8 +332,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
 
         // ── Header name: auto-save on blur, kept in sync with form input ─────
         this.bindEntityHeaderEvents({
-            onNameSave:          (name) => this.saveNameOnly(name, servers),
-            mirrorNameSelector:  '[name="name"]',
+                        mirrorNameSelector:  '[name="name"]',
         });
 
         // ── Action buttons ────────────────────────────────────────────────────
@@ -341,7 +340,15 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
             this.addEventListener(el, 'click', () => this.addNew()));
         this.bindAction('import',       () => this.showImport());
         this.bindAction('export',       () => this.exportAll(servers));
-        this.bindAction('save',         () => this.saveCurrent(servers));
+        const existing = servers.find(server => server.id === this.selectedId);
+        if (existing) this.bindAutoSave(this.container.querySelector<HTMLElement>('.settings-split__content') ?? this.container, async () => {
+            let draft: MCPServer;
+            try { draft = this.readDraft(existing); } catch (error) { throw new SettingsValidationError((error as Error).message); }
+            await this.service.saveMCPServer(structuredClone(draft));
+            Object.assign(existing, draft);
+            const title = [...this.container.querySelectorAll<HTMLElement>('[data-name-for]')].find(element => element.dataset.nameFor === existing.id);
+            if (title && !title.querySelector('input')) title.textContent = draft.name;
+        });
         this.bindAction('delete',       () => this.deleteCurrent());
         this.bindAction('test',         () => this.testCurrent(servers));
 
@@ -368,21 +375,6 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
     }
     private chk(name: string) {
         return (this.container.querySelector(`[name="${name}"]`) as HTMLInputElement | null)?.checked ?? false;
-    }
-
-    private async saveNameOnly(newName: string, servers: MCPServer[]): Promise<void> {
-        if (!this.selectedId || !newName) return;
-        const server = servers.find(s => s.id === this.selectedId);
-        if (!server || server.name === newName) return;
-
-        await this.service.saveMCPServer({ ...server, name: newName });
-
-        const sidebarTitle = this.container.querySelector<HTMLElement>(`[data-name-for="${CSS.escape(this.selectedId!)}"]`);
-        if (sidebarTitle && !sidebarTitle.querySelector('input')) sidebarTitle.textContent = newName;
-        const formInput = this.container.querySelector<HTMLInputElement>('[name="name"]');
-        if (formInput) formInput.value = newName;
-        // Patch local cache so subsequent saves use the new name
-        server.name = newName;
     }
 
     private _startMCPInlineRename(titleEl: HTMLElement, serverId: string, servers: MCPServer[]): void {
@@ -422,6 +414,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
 
     private readDraft(existing: MCPServer): MCPServer {
         const transport = this.val('transport') as MCPServer['transport'];
+        if (!['stdio', 'http'].includes(transport)) throw new Error(t('mcp.unsupportedTransport'));
         const seconds = Number(this.val('timeout'));
         if (!Number.isFinite(seconds) || seconds <= 0) throw new Error(t('mcp.invalidTimeout'));
         return {
@@ -438,17 +431,8 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         };
     }
 
-    private async saveCurrent(servers: MCPServer[]) {
-        const existing = servers.find(s => s.id === this.selectedId);
-        if (!existing) return;
-        try {
-            await this.service.saveMCPServer(this.readDraft(existing));
-            Toast.success(t('mcp.toast.saved'));
-            await this.render();
-        } catch (error) { Toast.error((error as Error).message); }
-    }
-
     private async deleteCurrent(): Promise<void> {
+        await this.discardAutoSave();
         const id = this.selectedId; if (!id) return;
         const request = this.options.hostContext?.requestDelete;
         if (!request) throw new Error('Configuration deletion is not connected');

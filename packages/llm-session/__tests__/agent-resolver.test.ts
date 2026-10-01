@@ -97,3 +97,13 @@ describe('shared Agent prompts', () => {
         await expect(resolver.resolveForChat('a')).rejects.toThrow('System prompt not found');
     });
 });
+
+
+it('resolves independent model reasoning efforts with legacy fallback', () => {
+    const resolver = new AgentResolver(service({ getProvider: () => ({ models: [{ id: 'a' }, { id: 'b' }] }) }));
+    const resolve = (resolver as unknown as { resolveThinkingConfig: (connection: unknown, tier: string, model: string) => unknown }).resolveThinkingConfig.bind(resolver);
+    const conn = { providerId: 'p1', metadata: { reasoningEffort: 'medium', modelReasoningEfforts: { a: 'low', b: 'high' } } };
+    expect(resolve(conn, 'optimal', 'a')).toEqual({ enableThinking: true, reasoningEffort: 'low' });
+    expect(resolve(conn, 'standard', 'b')).toEqual({ enableThinking: true, reasoningEffort: 'high' });
+    expect(resolve(conn, 'fast', 'legacy')).toEqual({ enableThinking: true, reasoningEffort: 'medium' });
+});

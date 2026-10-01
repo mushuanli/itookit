@@ -1,7 +1,7 @@
 // @file: common/interfaces/llm/agent.ts
 // Agent、MCP 及服务接口定义。
 
-import type { LLMConnection, ConnectionMeta, LLMProvider, DefaultConnectionDef, ConnectionTestResult } from './connection';
+import type { LLMConnection, ConnectionMeta, LLMProvider, DefaultConnectionDef, ConnectionTestResult, LLMModel, ProviderConnectionTestParams } from './connection';
 import type { RestorableItem } from '../types';
 import type { SkillDefinition } from '../skills/skill-types';
 import type { SystemPromptDefinition, PromptPreset } from './node-config';
@@ -184,7 +184,9 @@ export interface IConnectionService extends IConnectionReader {
     /** 删除用户自定义 Provider（内置 Provider 不可删除） */
     deleteProvider(id: string): Promise<void>;
     /** 测试连接参数是否可用（实际发起 HTTP 请求；本地 provider 无需 apiKey） */
-    testConnection(params: { provider: string; apiKey?: string; baseURL?: string; model?: string }): Promise<ConnectionTestResult>;
+    testConnection(params: ProviderConnectionTestParams): Promise<ConnectionTestResult>;
+    /** Read a model catalog without persisting the supplied Provider. */
+    listProviderModels(provider: LLMProvider): Promise<LLMModel[]>;
 }
 
 // ─── ILLMManagementService ───────────────────────────────────────────────────

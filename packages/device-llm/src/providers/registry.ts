@@ -1,3 +1,4 @@
+import { getPrimaryProtocol } from '@itookit/llm-common';
 // @file: device-llm/providers/registry.ts
 
 import { BaseProvider } from './base';
@@ -84,14 +85,20 @@ export function resolveProtocol(
     return 'openai-chat';
 }
 
+function definitionPath(definition: LLMProvider, protocol?: ApiProtocol): string | undefined {
+    const primary = getPrimaryProtocol(definition);
+    const selected = protocol ?? primary;
+    switch (selected) {
+        case 'openai-responses': return definition.responsesPath;
+        case 'anthropic-messages': return primary === selected ? definition.defaultPath : undefined;
+        case 'gemini-generate': return definition.geminiPath ?? (primary === selected ? definition.defaultPath : undefined);
+        case 'openai-chat': return definition.chatPath ?? (primary === selected ? definition.defaultPath : undefined);
+    }
+}
+
 /**
- * 创建 Provider 实例。
- *
- * 分发优先级：
- *   1. `config.protocol` 显式指定（ApiProtocol）
- *   2. providerRegistry 按名查找（内置/本地 provider 的权威实现类）
- *   3. Provider 定义中的 `implementation` 字段（未注册的 provider 才走这里）
- *   4. 兜底 OpenAIProvider
+ * Select an explicit protocol, then the model preference and Provider default.
+ * Registry implementations remain the legacy fallback, including local Codex.
  */
 export function createProvider(
     config: LLMProviderConfig,
@@ -101,6 +108,11 @@ export function createProvider(
 
     // 1. 查找 Provider 定义
     const definition = customDefaults?.[provider] || LLM_PROVIDERS[provider];
+
+    if (provider !== 'codex' && !config.protocol && definition) {
+        const preferred = definition.models.find(model => model.id === config.model)?.preferredProtocol;
+        config = { ...config, protocol: preferred ?? definition.defaultProtocol };
+    }
 
     // 2. 按 protocol 字段显式分发（优先级最高）
     let ProviderClass: ProviderConstructor | undefined;
@@ -137,11 +149,7 @@ export function createProvider(
             supportsThinking: config.supportsThinking ?? definition.supportsThinking,
             requiresReferer:  config.requiresReferer  ?? definition.requiresReferer,
             apiBaseUrl:       config.apiBaseUrl || definition.baseURL,
-            // openai-responses 协议优先使用 provider 声明的 Responses API 路径
-            // （如 DeepSeek 的 "/responses"，完整 URL = baseURL + responsesPath）
-            defaultPath: config.defaultPath ?? (config.protocol === 'openai-responses'
-                ? definition.responsesPath
-                : definition.defaultPath),
+            defaultPath: config.defaultPath ?? definitionPath(definition, config.protocol),
             anthropicPath:    config.anthropicPath ?? definition.anthropicPath,
             responsesPath:    config.responsesPath ?? definition.responsesPath,
             responses:        config.responses ?? definition.responses,

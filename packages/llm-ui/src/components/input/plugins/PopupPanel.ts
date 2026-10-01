@@ -131,6 +131,11 @@ export class PopupPanel {
     /**
      * 更新过滤（外部搜索时调用）
      */
+    updateItems(items: PopupItem[]): void {
+        this.items = items;
+        this.filter(this.searchInput?.value ?? '');
+    }
+
     filter(query: string): void {
         if (!query.trim()) {
             this.filteredItems = [...this.items];

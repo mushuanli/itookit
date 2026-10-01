@@ -36,3 +36,15 @@ it('keeps the explicit skills command available in its own manager', async () =>
     expect(host.querySelector('.llm-input__skill-section')).toBeNull();
     view.showSkillSettings(); expect(document.querySelectorAll('.settings-modal-overlay')).toHaveLength(1);
 });
+
+
+it('reports Agent-only changes immediately even when Session settings stay the same', () => {
+    const host = document.createElement('div'); document.body.append(host);
+    const changed = vi.fn();
+    const view = new ChatInput(host, { onSend: vi.fn(), onStop: vi.fn(), onConfigChange: changed });
+    const selectAgent = (view as unknown as { selectAgent: (id: string) => void }).selectAgent.bind(view);
+    try {
+        selectAgent('first'); selectAgent('second');
+        expect(changed.mock.calls.map(([config]) => config.agentId)).toEqual(['first', 'second']);
+    } finally { view.destroy(); }
+});

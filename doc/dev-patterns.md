@@ -7,6 +7,18 @@
 3. 如需新 Provider 类（非 OpenAI 兼容）：`packages/device-llm/src/providers/` 新建类 → `extends BaseProvider`
 4. `packages/device-llm/src/index.ts` — 导出
 
+Provider 设置页通过 `IConnectionService.listProviderModels(provider)` 获取模型目录；`device-llm/src/providers/model-catalog.ts` 按接入类型处理 OpenAI 兼容、Anthropic、Gemini 的地址、认证、返回结构和分页。请求使用尚未保存的表单地址、Key 与 `modelsPath` 覆盖（相对路径或完整 URL），失败不返回部分目录。刷新只按 ID 追加新模型，已有模型、顺序和未保存编辑保留，刷新成功后自动保存新增模型。新增模型默认启用 `supportsVision`、`supportsThinking`、`supportsTools`，这三个能力不提供开关；模型分类、Thinking 模式、首选协议和其他能力在折叠详情中配置。浏览器访问目录仍受 CORS 限制。
+
+Provider 高级设置以 `supportedProtocols` 声明可用协议，以 `defaultProtocol` 选择默认协议；每个协议的端点可独立覆盖（`chatPath` / `responsesPath` / `anthropicPath` / `geminiPath`），留空采用内置路径。Connection 只列出该 Provider 已配置的协议。模型的 `preferredProtocol` 用于连接未指定协议时：连接显式协议 → 当前请求模型的首选协议 → Provider 默认协议 → 旧实现回退；同一 Driver 切换模型时也重新选取协议。旧配置从 implementation 和非空兼容路径推断支持集合；原 Session 的 Anthropic 路径默认选择保持兼容。显式配置协议后，内置 Provider 的启动同步不覆盖用户的地址和路径。目录刷新成功不代表协议验证成功，高级设置可逐个协议发起真实模型请求，验证结果仅对当前编辑有效。新增字段及模型首选协议支持 `.llm` 导入导出，导出继续剥离 API Key。
+
+## LLM 配置自动保存
+
+`packages/ui-common/src/components/SettingsAutoSave.ts` 统一管理 LLM 设置编辑器的延迟、校验、串行写入和状态提示。普通文本停止输入 600ms、长文本 1000ms 后保存；开关/选择立即保存，API Key 和带 `data-autosave-defer` 的标识输入失去焦点后保存。输入法组合输入完成前不写入。程序修改列表时调用 `requestSettingsSave(root)`，搜索和临时图标输入不触发保存。
+
+Provider / Connection 使用 `configuration-form.ts` 的自动保存表单，新增资源使用稳定 ID；API 刷新也自动保存，失败保留编辑草稿并提供重试。Agent 优先通过宿主 `saveContent` 写入当前源，未注入宿主时使用 `saveAgent`，避免与宿主 `interactiveChange` 自动保存重复写入。Skill / MCP / SystemPrompt / Cost 使用同一控制器，完整配置经校验后整体写入；不合法的 JSON、路径/协议或未完成条目不覆盖上一次有效配置。
+
+保存成功只更新状态和局部标题，不调用整页 `render()`；服务自己的变更通知在保存/编辑期间不重建表单。切换资源和销毁前先提交有效草稿，失败保留 DOM；删除、重置、导入仍通过显式操作执行。自动保存不会主动重启 Agent 或 Flow，后续请求使用保存后的配置。
+
 ## 新增 Provider 内置联网搜索能力
 
 1. `packages/device-llm/src/constants/providers.ts` — provider 定义加 `capabilities.serverSideWebSearch: true`
@@ -89,3 +101,13 @@
 - **函数 ≤30 行**，圈复杂度 ≤10
 - **i18n 零硬编码**，图标统一从 `@itookit/common` 导入
 - **Git commit**: `type(scope): description` (Conventional Commits)
+
+Connection 推理强度按模型 ID 存于 `metadata.modelReasoningEfforts`；同一模型的多个 tier 共用配置，空值使用模型默认。旧统一 `reasoningEffort` 在编辑保存时迁移到当前有效模型，移除旧 `tierThinking`；请求显式推理强度优先于连接的模型配置。
+
+Provider 保存为启用且包含聊天模型时，如尚无对应 Connection，通信层创建一个启用的默认连接；已有连接的独立禁用状态保留。有效启用状态由 Provider 与 Connection 共同决定。
+
+聊天连接候选由 `llm-ui/src/shell/connection-options-cache.ts` 按配置服务共享缓存与在途请求，`onChange` 同步失效；打开连接菜单读取缓存，配置通知立即刷新下拉与已打开弹窗，保留搜索文本。最后一个编辑器关闭时解绑缓存订阅；过期异步结果不回填已销毁或更新后的输入视图。
+
+ChatInput 的 Agent、Connection、模型层级及其他会话配置修改立即提交保存，正文草稿单独防抖。`StateManager.saveInputConfiguration` 在调用时复制配置并固定 Session/branch，通过串行队列写入 Session settings 和分支草稿；菜单与斜杠配置命令共用该路径。编辑器 `flushPendingSave` 等待并重试当前配置，成功后才释放。设置写入通知 Session 投影缓存失效，切回会话读取已提交数据。
+
+Responses 请求统一发送 `input` item 数组，包括单条纯文本消息，以兼容只接受列表的代理；图片内容使用 `input_image`，`image_url` 为 URL 字符串，`detail` 为独立字段。

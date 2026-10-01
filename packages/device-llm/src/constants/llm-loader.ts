@@ -21,6 +21,9 @@ export interface LLMModelDef {
     id: string;
     name: string;
     icon?: string;
+    preferredProtocol?: LLMModel['preferredProtocol'];
+    category?: LLMModel['category'];
+    thinkingMode?: LLMModel['thinkingMode'];
     contextWindow?: number;
     maxOutput?: number;
     supportsVision?: boolean;
@@ -47,6 +50,13 @@ export interface LLMProviderDef {
     enabled?: boolean;
     defaultTemperature?: number;
     /** OpenAI Responses API 兼容路径（如 DeepSeek 的 "/responses"），可选 */
+    defaultPath?: string;
+    anthropicPath?: string;
+    geminiPath?: string;
+    chatPath?: string;
+    modelsPath?: string;
+    supportedProtocols?: LLMProvider['supportedProtocols'];
+    defaultProtocol?: LLMProvider['defaultProtocol'];
     responsesPath?: string;
     /** Responses API 推理行为配置（defaultThinkingEnabled 等），可选 */
     responses?: { defaultThinkingEnabled?: boolean };
@@ -236,6 +246,13 @@ export function toLLMProvider(def: LLMProviderDef): LLMProvider {
         defaultTemperature: def.defaultTemperature,
         authMethod: def.authMethod,
         apiKey: def.apiKey,
+        defaultPath: def.defaultPath,
+        anthropicPath: def.anthropicPath,
+        geminiPath: def.geminiPath,
+        chatPath: def.chatPath,
+        modelsPath: def.modelsPath,
+        supportedProtocols: def.supportedProtocols,
+        defaultProtocol: def.defaultProtocol,
         responsesPath: def.responsesPath,
         responses: def.responses,
         models: def.models.map(m => ({ ...m } as LLMModel)),
@@ -323,12 +340,25 @@ export function fromLLMProvider(p: LLMProvider): LLMProviderDef {
         isBuiltin: p.isBuiltin,
         enabled: p.enabled,
         defaultTemperature: p.defaultTemperature,
+        defaultPath: p.defaultPath,
+        anthropicPath: p.anthropicPath,
+        geminiPath: p.geminiPath,
+        chatPath: p.chatPath,
+        modelsPath: p.modelsPath,
+        supportedProtocols: p.supportedProtocols,
+        defaultProtocol: p.defaultProtocol,
         responsesPath: p.responsesPath,
         responses: p.responses,
         models: p.models.map(m => ({
             id: m.id,
             name: m.name,
             icon: m.icon,
+            preferredProtocol: m.preferredProtocol,
+            category: m.category,
+            thinkingMode: m.thinkingMode,
+            supportsAudio: m.supportsAudio,
+            supportsVideo: m.supportsVideo,
+            supportsStructuredOutput: m.supportsStructuredOutput,
             contextWindow: m.contextWindow,
             maxOutput: m.maxOutput,
             supportsVision: m.supportsVision,

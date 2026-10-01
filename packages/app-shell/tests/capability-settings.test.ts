@@ -50,7 +50,8 @@ it('escapes imported fields in both list and detail, and saves seconds as millis
     expect(host.querySelector<HTMLInputElement>('[name="header-name"]')!.value).toBe(server.name);
     expect(host.querySelector<HTMLInputElement>('[name="timeout"]')!.value).toBe('30');
     vi.spyOn(Toast, 'success').mockImplementation(() => {});
-    host.querySelector<HTMLButtonElement>('[data-action="save"]')!.click();
+    const endpoint = host.querySelector<HTMLInputElement>('[name="endpoint"]')!;
+    endpoint.value = 'https://example.invalid/mcp'; endpoint.dispatchEvent(new Event('change', { bubbles: true }));
     await vi.waitFor(() => expect(saveMCPServer).toHaveBeenCalledWith(expect.objectContaining({ timeout: 30000, timeoutUnit: 'ms', name: server.name })));
 });
 

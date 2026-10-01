@@ -1,5 +1,5 @@
 // @file: llm-settings-ui/editors/SystemPromptSettingsEditor.ts
-import { BaseSettingsEditor, Modal, Toast } from '@itookit/ui-common';
+import { BaseSettingsEditor, Modal, Toast, SettingsValidationError, requestSettingsSave } from '@itookit/ui-common';
 import { editorResourceId } from '@itookit/ui-common';
 import { t, TOOLBOX_ICONS, escapeHTML, type SystemPromptDefinition, type PromptPreset } from '@itookit/common';
 import type { IAgentManagementService } from '@itookit/common';
@@ -11,6 +11,7 @@ export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagem
     private get formOnly(): boolean { return this.options.target?.kind === 'entity' && this.options.target.entityType === 'system-prompt'; }
 
     async render(): Promise<void> {
+        if (!await this.prepareRender()) return;
         this.prompts = await this.service.listSystemPrompts();
         if (this.formOnly) {
             this.selectedId = editorResourceId(this.options) ?? null;
@@ -71,9 +72,9 @@ export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagem
         return `<header style="display:flex;align-items:center;gap:1rem;padding:1.25rem 1.75rem;border-bottom:1px solid var(--st-border-color)">
             <div style="width:2.75rem;height:2.75rem;border-radius:.75rem;display:grid;place-items:center;background:var(--st-color-primary-bg,#eef2ff);color:var(--st-color-primary);font-size:1.25rem">${TOOLBOX_ICONS.prompts}</div>
             <div style="min-width:0;flex:1"><h2 data-title style="margin:0;font-size:1.125rem">${escapeHTML(p.name || '未命名提示词')}</h2>
-                <p style="margin:.25rem 0 0;color:var(--st-text-tertiary);font-size:.8125rem">保存后即可在 Agent 配置中复用</p></div>
+                <p style="margin:.25rem 0 0;color:var(--st-text-tertiary);font-size:.8125rem">${t('settings.autosave.hint')}</p></div>
             ${p.id ? `<button class="settings-btn settings-btn--danger" data-action="delete" title="删除"><i class="fas fa-trash"></i></button>` : ''}
-            <button class="settings-btn settings-btn--primary" data-action="save"><i class="fas fa-save"></i> 保存</button>
+
         </header>
         <div style="overflow-y:auto;padding:1.5rem 1.75rem 2.5rem"><div style="max-width:900px;margin:auto">
             <section class="settings-section">
@@ -81,7 +82,7 @@ export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagem
                 <p style="margin:0 0 1rem;color:var(--st-text-tertiary);font-size:.8125rem">用清晰的名称和描述帮助团队快速识别用途。</p>
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.875rem">
                     <div class="settings-form-group"><label for="sp-name">名称</label><input class="settings-input" id="sp-name" data-field="name" value="${escapeHTML(p.name)}" placeholder="例如：高级编程助手"></div>
-                    <div class="settings-form-group"><label for="sp-id">ID <small style="font-weight:400;color:var(--st-text-tertiary)">保存后不可修改</small></label><input class="settings-input" id="sp-id" data-field="id" value="${escapeHTML(p.id)}" ${p.id ? 'disabled' : ''} placeholder="coding-expert"></div>
+                    <div class="settings-form-group"><label for="sp-id">ID <small style="font-weight:400;color:var(--st-text-tertiary)">保存后不可修改</small></label><input class="settings-input" id="sp-id" data-field="id" data-autosave-defer value="${escapeHTML(p.id)}" ${p.id ? 'disabled' : ''} placeholder="coding-expert"></div>
                 </div>
                 <div class="settings-form-group"><label for="sp-desc">描述 <small style="font-weight:400;color:var(--st-text-tertiary)">可选</small></label><input class="settings-input" id="sp-desc" data-field="description" value="${escapeHTML(p.description ?? '')}" placeholder="简要说明适用场景"></div>
             </section>
@@ -120,13 +121,18 @@ export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagem
         });
         this.container.querySelectorAll('[data-action="new"]').forEach(btn => this.addEventListener(btn, 'click', () => this.showNew()));
         this.addEventListener(this.container.querySelector('[data-action="back"]'), 'click', () => { this.selectedId = null; void this.render(); });
-        this.addEventListener(this.container.querySelector('[data-action="save"]'), 'click', () => void this.save());
+        if (this.container.querySelector('[data-field="name"]')) {
+            const editingId = this.selectedId;
+            this.bindAutoSave(this.container.querySelector<HTMLElement>('.settings-split__content') ?? this.container,
+                () => this.save(this.container.querySelector<HTMLInputElement>('[data-field="id"]')?.disabled ? this.field('id') : editingId), this.container.querySelector<HTMLElement>('header') ?? undefined);
+        }
         this.addEventListener(this.container.querySelector('[data-action="delete"]'), 'click', () => this.remove());
         this.addEventListener(this.container.querySelector('[data-action="add-preset"]'), 'click', () => {
             const box = this.container.querySelector<HTMLElement>('[data-presets]');
             box?.querySelector('[data-presets-empty]')?.remove();
             box?.insertAdjacentHTML('beforeend', this.presetRow({ name: '', prompt: '' }));
             box?.querySelector<HTMLInputElement>('[data-preset-row]:last-child [data-preset-name]')?.focus();
+            if (box) requestSettingsSave(box);
         });
         this.addEventListener(this.container.querySelector('[data-presets]'), 'click', e => {
             const btn = (e.target as HTMLElement).closest('[data-action="remove-preset"]');
@@ -134,6 +140,7 @@ export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagem
             btn.closest('[data-preset-row]')?.remove();
             const box = this.container.querySelector<HTMLElement>('[data-presets]');
             if (box && !box.querySelector('[data-preset-row]')) box.innerHTML = this.emptyPresets();
+            if (box) requestSettingsSave(box);
         });
         this.addEventListener(this.container.querySelector('[data-field="content"]'), 'input', () => {
             const count = this.container.querySelector<HTMLElement>('[data-count]');
@@ -145,7 +152,8 @@ export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagem
         });
     }
 
-    private showNew(): void {
+    private async showNew(): Promise<void> {
+        if (!await this.prepareRender()) return;
         this.selectedId = null;
         const split = this.container.querySelector('.settings-split');
         const main = this.container.querySelector<HTMLElement>('.settings-split__content');
@@ -156,34 +164,42 @@ export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagem
         main.querySelector<HTMLInputElement>('[data-field="name"]')?.focus();
     }
 
-    private async save(): Promise<void> {
-        const id = this.field('id').trim() || this.slug(this.field('name')) || `sp-${Date.now().toString(36)}`;
-        const name = this.field('name').trim() || id;
+    private async save(editingId: string | null): Promise<void> {
+        const name = this.field('name').trim();
+        if (!name) throw new SettingsValidationError(t('settings.autosave.invalid'));
+        const id = editingId || this.field('id').trim() || this.slug(name) || `sp-${Date.now().toString(36)}`;
         const previous = this.prompts.find(item => item.id === id);
+        if (!editingId && previous) throw new SettingsValidationError(t('settings.autosave.invalid'));
         const text = this.field('content');
         const content = previous && text === previous.content.join('\n') ? previous.content : text.trim() ? [text] : [];
         const presets = Array.from(this.container.querySelectorAll<HTMLElement>('[data-preset-row]')).map(row => ({
             name: row.querySelector<HTMLInputElement>('[data-preset-name]')?.value.trim() ?? '',
             prompt: row.querySelector<HTMLTextAreaElement>('[data-preset-prompt]')?.value.trim() ?? '',
-        })).filter(x => x.name || x.prompt);
-        try {
-            await this.service.saveSystemPrompt({ id, name, content, ...(this.field('description').trim() ? { description: this.field('description').trim() } : {}), ...(presets.length ? { presets } : {}) });
-            this.selectedId = id;
-            Toast.success(t('prompt.saved'));
-            await this.render();
-        } catch (error) { Toast.error(`保存失败：${error instanceof Error ? error.message : String(error)}`); }
+        })).filter(row => row.name || row.prompt);
+        if (presets.some(row => !row.name || !row.prompt)) throw new SettingsValidationError(t('settings.autosave.invalid'));
+        const draft = { ...previous, id, name, content, description: this.field('description').trim() || undefined,
+            presets: presets.length ? presets : undefined };
+        await this.service.saveSystemPrompt(draft);
+        this.prompts = this.prompts.filter(prompt => prompt.id !== id).concat(draft);
+        const idField = this.container.querySelector<HTMLInputElement>('[data-field="id"]');
+        if (idField) { idField.value = id; idField.disabled = true; }
+        if (!this.selectedId || this.selectedId === editingId) this.selectedId = id;
+        const label = [...this.container.querySelectorAll<HTMLElement>('[data-sp-id]')].find(element => element.dataset.spId === id)?.querySelector<HTMLElement>('.settings-list-item__title');
+        if (label) label.textContent = name;
     }
 
-    private remove(): void {
+    private async remove(): Promise<void> {
         const prompt = this.prompts.find(p => p.id === this.selectedId);
         if (!prompt) return;
         if (this.formOnly && this.options.hostContext?.requestDelete) {
+            await this.discardAutoSave();
             void this.options.hostContext.requestDelete([{ kind: 'entity', entityType: 'system-prompt', id: prompt.id }])
                 .then(() => this.render()).catch(error => Toast.error(String(error)));
             return;
         }
         Modal.confirm('确认删除', `确定要删除“${prompt.name || prompt.id}”吗？此操作无法撤销。`, async () => {
             try {
+                await this.discardAutoSave();
                 await this.service.deleteSystemPrompt(prompt.id);
                 this.selectedId = null;
                 Toast.success('系统提示词已删除');

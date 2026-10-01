@@ -1,3 +1,4 @@
+import { SettingsValidationError, requestSettingsSave } from '@itookit/ui-common';
 // @file: llm-ui/editors/CostEditor.ts
 //
 // 费用统计 & 定价配置编辑器。
@@ -6,8 +7,7 @@
 //   - 仪表盘：按时间（今日/本周/本月）+ provider 过滤展示费用汇总、按 provider 分组、Top 10 Sessions
 //   - 定价配置：可视化编辑 pricing.json（ModelPricingEntry 列表），保存后写入 VFS
 
-import {aggregateCostRecords, lookupPricingEntry} from '@itookit/common';
-import { Toast } from '@itookit/ui-common';
+import {aggregateCostRecords, lookupPricingEntry, t} from '@itookit/common';
 import type { IAgentManagementService,
     CostRecord,
     ModelPricingEntry,
@@ -36,11 +36,13 @@ export class CostEditor extends BaseSettingsEditor<IAgentManagementService> {
     private filterProviderId = '';
 
     private editablePricing: ModelPricingEntry[] = [];
-    private isDirtyPricing = false;
     private pricingInitialized = false;
     private expandedPricingIdx: number | null = null;
 
     async render(): Promise<void> {
+        if (!await this.prepareRender()) return;
+        this.pricingInitialized = false;
+        this.clearListeners();
         this.container.innerHTML = `
             <div class="settings-page">
                 <div class="settings-page__header">
@@ -105,12 +107,12 @@ export class CostEditor extends BaseSettingsEditor<IAgentManagementService> {
                 <div id="cost-panel-pricing" hidden>
                     <div class="cost-pricing-toolbar">
                         <p class="cost-pricing-toolbar__desc">
-                            编辑模型定价（USD / M tokens）。保存后立即生效，覆盖内置默认值。
+                            ${t('settings.autosave.hint')}
                         </p>
                         <div class="cost-pricing-toolbar__actions">
                             <button class="settings-btn settings-btn--secondary" id="btn-add-pricing">+ 添加条目</button>
                             <button class="settings-btn settings-btn--secondary" id="btn-reset-pricing" title="恢复为内置默认定价表">恢复默认</button>
-                            <button class="settings-btn settings-btn--primary" id="btn-save-pricing">保存定价</button>
+
                         </div>
                     </div>
                     <div class="cost-pricing-list" id="cost-pricing-list">
@@ -130,6 +132,7 @@ export class CostEditor extends BaseSettingsEditor<IAgentManagementService> {
         this.bindTabEvents();
         this.bindDashboardEvents();
         await this.loadDashboardData();
+        if (this.activeTab === 'pricing') this.initPricingPanel();
     }
 
     // ─── Tab ──────────────────────────────────────────────────────────────────
@@ -144,14 +147,11 @@ export class CostEditor extends BaseSettingsEditor<IAgentManagementService> {
         });
     }
 
-    private switchTab(tab: Tab): void {
+    private async switchTab(tab: Tab): Promise<void> {
         if (tab === this.activeTab) return;
 
-        if (this.isDirtyPricing && this.activeTab === 'pricing') {
-            const confirmed = window.confirm('定价配置有未保存的改动，切换后将丢弃。是否继续？');
-            if (!confirmed) return;
-            this.isDirtyPricing = false;
-        }
+        if (this.activeTab === 'pricing' && !await this.prepareRender()) return;
+        if (this.activeTab === 'pricing') this.pricingInitialized = false;
 
         this.activeTab = tab;
 
@@ -435,6 +435,8 @@ export class CostEditor extends BaseSettingsEditor<IAgentManagementService> {
         this.renderPricingRows();
         this.bindPricingRowDelegates();
         this.bindPricingEvents();
+        const rows = this.container.querySelector<HTMLElement>('#cost-pricing-rows');
+        if (rows) this.bindAutoSave(rows, () => this.savePricing(), this.container.querySelector<HTMLElement>('.cost-pricing-toolbar__actions') ?? undefined);
     }
 
     private bindPricingRowDelegates(): void {
@@ -451,11 +453,12 @@ export class CostEditor extends BaseSettingsEditor<IAgentManagementService> {
 
         rowsEl.addEventListener('click', (e) => {
             const target = e.target as HTMLElement;
-            if (target.tagName === 'INPUT' || target.tagName === 'BUTTON') return;
+            if (target.tagName === 'INPUT') return;
             const toggle = target.closest<HTMLElement>('.cost-pricing-row__id-toggle');
             if (toggle) {
                 const idx = parseInt(toggle.dataset.idx ?? '-1', 10);
                 if (idx >= 0) {
+                    this.syncInputsToPricingData();
                     this.expandedPricingIdx = this.expandedPricingIdx === idx ? null : idx;
                     this.renderPricingRows();
                 }
@@ -563,11 +566,6 @@ export class CostEditor extends BaseSettingsEditor<IAgentManagementService> {
             this.addEventListener(addBtn as HTMLElement, 'click', () => this.addPricingEntry());
         }
 
-        const saveBtn = this.container.querySelector('#btn-save-pricing');
-        if (saveBtn) {
-            this.addEventListener(saveBtn as HTMLElement, 'click', () => this.savePricing());
-        }
-
         const resetBtn = this.container.querySelector('#btn-reset-pricing');
         if (resetBtn) {
             this.addEventListener(resetBtn as HTMLElement, 'click', () => this.resetPricing());
@@ -575,10 +573,8 @@ export class CostEditor extends BaseSettingsEditor<IAgentManagementService> {
     }
 
     private markPricingDirty(): void {
-        if (this.isDirtyPricing) return;
-        this.isDirtyPricing = true;
-        const btn = this.container.querySelector('#btn-save-pricing');
-        if (btn) btn.textContent = '保存定价 *';
+        const rows = this.container.querySelector<HTMLElement>('#cost-pricing-rows');
+        if (rows) requestSettingsSave(rows);
     }
 
     private syncInputsToPricingData(): void {
@@ -606,6 +602,7 @@ export class CostEditor extends BaseSettingsEditor<IAgentManagementService> {
     }
 
     private addPricingEntry(): void {
+        this.syncInputsToPricingData();
         // Insert before the default row to keep default last
         const defaultIdx = this.editablePricing.findIndex(e => e.id === 'default');
         const newEntry: ModelPricingEntry = { id: '', price: [0, 0, 0, 0], providers: {}, names: [] };
@@ -685,13 +682,11 @@ export class CostEditor extends BaseSettingsEditor<IAgentManagementService> {
         const nonDefault = this.editablePricing.filter(e => e.id !== 'default');
         const ids = nonDefault.map(e => e.id).filter(Boolean);
         if (ids.length < nonDefault.length) {
-            Toast.error('所有定价条目的逻辑 ID 不能为空');
-            return;
+            throw new SettingsValidationError(t('settings.autosave.invalid'));
         }
         const unique = new Set(ids);
         if (unique.size < ids.length) {
-            Toast.error('定价条目的逻辑 ID 存在重复，请检查后重试');
-            return;
+            throw new SettingsValidationError(t('settings.autosave.invalid'));
         }
 
         // Ensure default row is always last in the saved config
@@ -701,15 +696,7 @@ export class CostEditor extends BaseSettingsEditor<IAgentManagementService> {
         ];
 
         const config: ModelPricingConfig = { model_pricing: sorted };
-        try {
-            await this.service.writePricing(config);
-            this.isDirtyPricing = false;
-            const btn = this.container.querySelector('#btn-save-pricing');
-            if (btn) btn.textContent = '保存定价';
-            Toast.success('定价配置已保存');
-        } catch (e) {
-            Toast.error('保存失败：' + (e instanceof Error ? e.message : String(e)));
-        }
+        await this.service.writePricing(structuredClone(config));
     }
 
     private async resetPricing(): Promise<void> {
@@ -731,10 +718,7 @@ export class CostEditor extends BaseSettingsEditor<IAgentManagementService> {
         }
 
         this.renderPricingRows();
-        this.isDirtyPricing = true;
-        const btn = this.container.querySelector('#btn-save-pricing');
-        if (btn) btn.textContent = '保存定价 *';
-        Toast.success('已恢复默认定价表，点击「保存定价」写入磁盘');
+        this.markPricingDirty();
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────

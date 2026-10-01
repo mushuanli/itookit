@@ -40,7 +40,8 @@ export class ProviderManager {
                 // Built-in definition may have changed (e.g. anthropicPath fix).
                 // Sync structural fields while preserving user data like apiKey.
                 const vfs = existing.find(p => p.id === key);
-                if (vfs && def) {
+                // Explicit protocol configuration marks user-owned endpoint settings.
+                if (vfs && def && !vfs.supportedProtocols) {
                     const needsUpdate =
                         vfs.baseURL !== def.baseURL ||
                         vfs.anthropicPath !== def.anthropicPath ||

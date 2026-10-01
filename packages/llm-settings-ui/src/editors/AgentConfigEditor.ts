@@ -1,3 +1,4 @@
+import { SettingsAutoSave, SettingsValidationError, requestSettingsSave } from '@itookit/ui-common';
 import { renderPromptReference, bindPromptReference } from './agent-prompt-reference';
 import { editorResourceId } from '@itookit/ui-common';
 // @file: llm-ui/editors/AgentConfigEditor.ts
@@ -17,6 +18,8 @@ import { bindAgentCapabilities, readAgentCapabilities, renderAgentCapabilities }
  * 需要完整的 CRUD 能力，因此依赖 IAgentManagementService
  */
 export class AgentConfigEditor implements IEditor {
+    private autoSave?: SettingsAutoSave;
+    private rendering?: Promise<void>;
     private promptLibrary: import('@itookit/common').SystemPromptDefinition[] = [];
     private container!: HTMLElement;
     private content: AgentDefinition | null = null;
@@ -37,6 +40,7 @@ export class AgentConfigEditor implements IEditor {
         this.originalContent = initialContent || '{}';
         this.currentTitle = (this.options.title as string) || '';
         this.setText(this.originalContent);
+        await this.rendering;
         this.emit('ready', undefined);
     }
 
@@ -50,6 +54,7 @@ export class AgentConfigEditor implements IEditor {
     }
 
     setText(text: string) {
+        if (this.autoSave?.protectsInput) return;
         try {
             const parsed = JSON.parse(text);
 
@@ -83,7 +88,7 @@ export class AgentConfigEditor implements IEditor {
                 defaultPrompts: this.normalizePrompts(parsed.defaultPrompts)
                 // 注意：这里不再处理 tags
             };
-            this.render();
+            this.rendering = this.render();
         } catch (e) {
             this.renderError((e as Error).message);
             this.content = null;
@@ -124,12 +129,13 @@ export class AgentConfigEditor implements IEditor {
         }
     }
 
-    isDirty() { return this._isDirty; }
+    isDirty() { return this.autoSave?.isDirty ?? this._isDirty; }
     setDirty(dirty: boolean) { this._isDirty = dirty; }
 
     // --- Rendering ---
 
     async render() {
+        if (this.autoSave && !await this.autoSave.dispose()) return;
         if (!this.content) return;
         const agent = this.content;
         const config = { ...agent.config, systemPrompt: agent.systemPrompt ?? agent.config.systemPrompt };
@@ -367,18 +373,19 @@ export class AgentConfigEditor implements IEditor {
     }
 
     private bindEvents() {
+        if (this.options.readOnly) {
+            this.container.querySelectorAll<HTMLInputElement>('input, select, textarea, button').forEach(field => { field.disabled = true; });
+            return;
+        }
         bindAgentCapabilities(this.container);
         // 全局变更监听
         const handleChange = () => {
             this._isDirty = true;
-            this.emit('interactiveChange', undefined);
+            requestSettingsSave(this.container);
         };
 
-        // Input/Select/Textarea 变更
-        this.container.querySelectorAll('input, select, textarea').forEach(el => {
-            el.addEventListener('input', handleChange);
-            el.addEventListener('change', handleChange);
-        });
+        this.autoSave = new SettingsAutoSave(this.container, () => this.saveDraft(),
+            this.container.querySelector<HTMLElement>('.agent-header') ?? undefined);
 
         bindPromptReference(this.container, this.promptLibrary, this.service, this.options.hostContext, handleChange);
 
@@ -575,7 +582,7 @@ export class AgentConfigEditor implements IEditor {
                     if (iconInput) iconInput.value = icon;
 
                     this._isDirty = true;
-                    this.emit('interactiveChange', undefined);
+                    requestSettingsSave(this.container);
                 }
                 overlay.remove();
             });
@@ -625,6 +632,19 @@ export class AgentConfigEditor implements IEditor {
         }
     }
 
+    private async saveDraft(): Promise<void> {
+        const name = this.container.querySelector<HTMLInputElement>('[name="name"]')?.value.trim();
+        if (!name) throw new SettingsValidationError(t('settings.autosave.invalid'));
+        this.syncModelFromUI();
+        const draft = structuredClone(this.content!);
+        const save = this.options.hostContext?.saveContent;
+        const id = editorResourceId(this.options);
+        if (save && id) await save(id, JSON.stringify(draft, null, 2));
+        else await this.service.saveAgent(draft);
+        this._isDirty = false;
+        this.emit('saved', undefined);
+    }
+
     private escapeHtml(str: string): string {
         const div = document.createElement('div');
         div.textContent = str;
@@ -633,7 +653,12 @@ export class AgentConfigEditor implements IEditor {
 
     // --- IEditor Interface Implementation ---
 
+    async flushPendingSave(): Promise<void> {
+        if (this.autoSave && !await this.autoSave.flush()) throw new Error(t('settings.autosave.leaveFailed'));
+    }
+
     async destroy() {
+        if (this.autoSave && !await this.autoSave.dispose()) throw new Error(t('settings.autosave.leaveFailed'));
         this.container.innerHTML = '';
         this.editorEvents.clear();
     }

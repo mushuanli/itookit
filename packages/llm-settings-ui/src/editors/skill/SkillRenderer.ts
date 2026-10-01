@@ -151,9 +151,7 @@ export function renderDetail(
                 <button class="settings-btn settings-btn--secondary" data-action="test" title="${t('tooltip.testConnection')}">
                     <i class="fas fa-vial"></i> ${t('action.test')}
                 </button>` : ''}
-                <button class="settings-btn settings-btn--primary" data-action="save">
-                    <i class="fas fa-save"></i> ${t('action.save')}
-                </button>
+
                 <button class="settings-btn settings-btn--danger" data-action="delete" title="${t('action.delete')}">
                     <i class="fas fa-trash"></i>
                 </button>`,
@@ -167,7 +165,7 @@ export function renderDetail(
                 <h3 class="settings-section__title">${t('skill.section.basic')}</h3>
                 <div class="settings-form-group">
                     <label>ID <span style="color:var(--st-text-tertiary);font-size:.8em">lowercase letters, numbers, hyphens</span></label>
-                    <input class="settings-input" name="id" value="${skill.id}"
+                    <input class="settings-input" name="id" data-autosave-defer value="${skill.id}"
                            placeholder="my-skill-id"
                            style="font-family:monospace;font-size:.875rem"
                            pattern="[a-z0-9][a-z0-9_-]*" title="Lowercase letters, numbers, hyphens">

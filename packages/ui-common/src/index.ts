@@ -42,3 +42,6 @@ export type { OcrControls, OcrSettingsState } from './interfaces/OcrControls';
 export { OcrSettingsForm, renderOcrSettings, readOcrSettings } from './components/OcrSettingsForm';
 
 export type { SessionDraftControls } from './interfaces/SessionDraftControls';
+
+export { SettingsAutoSave, SettingsValidationError, requestSettingsSave } from './components/SettingsAutoSave';
+export type { SettingsSave } from './components/SettingsAutoSave';

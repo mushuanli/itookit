@@ -289,6 +289,7 @@ export class AgentResolver {
     ): { enableThinking: boolean; reasoningEffort: 'low' | 'medium' | 'high' | 'xhigh' | undefined } {
         const pid = connMeta.providerId;
         const cmData = connMeta.metadata as Record<string, unknown> | undefined;
+        const modelEfforts = cmData?.modelReasoningEfforts as Record<string, 'low' | 'medium' | 'high' | 'xhigh'> | undefined;
         const tierThinking = cmData?.tierThinking as Record<string, boolean> | undefined;
         const tierOverride = tierThinking?.[tier];
 
@@ -297,12 +298,12 @@ export class AgentResolver {
             const provider = this.agentService.getProvider(pid);
             const modelDef = provider?.models.find(m => m.id === modelId);
             // Per-tier override takes priority; fall back to model's supportsThinking default.
-            enableThinking = tierOverride !== undefined ? tierOverride : !!modelDef?.supportsThinking;
+            enableThinking = tierOverride !== undefined ? tierOverride : (modelDef?.supportsThinking ?? true);
         }
 
         return {
             enableThinking,
-            reasoningEffort: cmData?.reasoningEffort as 'low' | 'medium' | 'high' | 'xhigh' | undefined,
+            reasoningEffort: (modelEfforts?.[modelId] ?? cmData?.reasoningEffort) as 'low' | 'medium' | 'high' | 'xhigh' | undefined,
         };
     }
 

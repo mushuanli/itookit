@@ -10,6 +10,7 @@ import type { ConnectionOption } from '../../domain/types';
 export interface ConnectionTierDeps {
     onNavigateSettings: (target: { resourceId: string }) => void;
     onChange: () => void;
+    onRefreshConnections?: () => Promise<void>;
 }
 
 export class ConnectionTierController {
@@ -84,6 +85,7 @@ export class ConnectionTierController {
         this.updateTierQuick();
         this.updateTierCardModels();
         this.updateTierPills(this.modelTier);
+        if (this.connPopup?.isVisible) this.connPopup.updateItems(this.buildConnItems());
     }
 
     /** 关闭连接/tier 弹窗（供其它弹窗互斥时调用）。 */
@@ -142,6 +144,7 @@ export class ConnectionTierController {
         if (!this.connPopup) {
             this.connPopup = new PopupPanel(this.connQuickBtn, {
                 emptyText: 'No connections configured',
+                showSearch: true,
                 animated: true,
                 maxVisible: 30,
             });
@@ -150,6 +153,7 @@ export class ConnectionTierController {
     }
 
     openConnPicker(): void {
+        void this.deps.onRefreshConnections?.();
         const popup = this.getOrCreateConnPopup();
         popup.show(this.buildConnItems(), {
             onSelect: (item) => {

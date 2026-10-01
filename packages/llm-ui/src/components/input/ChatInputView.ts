@@ -104,6 +104,8 @@ export interface ChatInputOptions {
  * 内部 DOM 操作完全封装。
  */
 export class ChatInput implements IChatInputPresenter {
+    private connectionLoadRevision = 0;
+    private connectionsDisposed = false;
     private textarea!: HTMLTextAreaElement;
     private sendBtn!: HTMLButtonElement;
     private stopBtn!: HTMLButtonElement;
@@ -201,6 +203,7 @@ export class ChatInput implements IChatInputPresenter {
             onCloseSettings: () => this.toggleSettings(false),
         });
         this.connectionTier = new ConnectionTierController(container, {
+            onRefreshConnections: () => this.refreshConnections(),
             onNavigateSettings: (target) => this.options.onNavigateSettings?.(target),
             onChange: () => {
                 this.config.settings.connectionId = this.connectionTier.getConnectionId();
@@ -389,6 +392,8 @@ export class ChatInput implements IChatInputPresenter {
     clearInteraction(interactionId?: string): void { this.interactionPanel.clear(interactionId); }
 
     destroy(): void {
+        this.connectionsDisposed = true;
+        this.connectionLoadRevision++;
         this.ocrSettings?.destroy();
         this.skillModal?.hide(); this.skillPanel = undefined;
         this.interactionPanel.clear();
@@ -787,8 +792,10 @@ export class ChatInput implements IChatInputPresenter {
 
     private async loadConnections(): Promise<void> {
         if (!this.options.onRequestConnections) return;
+        const revision = ++this.connectionLoadRevision;
         try {
-            this.connectionTier.setConnections(await this.options.onRequestConnections());
+            const connections = await this.options.onRequestConnections();
+            if (!this.connectionsDisposed && revision === this.connectionLoadRevision) this.connectionTier.setConnections(connections);
         } catch (e) {
             console.error('[ChatInput] Failed to load connections:', e);
         }
@@ -1087,7 +1094,7 @@ export class ChatInput implements IChatInputPresenter {
     private notifyConfigChange(): void {
         const config = this.getConfig();
         this.options.onDraftChange?.(config, [...this.files]);
-        const settingsJson = JSON.stringify(config.settings);
+        const settingsJson = JSON.stringify({ agentId: config.agentId, settings: config.settings });
         if (settingsJson === this.lastNotifiedSettings) return;
         this.lastNotifiedSettings = settingsJson;
         this.options.onConfigChange?.(config);

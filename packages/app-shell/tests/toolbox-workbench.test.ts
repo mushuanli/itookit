@@ -192,7 +192,8 @@ it('edits model resources inline, keeps provider keys out of the list and remaps
     await vi.waitFor(() => expect(f.main.querySelector('#connection-form')).not.toBeNull());
     expect(f.main.querySelector('.settings-split__sidebar')).toBeNull();
     const name = f.main.querySelector<HTMLInputElement>('[name="name"]')!; name.value = 'Updated model';
-    f.main.querySelector<HTMLButtonElement>('.settings-btn--primary')!.click();
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    name.dispatchEvent(new Event('focusout', { bubbles: true }));
     await vi.waitFor(async () => expect((await runtime.agentService.getFullConnection('custom-conn'))?.name).toBe('Updated model'));
     expect(await runtime.agentService.getFullConnection('custom-conn')).toMatchObject({ enabled: false, metadata: { custom: 'keep' } });
     const paths = await f.resources.import(await f.resources.export(['/connections/custom-conn', '/providers/custom']));
@@ -416,8 +417,9 @@ it('opens prompts in the toolbox without a second sidebar and preserves multilin
     await f.workbench.openResource('/prompts/rules');
     expect(f.main.querySelector('.settings-split__sidebar')).toBeNull();
     await vi.waitFor(() => expect(f.main.querySelector<HTMLTextAreaElement>('[data-field="content"]')?.value).toBe(content.join('\n')));
-    f.main.querySelector<HTMLInputElement>('[data-field="name"]')!.value = 'Updated rules';
-    f.main.querySelector<HTMLButtonElement>('[data-action="save"]')!.click();
+    const name = f.main.querySelector<HTMLInputElement>('[data-field="name"]')!; name.value = 'Updated rules';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    name.dispatchEvent(new Event('focusout', { bubbles: true }));
     await vi.waitFor(async () => expect(await runtime.agentService.getSystemPrompt('rules')).toMatchObject({ name: 'Updated rules', content }));
     expect(toolboxSettingsRoute('system-prompts', 'rules')).toBe('/prompts/rules');
 });

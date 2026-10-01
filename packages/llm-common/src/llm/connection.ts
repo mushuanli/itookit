@@ -25,6 +25,8 @@ export interface LLMModel {
     icon?: string;
     /** 模型用途分类，缺省视为 'chat'。 */
     category?: ModelCategory;
+    /** Preferred protocol when the Connection does not explicitly override it. */
+    preferredProtocol?: ApiProtocol;
     contextWindow?: number;
     maxOutput?: number;
     supportsVision?: boolean;
@@ -109,6 +111,14 @@ export interface LLMProvider {
     id: string;
     name: string;
     implementation: LLMProviderImplementation;
+    /** Explicit protocol support; omitted for legacy inferred configurations. */
+    supportedProtocols?: ApiProtocol[];
+    defaultProtocol?: ApiProtocol;
+    /** Model catalog URL or path override, using the implementation's catalog format. */
+    modelsPath?: string;
+    /** Gemini Generate endpoint path override. */
+    geminiPath?: string;
+    chatPath?: string;
     /**
      * Provider 根域地址，不含路径（如 "https://api.deepseek.com"）。
      * Provider 实现类会在此基础上拼接 defaultPath 或内置默认路径。
@@ -221,6 +231,8 @@ export interface LLMConnection {
         isSystemDefault?: boolean;
         thinkingBudget?: number;
         reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
+        /** Connection overrides keyed by model ID. */
+        modelReasoningEfforts?: Record<string, 'low' | 'medium' | 'high' | 'xhigh'>;
         mcpServers?: string[];
         caching?: boolean;
         headers?: Record<string, string>;
@@ -520,4 +532,14 @@ export function resolveWebSearchStrategy(
 function supportsServerSideSearch(protocol?: ApiProtocol): boolean {
     if (!protocol) return true;
     return protocol === 'openai-responses' || protocol === 'gemini-generate';
+}
+
+/** Unsaved Provider configuration used by settings requests. */
+export interface ProviderConnectionTestParams {
+    provider: string;
+    apiKey?: string;
+    baseURL?: string;
+    model?: string;
+    protocol?: ApiProtocol;
+    providerDefinition?: LLMProvider;
 }

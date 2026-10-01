@@ -1,3 +1,4 @@
+import { acquireConnectionOptions } from './connection-options-cache';
 import { DEFAULT_HARNESS_TOOL_IDS } from '@itookit/common';
 import { rerunSession } from './rerun-session';
 import { t } from '@itookit/common';
@@ -54,7 +55,7 @@ import { RunAttachmentController } from './RunAttachmentController';
 import { readDirectCommandOutcome } from '../commands/direct-command';
 import { inputInteraction } from './input-interaction';
 import {
-    buildExecutorOptions, validateAgentId, buildConnectionOptions,
+    buildExecutorOptions, validateAgentId,
 } from './AgentProvider';
 import { promptInterruptedRun } from './InterruptedRunPrompt';
 import { restoreWaitingAttachment } from './pending-interaction';
@@ -188,6 +189,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private skillRefreshBinding: ReturnType<typeof bindSkillRefresh> | null = null;
     /** Latest Session Skill list; the slash popup needs it synchronously for `/sk-<id>`. */
     private skillSnapshot: SkillInfo[] = [];
+    private connectionOptions?: ReturnType<typeof acquireConnectionOptions>;
     private refreshAgentsTimer: ReturnType<typeof setTimeout> | null = null;
     private titleInput!: HTMLInputElement;
     private currentTitle: string = 'New Chat';
@@ -229,6 +231,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.initComplete = false;
         this.initPromise = new Promise(resolve => { this.initResolve = resolve; });
         try {
+            this.connectionOptions = acquireConnectionOptions(this.agentService);
             this.initLayout();
             this.initInfrastructure();
             this.initServices();
@@ -415,8 +418,8 @@ export class LLMWorkspaceEditor implements IEditor {
                 settings: initialSettings,
             },
             onConfigChange: (config) => this.handleConfigChange(config),
-            onExecutorChange: () => { this.skillRefreshBinding?.refresh(); this.bus.emit('state:inputChanged', {}); },
-            onRequestConnections: () => buildConnectionOptions(this.agentService),
+            onExecutorChange: () => { this.skillRefreshBinding?.refresh(); },
+            onRequestConnections: () => this.connectionOptions!.read(),
 
             // ── @mention file reference ───────────────────────────────────────
             onRequestFiles: async (query, options) => this.fileSearchService.search(query, options),
@@ -659,6 +662,7 @@ export class LLMWorkspaceEditor implements IEditor {
         );
 
         this.agentServiceUnsub = this.agentService.onChange(() => {
+            void this.chatInput.refreshConnections();
             if (this.refreshAgentsTimer) clearTimeout(this.refreshAgentsTimer);
             this.refreshAgentsTimer = setTimeout(() => {
                 this.refreshAgentsTimer = null;
@@ -713,15 +717,11 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private async handleConfigChange(config: IChatInputConfig): Promise<void> {
         this.skillRefreshBinding?.refresh();
-        if (config.settings) {
-            if (this.currentSessionId) {
-                await this.errorHandler.wrap(
-                    () => this.sessionService.saveSessionSettings(config.settings),
-                    'Save session settings', 'warn'
-                );
-            }
-        }
-        this.bus.emit('state:inputChanged', {});
+        if (!this.currentSessionId || this.isBeingDeleted) return;
+        await this.errorHandler.wrap(
+            () => this.stateManager.saveInputConfiguration(config),
+            'Save input configuration', 'toast'
+        );
     }
 
     private async handleTitleChange(title: string): Promise<void> {
@@ -785,6 +785,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private async loadSession(initial?: InitialSessionData): Promise<void> {
         if (!this.options.sessionId) throw new Error('Session identity is required');
+        if (!initial) await this.flushPendingSave();
 
         this.sessionEventUnsub?.();
         this.sessionEventUnsub = null;
@@ -1022,6 +1023,7 @@ export class LLMWorkspaceEditor implements IEditor {
                     finally { this.invocationPending = undefined; void this.invocationPanel?.refresh(); }
                 },
                 chatInput: this.chatInput,
+                saveConfiguration: () => this.handleConfigChange(this.chatInput.getConfig()),
                 bus: this.bus,
                 historyView: this.historyView,
                 nodeCommands: this.nodeCommands,
@@ -1159,7 +1161,14 @@ export class LLMWorkspaceEditor implements IEditor {
     // 销毁 — 逆序清理
     // ================================================================
 
+    async flushPendingSave(): Promise<void> {
+        if (!this.initComplete || this.isBeingDeleted) return;
+        await this.stateManager.waitForDrafts();
+        await this.stateManager.saveInputConfiguration(this.chatInput.getConfig());
+    }
+
     async destroy(): Promise<void> {
+        await this.flushPendingSave();
         this.container.removeEventListener('click', this.onWelcomePrompt);
         this.rerunAbort?.abort();
         this.flowOutputAbort?.abort();
@@ -1177,16 +1186,12 @@ export class LLMWorkspaceEditor implements IEditor {
         this.stateManager?.cleanup();
         await this.stateManager?.waitForDrafts();
 
-        if (this.initComplete && !this.isBeingDeleted && !this.sessionManager.isGenerating()) {
-            await this.stateManager?.saveUIState(
-                this.chatInput?.getConfig(),
-                this.isBeingDeleted
-            ).catch(() => { });
-        }
 
         // 2. 外部事件解绑（Session 事件已在等待草稿前解除）
         this.globalEventUnsub?.();
         this.agentServiceUnsub?.();
+        this.connectionOptions?.dispose();
+        this.connectionOptions = undefined;
         this.sessionEventUnsub = null;
         this.globalEventUnsub = null;
         this.agentServiceUnsub = null;

@@ -1,3 +1,5 @@
+import type { ProviderConnectionTestParams } from '@itookit/llm-common';
+import { listProviderModels } from '../providers/model-catalog';
 // @file: device-llm/device/llm-device-driver.ts
 //
 // LLMDeviceDriver — LLM 连接配置守护者 + LLM/MCP/Skill 通信设备。
@@ -547,7 +549,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
                 return this.providerManager.getFullProvider(arg as string) ?? null;
 
             case LLM_IOCTL.SAVE_PROVIDER:
-                await this.providerManager.saveProvider(arg as LLMProvider, this.getSystemFS(ctx));
+                await this.saveProvider(arg as LLMProvider, this.getSystemFS(ctx));
                 return;
 
             case LLM_IOCTL.DELETE_PROVIDER:
@@ -840,6 +842,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     async saveProvider(provider: LLMProvider, systemFS?: IFileSystem): Promise<void> {
         this.cancelPendingSync();
         await this.providerManager.saveProvider(provider, systemFS);
+        await this.connectionManager.ensureProviderConnection(provider, systemFS);
     }
 
     async deleteProvider(id: string, systemFS?: IFileSystem): Promise<void> {
@@ -847,8 +850,12 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         await this.providerManager.deleteProvider(id, systemFS);
     }
 
-    async testConnection(params: { provider: string; apiKey?: string; baseURL?: string; model?: string }): Promise<ConnectionTestResult> {
-        return testLLMConnection({ ...params, codex: this.resolveCodexConfig() });
+    async testConnection(params: ProviderConnectionTestParams): Promise<ConnectionTestResult> {
+        return testLLMConnection({ ...params, providerDefinition: params.providerDefinition ?? this.getFullProvider(params.provider), codex: this.resolveCodexConfig() });
+    }
+
+    async listProviderModels(provider: LLMProvider) {
+        return listProviderModels(provider);
     }
 
     /** Derive the Codex CLI config shared by connection tests and driver creation. */
@@ -896,22 +903,22 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         const resolvedModelDef = provider?.models.find(m => m.id === resolvedModel);
         const resolvedThinkingMode = resolvedModelDef?.thinkingMode;
 
-        const effectiveProtocol =
-            conn.protocol
-            ?? (opts?.runMode === 'kernel' && provider?.anthropicPath ? 'anthropic-messages' as const : undefined)
-            ?? (opts?.runMode !== 'kernel' && provider?.anthropicPath ? 'anthropic-messages' as const : undefined);
         const connForDriver = {
             ...conn,
             apiKey,
             model: resolvedModel,
-            protocol: effectiveProtocol,
+            protocol: conn.protocol,
             ...(resolvedThinkingMode ? {
                 metadata: { ...conn.metadata, thinkingMode: resolvedThinkingMode },
             } : {}),
         };
 
         const pkey = connForDriver.providerId;
-        const customProviderDefaults = provider && pkey ? { [pkey]: provider } : undefined;
+        const customProviderDefaults = provider && pkey ? { [pkey]: {
+            ...provider,
+            defaultProtocol: provider.defaultProtocol ?? (!provider.supportedProtocols && provider.anthropicPath
+                ? 'anthropic-messages' : undefined),
+        } } : undefined;
 
         const baseLabel = sanitizeLabel((opts?.sessionLabel as string) ?? '');
         const sessionId = baseLabel || `llm-${++this.sessionSeq}`;

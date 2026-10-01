@@ -1,5 +1,9 @@
+import { SettingsValidationError } from '@itookit/ui-common';
+import { readProviderForm, renderProviderAdvanced, syncProtocolControls, renderProtocolOptions } from './provider-form';
+import { getPrimaryProtocol, getProviderProtocols } from '@itookit/llm-common';
+import type { ApiProtocol } from '@itookit/llm-common';
 import { showConfigurationForm, addConfigurationAction, addConfigurationEnabled } from './configuration-form';
-import { t } from '@itookit/common';
+import { t, escapeAttr, ACTION_ICONS } from '@itookit/common';
 // @file: llm-ui/editors/ProviderSettingsEditor.ts
 //
 // Provider 配置编辑器（三层架构第一层）。
@@ -14,7 +18,7 @@ import { t } from '@itookit/common';
 // 注意：tier 配置（optimal/standard/fast 映射）属于 Connection 层，不在此处配置。
 
 import {generateShortUUID} from '@itookit/common';
-import { BaseSettingsEditor } from '@itookit/ui-common';
+import { BaseSettingsEditor, requestSettingsSave } from '@itookit/ui-common';
 import type { IConnectionService,
     LLMProvider,
     LLMModel,
@@ -28,9 +32,6 @@ import { runLLMImport } from './llm-import';
 const MODEL_CATEGORIES: ModelCategory[] = ['chat', 'image', 'video', 'audio', 'embedding'];
 /** 能力 chip：[能力键, LLMModel 字段, emoji] */
 const MODEL_CAP_CHIPS: ReadonlyArray<[string, keyof LLMModel, string]> = [
-    ['vision', 'supportsVision', '👁️'],
-    ['thinking', 'supportsThinking', '🧠'],
-    ['tools', 'supportsTools', '🔧'],
     ['audio', 'supportsAudio', '🎵'],
     ['video', 'supportsVideo', '🎬'],
     ['structuredOutput', 'supportsStructuredOutput', '📋'],
@@ -40,10 +41,14 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
     private editModels: LLMModel[] = [];
     private _checkedIds = new Set<string>();
     private currentProviderId?: string;
+    private editingProvider?: LLMProvider;
+    private modelSearch = '';
+    private providerForm?: HTMLFormElement;
 
     private get formOnly(): boolean { return this.options.target?.kind === 'entity' && this.options.target.entityType === 'provider'; }
 
     async render() {
+        if (!await this.prepareRender()) return;
         const providers = this.service.getProviders();
         if (this.formOnly) {
             const target = this.options.target;
@@ -347,8 +352,16 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         // Load full provider (with apiKey) when editing an existing one
         const fullProvider = provider ? (this.service.getFullProvider(provider.id) ?? provider) : null;
         this.currentProviderId = provider?.id;
+        this.editingProvider = fullProvider ?? { id: `prov-${generateShortUUID()}`, name: '', implementation: 'openai-compatible', baseURL: '', models: [] };
+        this.modelSearch = '';
+        this.providerForm = undefined;
 
-        this.editModels = fullProvider ? JSON.parse(JSON.stringify(fullProvider.models)) : [];
+        this.editModels = (fullProvider?.models ?? []).map(model => ({
+            ...model,
+            supportsVision: model.supportsVision ?? true,
+            supportsThinking: model.supportsThinking ?? true,
+            supportsTools: model.supportsTools ?? true,
+        }));
         const existingApiKey = fullProvider?.apiKey ?? '';
 
         const modalContent = `
@@ -361,6 +374,12 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                 </div>
 
                 <div class="settings-form__group">
+                    <label class="settings-form__label">${t('provider.form.implementation')}</label>
+                    <select class="settings-form__select" name="implementation">
+                        ${(['openai-compatible', 'anthropic', 'gemini', 'custom'] as const).map(type => `<option value="${type}" ${this.editingProvider?.implementation === type ? 'selected' : ''}>${t(`provider.implementation.${type}`)}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="settings-form__group">
                     <label class="settings-form__label">API Key</label>
                     <input type="password" class="settings-form__input" name="apiKey"
                            value="${existingApiKey}"
@@ -371,7 +390,7 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                     <div style="margin-top:6px">
                         <button type="button" id="btn-test-provider"
                                 class="settings-btn settings-btn--secondary settings-btn--sm" style="width:100%">
-                            🔍 测试 API Key
+                            ${ACTION_ICONS.test} ${t('provider.protocol.testConnection')}
                         </button>
                     </div>
                     <div id="provider-test-result" style="display:none; margin-top:8px; padding:8px 10px; border-radius:4px; font-size:12px;"></div>
@@ -384,99 +403,65 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                     <small class="settings-form__help">Provider 根域地址，不含路径（如 https://api.deepseek.com）。</small>
                 </div>
 
-                <div class="settings-form__group" id="driver-table-group">
-                    <label class="settings-form__label">API 驱动（协议 → 端点路径）</label>
-                    <table class="settings-driver-table">
-                        <thead>
-                            <tr><th>驱动 / 协议</th><th>端点路径</th></tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td>
-                                    OpenAI Chat Completions
-                                    <small>openai-chat</small>
-                                </td>
-                                <td><input type="text" class="settings-form__input" name="defaultPath"
-                                           value="${(fullProvider?.defaultPath ?? provider?.defaultPath) ?? ''}"
-                                           placeholder="如 /v1/chat/completions"></td>
-                            </tr>
-                            <tr>
-                                <td>
-                                    OpenAI Responses
-                                    <small>openai-responses · 联网搜索</small>
-                                </td>
-                                <td><input type="text" class="settings-form__input" name="responsesPath"
-                                           value="${(fullProvider?.responsesPath ?? provider?.responsesPath) ?? ''}"
-                                           placeholder="如 /responses"></td>
-                            </tr>
-                            <tr>
-                                    <td>
-                                        Anthropic Messages
-                                    <small>anthropic-messages · Claude CLI</small>
-                                </td>
-                                <td><input type="text" class="settings-form__input" name="anthropicPath"
-                                           value="${(fullProvider?.anthropicPath ?? provider?.anthropicPath) ?? ''}"
-                                           placeholder="如 /anthropic"></td>
-                            </tr>
-                        </tbody>
-                    </table>
-                    <small class="settings-form__help">连接在「API 协议」中选定后走对应端点；留空使用内置默认值。</small>
-                </div>
-
-                <div class="settings-form__group">
-                    <label class="settings-form__label">默认温度 (0-2)</label>
-                    <input type="number" class="settings-form__input" name="defaultTemperature"
-                           value="${fullProvider?.defaultTemperature ?? provider?.defaultTemperature ?? ''}"
-                           min="0" max="2" step="0.1" placeholder="未设置（由 Connection 决定）"
-                           style="max-width:120px">
-                    <small class="settings-form__help">所有绑定此 Provider 的连接继承此温度，可被 Connection 覆盖。</small>
-                </div>
-
                 <h4 class="settings-section-title" style="display:flex;justify-content:space-between;align-items:center">
                     模型列表
+                    <button type="button" id="btn-refresh-models" class="settings-btn settings-btn--xs settings-btn--secondary">${t('provider.models.refresh')}</button>
                     <button type="button" id="btn-add-model" class="settings-btn settings-btn--xs settings-btn--primary">+ 新增</button>
                 </h4>
+                <input type="search" id="provider-model-search" class="settings-form__input" placeholder="${t('provider.models.search')}">
+                <small id="provider-model-count" class="settings-form__help"></small>
                 <div class="settings-model-list-container" id="model-list-container">
                     ${this.renderModelListHTML()}
                 </div>
-                <small class="settings-form__help">Model ID 须与 API 实际返回的 ID 一致。</small>
+                <small class="settings-form__help">${t('provider.models.help')}</small>
+                ${renderProviderAdvanced(this.editingProvider)}
             </form>
         `;
 
         showConfigurationForm(this.container, isNew ? '添加 Provider' : provider!.name, modalContent, {
             width: '620px',
-            confirmText: '保存',
+            confirmText: '',
+            onAutoSave: save => this.trackAutoSave(save),
+            onClose: () => { void this.render(); },
             onConfirm: async () => {
                 const form = document.getElementById('provider-form') as HTMLFormElement;
-                if (!form.checkValidity()) { form.reportValidity(); return false; }
+                if (!form.checkValidity()) return false;
 
                 this.syncInputsToModelData();
 
                 const formData = new FormData(form);
                 const data = Object.fromEntries(formData) as Record<string, string>;
 
+                const providerConfig = readProviderForm(form, this.editingProvider!);
+                if (!providerConfig.supportedProtocols?.length) { throw new SettingsValidationError(t('provider.protocol.required')); }
+                if (this.editModels.some(model => model.preferredProtocol && !getProviderProtocols(providerConfig).includes(model.preferredProtocol))) {
+                    throw new SettingsValidationError(t('provider.protocol.unavailable'));
+                }
                 const newApiKey = (data.apiKey as string || '').trim();
                 // 图标并入名称：以 emoji 开头的名称自动提取为 icon，其余为名称。
                 const rawName = (data.name as string || '').trim();
                 const emojiMatch = rawName.match(/^\p{Extended_Pictographic}/u);
                 const name = emojiMatch ? rawName.slice(emojiMatch[0].length).trim() : rawName;
+                if (!name) throw new SettingsValidationError(t('settings.autosave.invalid'));
+                const ids = this.editModels.map(model => model.id);
+                if (new Set(ids).size !== ids.length) throw new SettingsValidationError(t('provider.models.duplicateIds'));
                 const icon = emojiMatch ? emojiMatch[0] : (provider?.icon ?? undefined);
                 const updated: LLMProvider = {
                     // 保留未在表单中展示的 Provider 字段（capabilities.serverSideWebSearch、
                     // supportsThinking、requiresReferer、metadata 等），否则保存会静默丢失
                     // 内置联网搜索能力，导致 resolveWebSearch 判定失败。
-                    ...(provider ?? {}),
-                    id: provider?.id ?? `prov-${generateShortUUID()}`,
+                    ...providerConfig,
+                    id: this.editingProvider!.id,
                     name,
                     icon,
-                    implementation: provider?.implementation ?? 'openai-compatible',
-                    baseURL: data.baseURL,
-                    defaultPath: (data.defaultPath as string || '').trim() || undefined,
+                    implementation: providerConfig.implementation,
+                    baseURL: providerConfig.baseURL,
+                    defaultPath: providerConfig.defaultPath,
                     responsesPath: (data.responsesPath as string || '').trim() || undefined,
                     anthropicPath: (data.anthropicPath as string || '').trim() || undefined,
                     // Keep existing apiKey if field was left empty
                     apiKey: newApiKey || existingApiKey || undefined,
-                    models: [...this.editModels],
+                    models: structuredClone(this.editModels),
                     isBuiltin: isBuiltin,
                     enabled: this.formOnly ? data.enabled === 'on' : provider?.enabled,
                     defaultTemperature: (() => {
@@ -487,8 +472,10 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                 };
 
                 await this.service.saveProvider(updated);
-                Toast.success('Provider 已保存');
-                this.render();
+                this.editingProvider = structuredClone(updated);
+                this.currentProviderId = updated.id;
+                const heading = this.container.querySelector('.settings-page__title');
+                if (this.formOnly && heading) heading.textContent = updated.name;
             },
         }, this.formOnly);
 
@@ -500,26 +487,73 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         } else setTimeout(() => this.bindModalEvents(), 100);
     }
 
+    private async refreshModels(button: HTMLButtonElement, list: HTMLElement): Promise<void> {
+        const form = button.closest('form')!;
+        button.disabled = true;
+        button.textContent = t('provider.models.refreshing');
+        try {
+            const snapshot = readProviderForm(form, this.editingProvider!);
+            const models = await this.service.listProviderModels(snapshot);
+            const current = readProviderForm(form, this.editingProvider!);
+            if (['implementation', 'baseURL', 'apiKey', 'modelsPath'].some(field =>
+                snapshot[field as keyof LLMProvider] !== current[field as keyof LLMProvider])) {
+                throw new Error(t('provider.models.configurationChanged'));
+            }
+            if (!button.isConnected) return;
+            this.syncInputsToModelData();
+            const added = this.appendModels(models);
+            list.innerHTML = this.renderModelListHTML();
+            this.updateModelCount();
+            requestSettingsSave(form);
+            Toast.success(t('provider.models.refreshed', { count: added, total: models.length, existing: models.length - added }));
+        } catch (error) {
+            Toast.error(t('provider.models.refreshFailed', { message: error instanceof Error ? error.message : String(error) }));
+        } finally {
+            button.disabled = false;
+            button.textContent = t('provider.models.refresh');
+        }
+    }
+
+    private appendModels(entries: LLMModel[]): number {
+        const ids = new Set(this.editModels.map(model => model.id));
+        let added = 0;
+        for (const entry of entries) {
+            if (!entry || typeof entry !== 'object' || !('id' in entry) || typeof entry.id !== 'string') continue;
+            const id = entry.id.trim();
+            if (!id || ids.has(id)) continue;
+            this.editModels.push({ ...entry, id });
+            ids.add(id);
+            added++;
+        }
+        return added;
+    }
+
     private renderModelListHTML(): string {
         if (this.editModels.length === 0) {
             return '<div class="settings-empty-small">暂无模型，请添加</div>';
         }
         return this.editModels.map((m, i) => `
-            <div class="settings-model-item">
+            <div class="settings-model-item" ${this.matchesModelSearch(m) ? '' : 'hidden style="display:none"'}>
                 <div class="settings-model-item__drag">::</div>
                 <div class="settings-model-item__content" style="flex-direction:column;gap:4px;align-items:stretch">
                     <div style="display:flex;gap:4px">
                         <input type="text" class="settings-input-sm model-id-input" data-idx="${i}"
-                               value="${m.id}" placeholder="Model ID" title="Model ID（API 用）">
+                               required value="${escapeAttr(m.id)}" placeholder="Model ID" title="Model ID（API 用）">
                         <input type="text" class="settings-input-sm model-name-input" data-idx="${i}"
-                               value="${m.name}" placeholder="显示名称">
+                               value="${escapeAttr(m.name)}" placeholder="显示名称">
                     </div>
+                    <details><summary>${t('provider.models.details')}</summary>
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                         <select class="settings-input-sm model-category-select" data-idx="${i}" title="模型用途" style="max-width:110px">
                             ${MODEL_CATEGORIES.map(cat => `
                                 <option value="${cat}" ${(m.category ?? 'chat') === cat ? 'selected' : ''}>${cat}</option>
                             `).join('')}
                         </select>
+                        <label>${t('provider.models.preferredProtocol')}
+                            <select class="settings-input-sm model-protocol-select" data-idx="${i}">
+                                ${this.renderModelProtocolOptions(m.preferredProtocol)}
+                            </select>
+                        </label>
                         <select class="settings-input-sm model-thinking-select" data-idx="${i}" title="Thinking 模式" style="max-width:110px">
                             <option value="" ${!m.thinkingMode ? 'selected' : ''}>think: auto</option>
                             <option value="enabled" ${m.thinkingMode === 'enabled' ? 'selected' : ''}>think: on</option>
@@ -533,7 +567,7 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                                 ${emoji}
                             </label>
                         `).join('')}
-                    </div>
+                    </div></details>
                 </div>
                 <div class="settings-model-item__actions">
                     <button type="button" class="btn-icon btn-up"   data-idx="${i}" ${i === 0 ? 'disabled' : ''}>⬆️</button>
@@ -550,12 +584,15 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         const listContainer = document.getElementById('model-list-container') as HTMLElement | null;
         const addModelBtn   = document.getElementById('btn-add-model') as HTMLButtonElement | null;
 
-        // ── API 驱动表格恒显（3 行字段独立，无同名冲突） ─────────────────
-
         const renderList = () => {
             if (!listContainer) return;
             listContainer.innerHTML = this.renderModelListHTML();
+            this.updateModelCount();
+            if (this.providerForm) requestSettingsSave(this.providerForm);
         };
+
+        this.bindProviderControls();
+        this.updateModelCount();
 
         // Test API Key button
         const testBtn    = document.getElementById('btn-test-provider') as HTMLButtonElement | null;
@@ -564,7 +601,9 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
             testBtn.addEventListener('click', async () => {
                 if (testBtn.disabled) return;
                 const form = document.getElementById('provider-form') as HTMLFormElement;
-                const apiKey  = ((form.querySelector('[name="apiKey"]')  as HTMLInputElement)?.value || '').trim();
+                this.syncInputsToModelData();
+                const definition = readProviderForm(form, this.editingProvider!);
+                const apiKey = definition.apiKey;
                 const provId  = this.currentProviderId ?? 'custom';
                 const baseURL = ((form.querySelector('[name="baseURL"]') as HTMLInputElement)?.value || '').trim();
                 const models  = this.editModels;
@@ -578,22 +617,28 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                 testBtn.disabled = true; testBtn.textContent = '⏳ 测试中...';
                 testResult.style.display = 'none';
                 try {
-                    const r = await this.service.testConnection({ provider: provId, apiKey, baseURL, model });
+                    const r = await this.service.testConnection({ provider: provId, apiKey, baseURL, model,
+                        protocol: this.editModels[0]?.preferredProtocol ?? definition.defaultProtocol, providerDefinition: definition });
                     testResult.style.cssText = `display:block;padding:8px;border-radius:4px;font-size:12px;background:${r.success ? 'var(--st-success-bg,#d4edda)' : 'var(--st-danger-bg,#f8d7da)'};color:${r.success ? 'var(--st-success,#155724)' : 'var(--st-danger,#721c24)'}`;
                     testResult.textContent = `${r.success ? '✅' : '❌'} ${r.message || (r.success ? '连接测试成功' : '连接测试失败')}`;
                 } catch (e: unknown) {
                     testResult.style.cssText = 'display:block;padding:8px;border-radius:4px;font-size:12px;background:var(--st-danger-bg,#f8d7da);color:var(--st-danger,#721c24)';
                     testResult.textContent = `❌ 测试出错: ${e instanceof Error ? e.message : String(e)}`;
                 } finally {
-                    testBtn.disabled = false; testBtn.textContent = '🔍 测试 API Key';
+                    testBtn.disabled = false; testBtn.textContent = t('provider.protocol.testConnection');
                 }
             });
         }
 
+        const refreshBtn = document.getElementById('btn-refresh-models') as HTMLButtonElement | null;
+        refreshBtn?.addEventListener('click', () => {
+            if (!refreshBtn.disabled && listContainer) void this.refreshModels(refreshBtn, listContainer);
+        });
+
         // Add model
         addModelBtn?.addEventListener('click', () => {
             this.syncInputsToModelData();
-            this.editModels.push({ id: 'new-model-id', name: 'New Model', category: 'chat' });
+            this.editModels.push({ id: '', name: '', category: 'chat', supportsVision: true, supportsThinking: true, supportsTools: true });
             renderList();
             listContainer?.scrollTo({ top: listContainer.scrollHeight, behavior: 'smooth' });
         });
@@ -624,15 +669,101 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         });
     }
 
+    private renderModelProtocolOptions(selected?: ApiProtocol): string {
+        const form = this.providerForm?.isConnected ? this.providerForm : undefined;
+        const provider = form ? readProviderForm(form, this.editingProvider!) : this.editingProvider;
+        if (!provider) return '<option value=""></option>';
+        return renderProtocolOptions(provider, selected).replace(/<option value="">.*?<\/option>/, `<option value="">${t('provider.models.inheritProtocol')}</option>`);
+    }
+
+    private refreshModelProtocolOptions(form: HTMLFormElement): void {
+        this.syncInputsToModelData();
+        form.querySelectorAll<HTMLSelectElement>('.model-protocol-select').forEach((select, index) => {
+            select.innerHTML = this.renderModelProtocolOptions(this.editModels[index].preferredProtocol);
+        });
+    }
+
+    private matchesModelSearch(model: LLMModel): boolean {
+        return `${model.id} ${model.name}`.toLowerCase().includes(this.modelSearch);
+    }
+
+    private updateModelCount(): void {
+        const count = document.getElementById('provider-model-count');
+        if (count) count.textContent = t('provider.models.count', { total: this.editModels.length,
+            visible: this.editModels.filter(model => this.matchesModelSearch(model)).length });
+    }
+
+    private bindTestInvalidation(form: HTMLFormElement): void {
+        form.addEventListener('input', event => {
+            const input = event.target as HTMLInputElement;
+            if (!['baseURL', 'apiKey', 'implementation', 'chatPath', 'responsesPath', 'anthropicPath', 'geminiPath'].includes(input.name)) return;
+            form.querySelectorAll<HTMLElement>('[data-protocol-result]').forEach(result => {
+                result.textContent = t('provider.protocol.unverified');
+            });
+            const result = form.querySelector<HTMLElement>('#provider-test-result');
+            if (result) result.style.display = 'none';
+        });
+    }
+
+    private bindModelSearch(form: HTMLFormElement): void {
+        form.querySelector('#provider-model-search')?.addEventListener('input', event => {
+            this.syncInputsToModelData();
+            this.modelSearch = (event.target as HTMLInputElement).value.toLowerCase().trim();
+            document.getElementById('model-list-container')!.innerHTML = this.renderModelListHTML();
+            this.updateModelCount();
+        });
+    }
+
+    private bindProviderControls(): void {
+        const form = document.getElementById('provider-form') as HTMLFormElement;
+        this.providerForm = form;
+        this.bindModelSearch(form);
+        this.bindTestInvalidation(form);
+        form.querySelector('#provider-add-protocol')?.addEventListener('change', event => {
+            const select = event.target as HTMLSelectElement;
+            const checkbox = form.querySelector<HTMLInputElement>(`[name="supportedProtocols"][value="${select.value}"]`);
+            if (checkbox) checkbox.checked = true;
+            select.value = '';
+            syncProtocolControls(form);
+            this.refreshModelProtocolOptions(form);
+        });
+        form.querySelector('#provider-protocols')?.addEventListener('change', () => {
+            syncProtocolControls(form); this.refreshModelProtocolOptions(form);
+        });
+        form.querySelector('[name="implementation"]')?.addEventListener('change', () => {
+            const primary = getPrimaryProtocol(readProviderForm(form, this.editingProvider!));
+            form.querySelectorAll<HTMLInputElement>('[name="supportedProtocols"]').forEach(input => { input.checked = input.value === primary; });
+            syncProtocolControls(form);
+            this.refreshModelProtocolOptions(form);
+        });
+        form.querySelectorAll<HTMLButtonElement>('[data-test-protocol]').forEach(button => {
+            button.addEventListener('click', () => { void this.testProtocol(form, button); });
+        });
+    }
+
+    private async testProtocol(form: HTMLFormElement, button: HTMLButtonElement): Promise<void> {
+        const protocol = button.dataset.testProtocol as ApiProtocol;
+        const result = form.querySelector<HTMLElement>(`[data-protocol-result="${protocol}"]`)!;
+        this.syncInputsToModelData();
+        const definition = readProviderForm(form, this.editingProvider!);
+        button.disabled = true;
+        result.textContent = t('provider.protocol.testing');
+        try {
+            const response = await this.service.testConnection({ provider: definition.id,
+                apiKey: definition.apiKey, baseURL: definition.baseURL, model: this.editModels[0]?.id,
+                protocol, providerDefinition: definition });
+            result.textContent = `${t(response.success ? 'provider.protocol.verified' : 'provider.protocol.failed')}: ${response.message ?? ''}`;
+        } catch (error) {
+            result.textContent = `${t('provider.protocol.failed')}: ${error instanceof Error ? error.message : String(error)}`;
+        } finally { button.disabled = false; }
+    }
+
     // ── Sync helpers ───────────────────────────────────────────────────────────
 
     private syncInputsToModelData() {
         const container = document.getElementById('model-list-container');
         if (!container) return;
         const capMap: Record<string, keyof LLMModel> = {
-            vision: 'supportsVision',
-            thinking: 'supportsThinking',
-            tools: 'supportsTools',
             audio: 'supportsAudio',
             video: 'supportsVideo',
             structuredOutput: 'supportsStructuredOutput',
@@ -642,10 +773,13 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
             const idEl   = row.querySelector('.model-id-input') as HTMLInputElement | null;
             const nameEl = row.querySelector('.model-name-input') as HTMLInputElement | null;
             if (idEl)   this.editModels[i].id   = idEl.value.trim();
-            if (nameEl) this.editModels[i].name = nameEl.value.trim();
+            if (nameEl) this.editModels[i].name = nameEl.value.trim() || this.editModels[i].id;
 
             const catEl = row.querySelector('.model-category-select') as HTMLSelectElement | null;
             if (catEl) this.editModels[i].category = (catEl.value as ModelCategory) || undefined;
+
+            const protocolEl = row.querySelector('.model-protocol-select') as HTMLSelectElement | null;
+            if (protocolEl) this.editModels[i].preferredProtocol = (protocolEl.value as ApiProtocol) || undefined;
 
             const thinkEl = row.querySelector('.model-thinking-select') as HTMLSelectElement | null;
             if (thinkEl) {
@@ -664,13 +798,16 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
 
     // ── Delete / Reset ─────────────────────────────────────────────────────────
 
-    private confirmDelete(provider: LLMProvider): Promise<void> { return this.deleteProviders([provider.id]); }
+    private async confirmDelete(provider: LLMProvider): Promise<void> {
+        await this.discardAutoSave(); await this.deleteProviders([provider.id]);
+    }
 
     private confirmReset(provider: LLMProvider) {
         Modal.confirm(
             '确认重置',
             `将「${provider.name}」恢复为内置默认配置（BaseURL / 模型列表），确定继续？`,
             async () => {
+                await this.discardAutoSave();
                 // Re-save from built-in constant (getProviderDefaults returns raw constant values)
                 const defaults = this.service.getProviderDefaults();
                 const def = defaults[provider.id];

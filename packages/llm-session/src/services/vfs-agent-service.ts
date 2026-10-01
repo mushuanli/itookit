@@ -1,3 +1,4 @@
+import type { ProviderConnectionTestParams } from '@itookit/llm-common';
 // @file: llm-conversation/src/services/vfs-agent-service.ts
 //
 // Agent VFS 持久化服务。
@@ -355,7 +356,8 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
     getFullProvider(id: string): LLMProvider | undefined { return this.llmService.getFullProvider(id); }
     async saveProvider(provider: LLMProvider): Promise<void> { return this.llmService.saveProvider(provider); }
     async deleteProvider(id: string): Promise<void> { return this.llmService.deleteProvider(id); }
-    async testConnection(params: { provider: string; apiKey?: string; baseURL?: string; model?: string }): Promise<ConnectionTestResult> { return this.llmService.testConnection(params); }
+    async listProviderModels(provider: LLMProvider) { return this.llmService.listProviderModels(provider); }
+    async testConnection(params: ProviderConnectionTestParams): Promise<ConnectionTestResult> { return this.llmService.testConnection(params); }
 
     async getConnections(): Promise<ConnectionMeta[]> { return this.llmService.getConnections(); }
     async getFullConnection(id: string): Promise<LLMConnection | null> { return this.llmService.getFullConnection(id); }

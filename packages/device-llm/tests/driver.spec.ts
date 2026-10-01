@@ -25,6 +25,19 @@ describe('LLMDriver Core', () => {
         expect(driver).toBeDefined();
     });
 
+    it('applies the requested model effort and preserves explicit request overrides', async () => {
+        const driver = new LLMDriver({ connection: { id: 'c', name: 'C', providerId: 'deepseek',
+            apiKey: 'test', model: 'a', baseURL: 'https://example.com',
+            metadata: { modelReasoningEfforts: { a: 'low', b: 'high' } } } });
+        globalFetch.mockResolvedValue({ ok: true, status: 200,
+            json: async () => ({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }] }) });
+        for (const request of [{}, { model: 'b' }, { model: 'b', reasoningEffort: 'medium' as const }]) {
+            await driver.chat.create({ messages: [{ role: 'user', content: 'Hi' }], thinking: true, ...request });
+        }
+        expect(globalFetch.mock.calls.map(call => JSON.parse(call[1].body).reasoning_effort)).toEqual(['low', 'high', 'medium']);
+        await driver.dispose();
+    });
+
     it('should retry on 5xx errors', async () => {
         const driver = new LLMDriver({
             provider: 'openai',

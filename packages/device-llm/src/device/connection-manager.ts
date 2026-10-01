@@ -2,7 +2,7 @@
 //
 // ConnectionManager — CRUD for LLMConnection with VFS persistence.
 
-import type { LLMConnection, ConnectionMeta } from '@itookit/common';
+import type { LLMConnection, ConnectionMeta, LLMProvider } from '@itookit/common';
 import type { IVFSManager, IFileSystem } from '@itookit/vfs-core';
 import { toConnectionMeta, aggregateProviderCosts } from '@itookit/common';
 import { DEFAULT_CONNECTIONS, CONST_CONFIG_VERSION } from '../constants';
@@ -80,6 +80,16 @@ export class ConnectionManager {
     }
 
     // ─── Mutations ─────────────────────────────────────────────────────────
+
+    async ensureProviderConnection(provider: LLMProvider, systemFS?: IFileSystem): Promise<void> {
+        const model = provider.models.find(model => (model.category ?? 'chat') === 'chat');
+        if (provider.enabled === false || !model) return;
+        if (this._connections.some(connection => connection.providerId === provider.id)) return;
+        const base = `provider-${provider.id}`;
+        let id = base, suffix = 1;
+        while (this.findConn(id)) id = `${base}-${suffix++}`;
+        await this.saveConnection({ id, name: provider.name, providerId: provider.id, enabled: true, tiers: { optimal: model.id } }, systemFS);
+    }
 
     async saveConnection(conn: LLMConnection, systemFS?: IFileSystem): Promise<void> {
         await this.writeToDisk(conn, systemFS);

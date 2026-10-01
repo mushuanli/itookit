@@ -387,6 +387,7 @@ export class SessionRepository implements ISessionRepository {
             const current = sessionSettings(await tx.getEntry(path, 'settings'), manifest);
             await tx.setEntry(path, 'settings', JSON.stringify(mergeSessionSettings(current, patch)));
         });
+        this.notify({ sessionId: id, kind: 'session' });
     }
     async readDocument(id: string, name: string): Promise<string | null> {
         const p = this.paths(id), key = `document/${this.name(name)}`;
