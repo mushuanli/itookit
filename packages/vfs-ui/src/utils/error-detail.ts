@@ -23,3 +23,19 @@ export function describeCauseChain(error: unknown, maxDepth = 5): string {
     }
     return parts.join(' ← ');
 }
+
+/**
+ * The innermost message in the chain: what a person can act on, without the
+ * "Source operation failed: <method>" wrapper the view adds for privacy.
+ */
+export function describeErrorReason(error: unknown): string {
+    const seen = new Set<unknown>();
+    let current: unknown = error;
+    let reason = '';
+    while (current && typeof current === 'object' && !seen.has(current)) {
+        seen.add(current);
+        if (current instanceof Error && current.message) reason = current.message;
+        current = (current as { cause?: unknown }).cause;
+    }
+    return reason || String(error);
+}

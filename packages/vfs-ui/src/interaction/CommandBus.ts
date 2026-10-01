@@ -4,6 +4,7 @@
  */
 import type { ICommandPort } from '../contracts/ports';
 import type { CommandName, CommandPayload } from '../contracts/commands';
+import { describeErrorReason } from '../utils/error-detail';
 
 type Handler<T extends CommandName> = (payload: CommandPayload<T>) => void | Promise<void>;
 
@@ -19,7 +20,8 @@ export class CommandBus implements ICommandPort {
       catch (error) { tasks.push(Promise.reject(error)); }
     }
     const work = Promise.all(tasks).then(() => {});
-    void work.catch(error => console.error(`[CommandBus] ${command} failed`, error));
+    // The view error only names the operation; the actionable reason rides along as `cause`.
+    void work.catch(error => console.error(`[CommandBus] ${command} failed: ${describeErrorReason(error)}`, error));
     return work;
   }
 

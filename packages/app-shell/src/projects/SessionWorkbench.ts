@@ -19,7 +19,7 @@ import { localizeMountError } from '../files/localize-mount-error';
 import type { EditorFactory, IEditor, EditorHostContext, ContextMenuConfig } from '@itookit/ui-common';
 import type { ISessionRepository } from '@itookit/llm-session';
 import type { Kernel } from '@itookit/durable-kernel';
-import { filterGitignoredFiles, createVFSUI, type VFSToolbarContext, type VFSUIShell, type VFSNodeUI, type UIPersistencePort } from '@itookit/vfs-ui';
+import { filterGitignoredFiles, createVFSUI, describeErrorReason, type VFSToolbarContext, type VFSUIShell, type VFSNodeUI, type UIPersistencePort } from '@itookit/vfs-ui';
 import { FSError, createFileSystemView, type IFileSystem, type FileSystemContextOwner, type FileSystemView } from '@itookit/vfs-core';
 
 
@@ -356,7 +356,8 @@ export class SessionWorkbench implements WorkspaceController {
     }
     private report(error: unknown): void {
         if (this.closed) return;
-        const text = error instanceof Error ? error.message : String(error);
+        // View errors only name the operation; the reason a user can act on is the cause.
+        const text = describeErrorReason(error);
         if (!this.editor && !this.previewCleanup) this.message(text);
         else {
             const notice = document.createElement('div'); notice.className = 'session-detail__error';

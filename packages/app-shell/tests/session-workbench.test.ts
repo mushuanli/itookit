@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FSError } from '@itookit/vfs-core';
 import { t } from '@itookit/common';
 import { createVFSUI } from '@itookit/vfs-ui';
-vi.mock('@itookit/vfs-ui', () => ({ filterGitignoredFiles: async (_fs: unknown, _path: string, nodes: unknown[]) => nodes, createVFSUI: vi.fn(() => ({ on: () => () => {}, start: async () => {}, getActiveSession: () => undefined, refresh: async () => {}, selectPath: async () => {}, destroy: () => {} })) }));
+vi.mock('@itookit/vfs-ui', async (importOriginal) => ({ ...(await importOriginal<typeof import('@itookit/vfs-ui')>()),
+    filterGitignoredFiles: async (_fs: unknown, _path: string, nodes: unknown[]) => nodes,
+    createVFSUI: vi.fn(() => ({ on: () => () => {}, start: async () => {}, getActiveSession: () => undefined, refresh: async () => {}, selectPath: async () => {}, destroy: () => {} })) }));
 import { SessionWorkbench } from '../src/projects/SessionWorkbench';
 const element = () => ({ replaceChildren: vi.fn(), append: vi.fn(), setAttribute: vi.fn(), classList: { add: vi.fn() }, remove: vi.fn(), title: '', textContent: '', hidden: false });
 function setup() {

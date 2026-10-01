@@ -1,8 +1,10 @@
 /** One execution boundary for menus, toolbars, row actions and bulk actions. */
+import { describeErrorReason } from '../utils/error-detail';
+
 export class ActionRunner {
   private readonly pending = new Map<string, Promise<void>>();
   private readonly abort = new AbortController();
-  constructor(private readonly report: (error: unknown) => void = error => alert(String(error))) {}
+  constructor(private readonly report: (error: unknown) => void = error => alert(describeErrorReason(error))) {}
   run(id: string, operation: (signal: AbortSignal) => void | Promise<void>): Promise<void> {
     if (this.abort.signal.aborted) return Promise.resolve();
     const current = this.pending.get(id);
