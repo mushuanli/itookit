@@ -1,6 +1,6 @@
 {
     "name": "@itookit/vfsdriver-indexeddb",
-    "version": "0.1.0",
+    "version": "5.3.0",
     "description": "IndexedDB storage backend for @itookit/vfs-core — persistent browser-side VFS driver.",
     "type": "module",
     "main": "./src/index.ts",
@@ -15,14 +15,19 @@
     },
     "publishConfig": {
         "access": "public",
-        "main": "./dist/index.js",
-        "module": "./dist/index.mjs",
+        "main": "./dist/index.cjs",
+        "module": "./dist/index.js",
         "types": "./dist/index.d.ts",
         "exports": {
             ".": {
-                "types": "./dist/index.d.ts",
-                "import": "./dist/index.mjs",
-                "require": "./dist/index.js"
+                "import": {
+                    "types": "./dist/index.d.ts",
+                    "default": "./dist/index.js"
+                },
+                "require": {
+                    "types": "./dist/index.d.cts",
+                    "default": "./dist/index.cjs"
+                }
             }
         }
     },
@@ -54,5 +59,14 @@
         "tsup": "^8.5.1",
         "typescript": "^5.9.3",
         "vitest": "^3.2.1"
-    }
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/mushuanli/itookit.git",
+        "directory": "packages/vfsdriver-indexeddb"
+    },
+    "bugs": {
+        "url": "https://github.com/mushuanli/itookit/issues"
+    },
+    "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/vfsdriver-indexeddb#readme"
 }
