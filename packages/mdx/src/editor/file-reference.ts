@@ -1,5 +1,5 @@
-import type { EditorFileReference } from '@itookit/ui-common';
-import { editorFilePath } from '@itookit/ui-common';
+import type { EditorFileReference } from '../editor/contracts';
+import { editorFilePath } from '../editor/contracts';
 import type { MDxEditor } from './mdx-editor';
 
 /** Read only the active view's selection; ignore selections in other panes. */

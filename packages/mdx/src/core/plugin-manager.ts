@@ -3,6 +3,7 @@
  */
 import type { MarkedExtension } from 'marked';
 import type { Extension } from '@codemirror/state';
+import { Toast } from '../utils/notifications';
 import { ServiceContainer } from './service-container';
 import { EventBus } from './event-bus';
 import { CommandRegistry } from './command-registry';
@@ -11,7 +12,7 @@ import type {
   MDxPlugin, PluginContext,
   ToolbarButtonConfig, TitleBarButtonConfig,
 } from './types';
-import type { IFileSystem } from '@itookit/vfs-core';
+import type { AssetProvider, StoreFactory } from '../editor/contracts';
 
 /**
  * 插件管理器（精简版）
@@ -36,11 +37,9 @@ export class PluginManager {
   private commandRegistry = new CommandRegistry();
 
   // 上下文信息
-  private fs: IFileSystem | null = null;
-  private assets: IFileSystem | null = null;
-  private currentNodeId: string | null = null;
-
-  private ownerNodeId: string | null = null;
+  private assets?: AssetProvider;
+  private documentPath?: string;
+  private storeFactory?: StoreFactory;
 
   // 收集器
   public codemirrorExtensions: Extension[] = [];
@@ -61,24 +60,15 @@ export class PluginManager {
 
   // === 上下文配置 ===
 
-  setContext(nodeId?: string, ownerNodeId?: string, engine?: IFileSystem, assets?: IFileSystem): void {
-    if (nodeId) this.currentNodeId = nodeId;
-    if (engine) this.fs = engine;
-    this.assets = assets ?? null;
-    this.ownerNodeId = ownerNodeId || nodeId || null;
-    this.storeCache.clear();
+  setContext(documentPath?: string, assets?: AssetProvider, storeFactory?: StoreFactory): void {
+    this.documentPath = documentPath;
+    this.assets = assets;
+    this.storeFactory = storeFactory;
   }
 
-  setNodeId(nodeId: string): void {
-    if (this.ownerNodeId === this.currentNodeId) this.ownerNodeId = null;
-    this.currentNodeId = nodeId;
-    if (!this.ownerNodeId) this.ownerNodeId = nodeId;
-    this.storeCache.forEach(store => store.updateNodeId?.(nodeId));
-  }
-
-  setFileSystem(engine: IFileSystem): void {
-    this.fs = engine;
-    this.storeCache.clear();
+  setDocumentPath(path: string): void {
+    this.documentPath = path;
+    this.storeCache.forEach(store => store.updateDocumentPath?.(path));
   }
 
   // === 插件生命周期 ===
@@ -182,11 +172,13 @@ export class PluginManager {
       // 持久化
       getScopedStore: () => this.getOrCreateStore(plugin.name),
 
-      // 引擎访问
-      getFileSystem: () => this.fs,
-      getAssetFileSystem: () => this.assets,
-      getCurrentNodeId: () => this.currentNodeId,
-      getOwnerNodeId: () => this.ownerNodeId,
+      // Host capabilities
+      notify: (message, level) => {
+        const notify = this.editorInstance?.config.host?.notify;
+        if (notify) notify(message, level); else Toast[level](message);
+      },
+      getAssets: () => this.assets,
+      getDocumentPath: () => this.documentPath,
 
       // 内部清理
       _cleanup: () => {
@@ -200,7 +192,7 @@ export class PluginManager {
     return context;
   }
 
-  // === 存储工厂（三级回退） ===
+  // === Injected store factory with an in-memory fallback ===
 
   private getOrCreateStore(pluginName: string): ScopedPersistenceStore {
     const cached = this.storeCache.get(pluginName);
@@ -209,8 +201,8 @@ export class PluginManager {
     const store = createStore({
       pluginName,
       instanceId: this.instanceId,
-      fs: this.fs,
-      nodeId: this.currentNodeId,
+      documentPath: this.documentPath,
+      factory: this.storeFactory,
     });
 
     this.storeCache.set(pluginName, store);

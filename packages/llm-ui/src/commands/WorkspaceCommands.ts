@@ -3,7 +3,7 @@
 
 import { SessionCommand } from '@itookit/llm-session';
 import { Command } from './Command';
-import { LLMPrintService, type PrintService } from '@itookit/mdxeditor';
+import { LLMPrintService, type PrintService } from '@itookit/mdx-adapter';
 import type { ErrorSeverity } from '../utils/errorHandler';
 import type { IFileSystem } from '@itookit/vfs-core';
 import { copyText } from '@itookit/ui-common';

@@ -8,11 +8,9 @@
 
 ```typescript
 interface MDxPlugin {
-    id: string;
-    init(ctx: PluginContext): Promise<void>;
-    destroy(): void;
-    getExtensions?(): Extension[];          // CodeMirror
-    getRendererExtension?(): MarkedExtension; // Marked
+    name: string;
+    install(ctx: PluginContext): void;
+    destroy?(): void;
 }
 ```
 
@@ -31,3 +29,9 @@ interface MDxPlugin {
 | | `TagPlugin` | #-tag 自动完成 |
 | Anki | `ClozePlugin` / `MemoryPlugin` | 完形填空/间隔重复 |
 | UI | `ToolbarPlugin` / `TitleBarPlugin` | 工具栏/标题栏 |
+
+## 宿主与数据适配
+
+插件通过 `PluginContext.getAssets()`、`getDocumentPath()`、`getScopedStore()` 和 `notify()` 访问公共能力；使用 `registerCodeMirrorExtension` / `registerSyntaxExtension` 注册扩展。
+
+`MentionProvider`、`AutocompleteProvider` 和 `TagPluginOptions.getTags` 接收用户自己的查询实现。MindOS 的 VFS、附件管理和会话打印由 `@itookit/mdx-adapter` 接入，核心插件不导入内部业务包。

@@ -5,36 +5,9 @@
 import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { MDxEditor } from '../../editor/mdx-editor';
 import type { PluginManager } from '../../core/plugin-manager';
-import { ACTION_ICONS, t, buildRenamedFilename } from '@itookit/common';
-import { copyText, Toast } from '@itookit/ui-common';
-import type { IFileSystem } from '@itookit/vfs-core';
-
-const replaceBasename = (path: string, filename: string): string => {
-  const slash = path.lastIndexOf('/');
-  return slash >= 0 ? `${path.slice(0, slash + 1)}${filename}` : path;
-};
-
-const renameWithStoredTitle = async (
-  engine: IFileSystem,
-  nodeId: string,
-  filename: string,
-  title: string,
-): Promise<void> => {
-  const node = await engine.driver.getNode(nodeId);
-  const oldTitle = typeof node?.metadata?.title === 'string'
-    ? node.metadata.title
-    : null;
-  if (oldTitle !== null) await engine.driver.updateMetadata(nodeId, { title });
-  try {
-    await engine.driver.rename(nodeId, filename);
-  } catch (error) {
-    if (oldTitle !== null) {
-      await engine.driver.updateMetadata(nodeId, { title: oldTitle }).catch(() => { });
-    }
-    throw error;
-  }
-};
-
+import { ACTION_ICONS } from '../../utils/icons';
+import { t } from '../../utils/i18n';
+import { copyText } from '../../utils/clipboard';
 /**
  * 标题栏插件配置选项
  */
@@ -146,7 +119,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
     this.editor = editor;
     context.registerTitleBarButton?.({
       id: 'toggle-line-wrapping',
-      title: t('editor.wrap.label'),
+      title: this.translate('editor.wrap.label'),
       icon: ACTION_ICONS.wordWrap,
       location: 'right',
       onClick: () => editor.setLineWrapping(!editor.getLineWrapping()),
@@ -185,7 +158,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
 
       context.registerTitleBarButton?.({
         id: 'ai-action',
-        title: t('editor.ai.title'),
+        title: this.translate('editor.ai.title'),
         icon: ACTION_ICONS.ai,
         command: 'triggerAI',
         location: 'right',
@@ -194,12 +167,12 @@ export class CoreTitleBarPlugin implements MDxPlugin {
 
     context.registerTitleBarButton?.({
       id: 'copy-content',
-      title: t('editor.copyContent'),
+      title: this.translate('editor.copyContent'),
       icon: ACTION_ICONS.copy,
       location: 'right',
       onClick: async ({ editor }) => {
-        if (await copyText(editor.getText())) Toast.success(t('editor.copySuccess'));
-        else Toast.error(t('editor.copyFailed'));
+        if (await copyText(editor.getText())) context.notify(this.translate('editor.copySuccess'), 'success');
+        else context.notify(this.translate('editor.copyFailed'), 'error');
       },
     });
 
@@ -265,18 +238,13 @@ export class CoreTitleBarPlugin implements MDxPlugin {
         this.titleEl!.value = this.currentTitle;
         return;
       }
-      const engine = context.getFileSystem?.();
-      const nodeId = context.getCurrentNodeId();
-      if (!engine || !nodeId) {
-        this.titleEl!.value = this.currentTitle;
-        return;
-      }
-      // The actual path remains authoritative when the display title hides the suffix.
-      const { filename: finalName, title } = buildRenamedFilename(newTitle, nodeId.split('/').pop()!);
+      const path = editor.config.documentPath;
+      const rename = editor.config.host?.renameDocument;
+      if (!rename || !path) { this.titleEl!.value = this.currentTitle; return; }
       try {
-        await renameWithStoredTitle(engine, nodeId, finalName, title);
-        editor.updateNodeId(replaceBasename(nodeId, finalName));
-        editor.setTitle(title);
+        const result = await rename(path, newTitle);
+        editor.updateDocumentPath(result.path);
+        editor.setTitle(result.title);
       } catch {
         this.titleEl!.value = this.currentTitle;
       }
@@ -375,10 +343,14 @@ export class CoreTitleBarPlugin implements MDxPlugin {
     }
   }
 
+  private translate(key: string): string {
+    return this.editor?.config.translate?.(key) ?? t(key, this.editor?.config.locale);
+  }
+
   private updateWrapButton(): void {
     if (!this.wrapButton || !this.editor) return;
     this.wrapButton.setAttribute('aria-pressed', String(this.editor.getLineWrapping()));
-    this.wrapButton.title = t(this.editor.getMode() === 'edit'
+    this.wrapButton.title = this.translate(this.editor.getMode() === 'edit'
       ? 'editor.wrap.sourceHint' : 'editor.wrap.previewHint');
   }
 

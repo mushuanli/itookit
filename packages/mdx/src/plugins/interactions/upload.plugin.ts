@@ -5,7 +5,6 @@
 import { EditorView } from 'codemirror';
 import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { MDxEditor } from '../../editor/mdx-editor';
-import { Toast } from '@itookit/ui-common';
 import {
     getUploadLimits,
     validateFile,
@@ -102,7 +101,7 @@ export class UploadPlugin implements MDxPlugin {
                 view.focus();
                 await this.processFiles(files, view);
             } else {
-                Toast.error('无法获取编辑器实例');
+                this.context.notify('无法获取编辑器实例', 'error');
             }
 
             // 清空 value，允许重复选择同一个文件
@@ -132,19 +131,9 @@ export class UploadPlugin implements MDxPlugin {
      * 核心处理逻辑：校验 -> 上传 -> 替换 Markdown
      */
     private async processFiles(fileList: FileList | File[], view: EditorView): Promise<void> {
-        const engine = this.context.getFileSystem?.();
-        // ✅ 获取 ownerNodeId (由 EditorOptions 传入，或默认为 nodeId)
-        const ownerNodeId = this.context.getOwnerNodeId?.();
-
-        if (!engine) {
-            console.warn('[UploadPlugin] No engine available.');
-            Toast.error('上传服务不可用');
-            return;
-        }
-
-        if (!ownerNodeId) {
-            console.warn('[UploadPlugin] No ownerNodeId defined.');
-            Toast.error('无法确定资产归属，上传失败');
+        const assets = this.context.getAssets();
+        if (!assets?.upload) {
+            this.context.notify('上传服务不可用', 'error');
             return;
         }
 
@@ -174,15 +163,12 @@ export class UploadPlugin implements MDxPlugin {
                     continue;
                 }
 
-                // 2.2 生成安全文件名 (Engine 层可能还会处理重名)
+                // Generate a safe filename; the host may resolve collisions.
                 const safeName = this.generateSafeFilename(file.name);
                 const arrayBuffer = await file.arrayBuffer();
 
-                // 2.3 ✅ 调用 Engine 创建资产
-                // 注意：VFSCore 会根据 arrayBuffer 自动标记 isBinary: true
-                // MiddlewareRegistry 会根据此标记跳过 PlainTextMiddleware
-                // v3.3: IFileSystem.meta.assets.putAsset replaces deprecated IFSEngine.createAsset
-                const assetNode = await engine.meta.assets.putAsset(ownerNodeId, safeName, arrayBuffer);
+                // Upload through the host attachment port.
+                const assetNode = await assets.upload(safeName, arrayBuffer);
 
                 // 2.4 生成 @asset/ 路径 Markdown
                 const path = generateAssetPath(assetNode.name);
@@ -191,7 +177,7 @@ export class UploadPlugin implements MDxPlugin {
 
             // 3. 处理错误提示
             if (errors.length > 0) {
-                Toast.error(`部分文件上传失败:\n${errors.slice(0, 3).join('\n')}${errors.length > 3 ? '...' : ''}`);
+                this.context.notify(`部分文件上传失败:\n${errors.slice(0, 3).join('\n')}${errors.length > 3 ? '...' : ''}`, 'error');
             }
 
             // 4. 替换占位符
@@ -216,13 +202,13 @@ export class UploadPlugin implements MDxPlugin {
                 });
 
                 if (replacements.length > 0) {
-                    Toast.success(`成功上传 ${replacements.length} 个文件`);
+                    this.context.notify(`成功上传 ${replacements.length} 个文件`, 'success');
                 }
             }
 
         } catch (error) {
             console.error('[UploadPlugin] Upload failed:', error);
-            Toast.error('上传过程中发生错误');
+            this.context.notify('上传过程中发生错误', 'error');
 
             // 发生严重错误时清理占位符
             const currentDoc = view.state.doc.toString();

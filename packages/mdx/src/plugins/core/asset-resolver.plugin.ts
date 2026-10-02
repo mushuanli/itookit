@@ -4,8 +4,6 @@
  */
 import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { AssetConfigOptions } from '../../services/asset-helper';
-import { guessMimeType } from '@itookit/vfs-core';
-import { createMDXFile } from '@itookit/vfs-core';
 
 export interface AssetResolverPluginOptions extends AssetConfigOptions { }
 
@@ -30,13 +28,9 @@ export class AssetResolverPlugin implements MDxPlugin {
     }
 
     private async resolveAssets(root: HTMLElement, context: PluginContext): Promise<void> {
-        const fs = context.getFileSystem?.();
-        const ownerNodeId = context.getOwnerNodeId?.();
-        const assets = context.getAssetFileSystem?.();
-        if (!assets && (!fs || !ownerNodeId)) return;
-        const read = (name: string) => assets
-            ? assets.driver.readContent('/' + name, { encoding: 'binary' })
-            : createMDXFile(fs!, ownerNodeId!).asset(name).read();
+        const assets = context.getAssets();
+        if (!assets) return;
+        const read = (name: string) => assets.read(name);
 
         const elements = root.querySelectorAll<HTMLElement>('[src], [href]');
         const resolvePromises: Promise<void>[] = [];
@@ -53,7 +47,7 @@ export class AssetResolverPlugin implements MDxPlugin {
             resolvePromises.push(
                 read(name).then((data) => {
                     if (!data) return;
-                    const mimeType = guessMimeType(name);
+                    const mimeType = assets.mimeType?.(name) ?? 'application/octet-stream';
                     const blobUrl = URL.createObjectURL(new Blob([data], { type: mimeType }));
                     this.createdUrls.add(blobUrl);
 
@@ -76,12 +70,7 @@ export class AssetResolverPlugin implements MDxPlugin {
      * 清理当前文档中未引用的资产
      */
     private async pruneUnusedAssets(context: PluginContext): Promise<number> {
-        const fs = context.getFileSystem?.();
-        const ownerNodeId = context.getOwnerNodeId?.();
-        if (!fs || !ownerNodeId) return 0;
-
-        const fileIO = createMDXFile(fs, ownerNodeId);
-        return fileIO.pruneUnusedAssets();
+        return context.getAssets()?.prune?.() ?? 0;
     }
 
     destroy(): void {

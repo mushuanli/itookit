@@ -33,7 +33,8 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 | `@itookit/llm-ui` | Chat UI：聊天界面、流式历史视图、会话编排可视化。 |
 | `@itookit/llm-settings-ui` | LLM 设置 UI：Agent/Provider/Connection/MCP/Skill/Cost/SystemPrompt 编辑器 + 配置导入导出（`llm-import`）。 |
 | `@itookit/vfs-ui` | 文件树 UI：目录导航、标签、内容大纲。 |
-| `@itookit/mdxeditor` | 基于 CodeMirror 6 的 MDX 编辑器（目录 `packages/mdx`）。 |
+| `@itookit/mdxeditor` | 独立 CodeMirror 6 编辑器（目录 `packages/mdx`），不依赖其他内部包；宿主通过公共附件、存储、导航和保存接口注入能力。 |
+| `@itookit/mdx-adapter` | MindOS 编辑器适配：VFS/namespace/Session 校验、文件格式、插件元数据、附件管理 UI、文件聊天引用及会话打印。 |
 | `@itookit/ui-common` | 共享 UI 组件、契约、浏览器工具。 |
 | `@itookit/app-settings` | 设置模块：SettingsEngine、SkillsEngine。 |
 | `@itookit/app-core` | 无 UI 应用核心：MindOS profile、RunDefinition、共享 Session 文件/目录服务，以及统一装配 `createApplicationRuntime`（VFS/LLM/Session/Flow）与 headless `createKernelRuntime`（durable-kernel + kernel-adapters + Flow programs）。Web/Tauri/CLI 共用。 |

@@ -1,7 +1,7 @@
 import { builtinTokenizer } from '../../renderer/worker-tokenizers';
 // mdx/plugins/autocomplete/mention.plugin.ts
 
-import type { HoverPreviewData } from '@itookit/common';
+import type { HoverPreviewData } from '../../editor/contracts';
 import type { Completion } from '@codemirror/autocomplete';
 import type { MarkedExtension } from 'marked';
 import type { MDxPlugin, PluginContext } from '../../core/types';

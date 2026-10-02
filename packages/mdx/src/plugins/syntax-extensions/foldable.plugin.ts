@@ -2,7 +2,7 @@
 
 import type { MDxPlugin, PluginContext } from '../../core/types';
 import { Marked } from 'marked';
-import { escapeHTML } from '@itookit/common';
+import { escapeHTML } from '../../utils/html';
 /**
  * 可折叠块插件配置选项
  */

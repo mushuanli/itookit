@@ -389,6 +389,9 @@ importers:
       '@itookit/device-llm':
         specifier: workspace:*
         version: link:../device-llm
+      '@itookit/mdx-adapter':
+        specifier: workspace:*
+        version: link:../mdx-adapter
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../mdx
@@ -438,6 +441,9 @@ importers:
       '@itookit/llm-session':
         specifier: workspace:*
         version: link:../llm-session
+      '@itookit/mdx-adapter':
+        specifier: workspace:*
+        version: link:../mdx-adapter
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../mdx
@@ -882,6 +888,9 @@ importers:
         specifier: ^16.4.2
         version: 16.4.2
     devDependencies:
+      '@itookit/mdx-adapter':
+        specifier: workspace:*
+        version: link:../mdx-adapter
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../mdx
@@ -936,15 +945,9 @@ importers:
       '@codemirror/view':
         specifier: ^6.43.5
         version: 6.43.5
-      '@itookit/common':
-        specifier: workspace:*
-        version: link:../common
-      '@itookit/ui-common':
-        specifier: workspace:*
-        version: link:../ui-common
-      '@itookit/vfs-core':
-        specifier: workspace:*
-        version: link:../vfs-core
+      '@types/turndown':
+        specifier: ^5.0.6
+        version: 5.0.6
       codemirror:
         specifier: ^6.0.2
         version: 6.0.2
@@ -970,9 +973,6 @@ importers:
       '@types/node':
         specifier: ^20.19.43
         version: 20.19.43
-      '@types/turndown':
-        specifier: ^5.0.6
-        version: 5.0.6
       jsdom:
         specifier: ^27.2.0
         version: 27.2.0
@@ -985,6 +985,43 @@ importers:
       vite-plugin-dts:
         specifier: ^3.9.1
         version: 3.9.1(@types/node@20.19.43)(rollup@4.62.2)(typescript@5.9.3)(vite@5.4.21(@types/node@20.19.43))
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@20.19.43)(jiti@1.21.7)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.2)
+
+  packages/mdx-adapter:
+    dependencies:
+      '@itookit/common':
+        specifier: workspace:*
+        version: link:../common
+      '@itookit/ui-common':
+        specifier: workspace:*
+        version: link:../ui-common
+      '@itookit/vfs-core':
+        specifier: workspace:*
+        version: link:../vfs-core
+    devDependencies:
+      '@codemirror/language':
+        specifier: ^6.12.4
+        version: 6.12.4
+      '@codemirror/view':
+        specifier: ^6.43.5
+        version: 6.43.5
+      '@itookit/mdxeditor':
+        specifier: workspace:*
+        version: link:../mdx
+      '@types/node':
+        specifier: ^20.19.25
+        version: 20.19.43
+      jsdom:
+        specifier: ^27.2.0
+        version: 27.2.0
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@20.19.43))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/debug@4.1.13)(@types/node@20.19.43)(jiti@1.21.7)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.2)

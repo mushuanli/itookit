@@ -4,13 +4,13 @@
  */
 import { Toast } from '@itookit/ui-common';
 import { guessMimeType, type IFileSystem, type FSNode, type FSFileNode } from '@itookit/vfs-core';
-import type { MDxEditor } from '../../editor/mdx-editor';
+import type { MDxEditor } from '@itookit/mdxeditor';
 import {
     isAssetVisible,
     generateAssetPath,
     extractFilenameFromPath,
     AssetConfigOptions
-} from '../../services/asset-helper';
+} from '@itookit/mdxeditor';
 
 interface AssetDisplayItem {
     node: FSNode;

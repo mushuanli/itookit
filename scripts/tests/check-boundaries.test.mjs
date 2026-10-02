@@ -39,3 +39,12 @@ test('public core exports are explicit and comments do not create false dependen
     assert.equal(inspect(core, "export { Service } from './service'; // import '@itookit/app-shell'\n").length, 0);
     assert.equal(inspect(core, 'const description = "document and HTMLElement";').length, 0);
 });
+
+
+test('standalone mdxeditor has no internal package dependencies', () => {
+    for (const name of ['common', 'ui-common', 'vfs-core', 'mdx-adapter']) {
+        assert.match(dependencyError('@itookit/mdxeditor', '@itookit/' + name), /public ports/);
+    }
+    assert.equal(dependencyError('@itookit/mdxeditor', 'codemirror'), undefined);
+    assert.equal(dependencyError('@itookit/mdx-adapter', '@itookit/mdxeditor'), undefined);
+});

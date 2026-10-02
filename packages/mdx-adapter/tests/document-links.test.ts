@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { resolveDocumentLink } from '../src/editor/document-links';
+import { resolveDocumentLink } from '../../mdx/src/editor/document-links';
 import { defaultEditorFactory } from '../src/factory';
-import type { MDxEditor } from '../src/editor/mdx-editor';
+import type { MDxEditor } from '@itookit/mdxeditor';
 
 beforeEach(() => vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} })));
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); document.body.replaceChildren(); });

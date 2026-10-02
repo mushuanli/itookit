@@ -1,5 +1,5 @@
 // @mdx/editor/navigation.ts
-import { extractHeadings, slugify, tryParseJson, type Heading } from '@itookit/common';
+import { extractHeadings, slugify, tryParseJson, type Heading } from '../utils/markdown';
 import { CodeMirrorAdapter } from './codemirror-adapter';
 
 interface HeadingPosition {

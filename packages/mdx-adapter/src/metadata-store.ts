@@ -1,6 +1,6 @@
 // @mdx/core/store/engine-metadata-store.ts
 import type { IFileSystem } from '@itookit/vfs-core';
-import type { ScopedPersistenceStore } from './types';
+import type { ScopedPersistenceStore } from '@itookit/mdxeditor';
 
 type PluginDataRecord = Record<string, unknown>;
 
@@ -30,7 +30,7 @@ export class EngineMetadataStore implements ScopedPersistenceStore {
         return `_mdx_plugin_${this.pluginNamespace}`;
     }
 
-    updateNodeId(newNodeId: string): void {
+    updateDocumentPath(newNodeId: string): void {
         this.nodeId = newNodeId;
     }
 

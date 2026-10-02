@@ -1,6 +1,6 @@
 {
   "name": "@itookit/mdxeditor",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "A powerful, plugin-driven MDX editor component based on CodeMirror 6, designed for extensibility and rich content creation.",
   "type": "module",
   "main": "./src/index.ts",
@@ -29,8 +29,7 @@
     }
   },
   "files": [
-    "dist",
-    "styles"
+    "dist"
   ],
   "sideEffects": [
     "**/*.css"
@@ -65,12 +64,12 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/mushuanli/itookit.git",
-    "directory": "packages/mdxeditor"
+    "directory": "packages/mdx"
   },
   "bugs": {
     "url": "https://github.com/mushuanli/itookit/issues"
   },
-  "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/mdxeditor#readme",
+  "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/mdx#readme",
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.10.4",
@@ -80,8 +79,6 @@
     "@codemirror/search": "^6.7.1",
     "@codemirror/state": "^6.7.1",
     "@codemirror/view": "^6.43.5",
-    "@itookit/common": "workspace:*",
-    "@itookit/vfs-core": "workspace:*",
     "codemirror": "^6.0.2",
     "front-matter": "^4.0.2",
     "gray-matter": "^4.0.3",
@@ -89,11 +86,10 @@
     "mermaid": "^11.12.1",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2",
-    "@itookit/ui-common": "workspace:*"
+    "@types/turndown": "^5.0.6"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
-    "@types/turndown": "^5.0.6",
     "typescript": "^5.9.3",
     "vite": "^5.4.21",
     "vite-plugin-dts": "^3.9.1",

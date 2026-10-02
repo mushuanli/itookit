@@ -2,7 +2,7 @@ import { lexInWorker, needsWorker } from './worker-lexer';
 import { workerSyntax } from './worker-tokenizers';
 // @mdx/renderer/marked-adapter.ts
 import { Marked, Tokens } from 'marked';
-import { slugify } from '@itookit/common';
+import { slugify } from '../utils/markdown';
 
 /**
  * Marked 适配器

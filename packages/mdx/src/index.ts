@@ -1,4 +1,5 @@
 /// <reference path="./types/turndown-plugin-gfm.d.ts" />
+import './styles/index.css';
 
 // @mdx/index.ts
 export { createMDxEditor, defaultEditorFactory, registerPlugin } from './factory';
@@ -26,9 +27,9 @@ export type {
 
 // === 服务 ===
 export { MDxProcessor } from './services/processor';
-export type { ProcessOptions, ProcessResult, MentionMatch } from './services/processor';
+export type { ProcessOptions, ProcessResult, MentionMatch, IMentionProviderForProcessor, MentionRule } from './services/processor';
 
-export { DefaultPrintService, LLMPrintService } from './services/print/print.service';
+export { DefaultPrintService } from './services/print/print.service';
 export type { PrintService, PrintOptions } from './services/print/print.service';
 
 export {
@@ -88,7 +89,7 @@ export type { ToolbarPluginOptions } from './plugins/ui/toolbar.plugin';
 export { FormattingPlugin } from './plugins/ui/formatting.plugin';
 export type { FormattingPluginOptions } from './plugins/ui/formatting.plugin';
 
-export { AssetManagerUI } from './plugins/ui/asset-manager.ui';
+
 
 export { AutocompletePlugin } from './plugins/autocomplete/autocomplete.plugin';
 export type { AutocompletePluginOptions, AutocompleteProvider, AutocompleteSourceConfig } from './plugins/autocomplete/autocomplete.plugin';
@@ -98,3 +99,10 @@ export type { TagPluginOptions } from './plugins/autocomplete/tag.plugin';
 
 export { MentionPlugin } from './plugins/autocomplete/mention.plugin';
 export type { MentionPluginOptions, MentionProvider, MentionItem } from './plugins/autocomplete/mention.plugin';
+
+export * from "./editor/contracts";
+export { fileReference } from "./editor/file-reference";
+export { CoreTitleBarPlugin } from "./plugins/ui/titlebar.plugin";
+export type { CoreTitleBarPluginOptions } from "./plugins/ui/titlebar.plugin";
+export { AssetResolverPlugin } from "./plugins/core/asset-resolver.plugin";
+export type { AssetConfigOptions } from "./services/asset-helper";

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DirectoryMountService, SessionFilesService, ProjectService, type ApplicationRuntime } from '@itookit/app-core';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { SessionRepository } from '@itookit/llm-session';
-import { defaultEditorFactory } from '@itookit/mdxeditor';
+import { defaultEditorFactory } from '@itookit/mdx-adapter';
 import type { WorkspaceConfig } from '../src/types';
 
 vi.mock('../src/ThemeService', () => ({
@@ -11,7 +11,7 @@ vi.mock('../src/ThemeService', () => ({
     ThemeMode: undefined,
 }));
 
-vi.mock('@itookit/mdxeditor', () => ({
+vi.mock('@itookit/mdx-adapter', () => ({
     defaultEditorFactory: vi.fn(async () => ({ destroy: vi.fn(async () => {}) })),
 }));
 

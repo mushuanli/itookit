@@ -3,18 +3,12 @@
  * 核心类型定义
  * 
  * 作用：
- * 1. 统一 re-export @itookit/common 中的关键类型，降低直接外部依赖
+ * 1. Own the editor contracts independently of host packages
  * 2. 定义 MDx 内部的核心接口
  * 3. 插件开发者只需导入此文件
  */
 
-// === Re-export 外部依赖类型（隔离层） ===
-import type {
-    IFileSystem,
-} from '@itookit/vfs-core';
-
-
-// === MDx 内部类型 ===
+import type { AssetProvider } from '../editor/contracts';
 
 import type { Extension } from '@codemirror/state';
 import type { MarkedExtension } from 'marked';
@@ -27,6 +21,7 @@ export interface ScopedPersistenceStore {
     get(key: string): Promise<unknown>;
     set(key: string, value: unknown): Promise<void>;
     remove(key: string): Promise<void>;
+    updateDocumentPath?(path: string): void;
     destroy?(): void;
 }
 
@@ -85,11 +80,10 @@ export interface PluginContext {
     // 持久化存储
     getScopedStore(): ScopedPersistenceStore;
 
-    // 引擎访问
-    getFileSystem?(): IFileSystem | null;
-    getAssetFileSystem?(): IFileSystem | null;
-    getCurrentNodeId(): string | null;
-    getOwnerNodeId?(): string | null;
+    // Host capabilities
+    notify(message: string, level: 'info' | 'success' | 'error'): void;
+    getAssets(): AssetProvider | undefined;
+    getDocumentPath(): string | undefined;
 
     // 编辑器交互（仅 MDxEditor 上下文可用）
     registerCommand?(name: string, fn: Function): void;

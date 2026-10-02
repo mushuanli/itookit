@@ -1,8 +1,1 @@
-// @file: mdx/utils/logger.ts
-
-import { createModuleLogger } from '@itookit/common';
-
-/**
- * llm-driver 模块的统一日志实例
- */
-export const log = createModuleLogger('mdx');
+export const log = { debug: console.debug.bind(console, '[mdx]'), info: console.info.bind(console, '[mdx]'), warn: console.warn.bind(console, '[mdx]'), error: console.error.bind(console, '[mdx]') };

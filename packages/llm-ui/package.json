@@ -88,7 +88,8 @@
     "@itookit/llm-common": "workspace:*"
   },
   "peerDependencies": {
-    "@itookit/mdxeditor": "workspace:*"
+    "@itookit/mdxeditor": "workspace:*",
+    "@itookit/mdx-adapter": "workspace:*"
   },
   "devDependencies": {
     "@itookit/mdxeditor": "workspace:*",
@@ -99,6 +100,7 @@
     "vite": "^5.4.21",
     "vite-plugin-checker": "^0.11.0",
     "vite-plugin-dts": "^3.9.1",
-    "vitest": "^1.6.1"
+    "vitest": "^1.6.1",
+    "@itookit/mdx-adapter": "workspace:*"
   }
 }

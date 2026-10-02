@@ -37,10 +37,10 @@ describe('print title', () => {
         const editor = Object.assign(Object.create(MDxEditor.prototype), {
             getMode: () => 'edit',
             getLineWrapping: () => true,
-            config: { title: 'Old', language: '.md' },
+            config: { title: 'Old', documentPath: '/Old.md', host: { renameDocument: async () => { await rename(); return { path: '/New.md', title: 'New' }; } } },
             _container: container,
             renderer: { getPluginManager: () => manager },
-            updateNodeId: vi.fn(),
+            updateDocumentPath: vi.fn(),
             print: vi.fn().mockResolvedValue(undefined),
         });
         const context = {

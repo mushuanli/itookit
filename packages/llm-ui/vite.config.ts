@@ -7,6 +7,7 @@ export default defineConfig(
     fileName: 'llm-ui',
     rootDir: __dirname,
     external: [
+      '@itookit/mdx-adapter',
       '@itookit/common',
       '@itookit/vfs-core',
       '@itookit/device-llm',
@@ -16,6 +17,7 @@ export default defineConfig(
       'js-yaml'
     ],
     globals: {
+      '@itookit/mdx-adapter': 'MDxAdapter',
       '@itookit/common': 'ItookitCommon',
       '@itookit/vfs-core': 'ItookitStdio',
       '@itookit/device-llm': 'LLMDriver',

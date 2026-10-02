@@ -7,12 +7,14 @@ export default defineConfig(
     fileName: 'app-settings',
     rootDir: __dirname,
     external: [
+      '@itookit/mdx-adapter',
       '@itookit/common',
       '@itookit/vfs',
       '@itookit/device-llm',
       '@itookit/llm-ui'
     ],
     globals: {
+      '@itookit/mdx-adapter': 'MDxAdapter',
       '@itookit/common': 'ItookitCommon',
       '@itookit/vfs': 'VFSCore',
       '@itookit/device-llm': 'LLMDriver',

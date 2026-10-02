@@ -1,4 +1,4 @@
-import { editorFilePath, type EditorOptions } from '@itookit/ui-common';
+import { type EditorOptions } from '../editor/contracts';
 
 function largeDocumentReason(text: string): DocumentProfile['largeReason'] {
     if (text.length > 256 * 1024) return 'bytes';
@@ -12,11 +12,10 @@ function largeDocumentReason(text: string): DocumentProfile['largeReason'] {
     return new TextEncoder().encode(text).byteLength > 256 * 1024 ? 'bytes' : undefined;
 }
 
-/** An unrecognized file is source text; explicit host format preserves domain aliases. */
+/** The host selects the format; the standalone editor defaults to Markdown. */
 export function documentFormat(options: EditorOptions): 'markdown' | 'text' {
     if (options.contentFormat) return options.contentFormat;
-    const path = editorFilePath(options);
-    return !path || /\.(md|markdown|mdx)$/i.test(path) ? 'markdown' : 'text';
+    return 'markdown';
 }
 
 export interface DocumentProfile {

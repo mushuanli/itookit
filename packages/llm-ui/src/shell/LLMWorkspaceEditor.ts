@@ -78,7 +78,7 @@ import { LayoutTemplates } from '../components/templates/LayoutTemplates';
 import { HistoryPlugin } from '../components/input/plugins/HistoryPlugin';
 import { SlashCommandPlugin } from '../components/input/plugins/SlashCommandPlugin';
 import { getPromptHistory } from '@itookit/llm-session';
-import { AssetManagerUI } from '@itookit/mdxeditor';
+import { AssetManagerUI } from '@itookit/mdx-adapter';
 
 interface InitialSessionData {
     session: Awaited<ReturnType<SessionService['loadSession']>>;

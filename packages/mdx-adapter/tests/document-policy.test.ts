@@ -4,9 +4,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { language } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
 import { defaultEditorFactory } from '../src/factory';
-import { MarkedAdapter } from '../src/renderer/marked-adapter';
-import { MDxEditor } from '../src/editor/mdx-editor';
-import { isLargeDocument } from '../src/editor/document-policy';
+import { MarkedAdapter } from '../../mdx/src/renderer/marked-adapter';
+import { MDxEditor } from '@itookit/mdxeditor';
+import { isLargeDocument } from '../../mdx/src/editor/document-policy';
 
 beforeEach(() => vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} })));
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); document.body.replaceChildren(); });
@@ -71,7 +71,7 @@ it('opens the repository lockfile without a Markdown parser and respects readonl
 });
 
 it('shares an immutable document policy without mutating caller options', async () => {
-    const { documentProfile } = await import('../src/editor/document-policy');
+    const { documentProfile } = await import('../../mdx/src/editor/document-policy');
     const options = { contentFormat: 'markdown' as const, initialMode: 'render' as const };
     const profile = documentProfile(options, 'line\n'.repeat(5_001));
     expect(profile).toMatchObject({ largeReason: 'lines', initialMode: 'edit',

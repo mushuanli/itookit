@@ -1,7 +1,7 @@
 // mdx/plugins/cloze/cloze-control-ui.plugin.ts
 import type { MDxPlugin, PluginContext } from '../../core/types';
 import { ClozeAPIKey } from './cloze.plugin';
-import { escapeHTML } from '@itookit/common';
+import { escapeHTML } from '../../utils/html';
 
 export interface ClozeControlsPluginOptions {
   className?: string;

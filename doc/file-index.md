@@ -119,6 +119,7 @@
 | 资源浏览契约与数据源 | `vfs-ui/src/browser/`、`vfs-ui/src/contracts/source.ts` |
 | 文件编辑器装配与预览 | `app-shell/src/browser/` |
 | MDX 编辑器 | `packages/mdx/src/` |
+| MDX 宿主/VFS 适配 | `packages/mdx-adapter/src/` |
 | 设置（Provider/Connection/Agent/MCP/Skill/Cost） | `packages/llm-settings-ui/src/editors/` |
 
 ## 装配 / 入口

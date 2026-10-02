@@ -1,5 +1,5 @@
 // mdx/plugins/autocomplete/autocomplete.plugin.ts
-import { type HoverPreviewData } from '@itookit/common';
+import { type HoverPreviewData } from '../../editor/contracts';
 import type { MDxPlugin, PluginContext } from '../../core/types';
 import {
   Completion,

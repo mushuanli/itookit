@@ -10,9 +10,9 @@
 | `IStorageBackend` | `stat/list/read/write/mkdir/delete/rename` | `vfs-core/interfaces/storage/` | `vfsdriver-indexeddb`、`vfsdriver-localfs` | `vfs-core (VFSEngine)` |
 | `IVFSManager` | `openFileSystem()/mounts/devices/plugins` | `vfs-core/interfaces/services/vfs-manager.ts` | `vfs-core (VFSManager)` | `app-core`、`app-shell`、`device-llm` |
 | `IFileSystem` | `openFile()/driver/meta/capabilities/capabilitiesAt()/discoveryRoot?()` | `vfs-core/interfaces/services/file-system.ts` | `vfs-core (FileSystemView)` | `vfs-ui`、`llm-ui`、`llm-session`、`app-core` |
-| `IFSDriver` | `getNode/getChildren/readContent/writeContent/createFile/createDirectory/rename/move/delete/search` | `vfs-core/interfaces/services/fs-driver.ts` | `FileSystemView.driver` | `vfs-ui`、`mdxeditor`、`llm-session` |
-| `IFSMetaDriver` | `assets/tags/seq/refs/watcher` | `vfs-core/interfaces/services/fs-meta-driver.ts` | `FileSystemView.meta` | `llm-session`、`mdxeditor` |
-| `IFile` | `read()/write()`（extends `IIOStream`） | `vfs-core/interfaces/IFile.ts` | `FileHandle`、`MDXFileHandle` | `mdxeditor`、`llm-session` |
+| `IFSDriver` | `getNode/getChildren/readContent/writeContent/createFile/createDirectory/rename/move/delete/search` | `vfs-core/interfaces/services/fs-driver.ts` | `FileSystemView.driver` | `vfs-ui`、`mdx-adapter`、`llm-session` |
+| `IFSMetaDriver` | `assets/tags/seq/refs/watcher` | `vfs-core/interfaces/services/fs-meta-driver.ts` | `FileSystemView.meta` | `llm-session`、`mdx-adapter` |
+| `IFile` | `read()/write()`（extends `IIOStream`） | `vfs-core/interfaces/IFile.ts` | `FileHandle`、`MDXFileHandle` | `mdx-adapter`、`llm-session` |
 | `FileDiscoverySource` / `FileDiscoveryOptions` | `list/stat/readIgnoreFile/rootFor`；`includeIgnored/excludeDirectories/signal` | `vfs-core/interfaces/services/file-discovery.ts` | VFS 适配器、tools Node 适配器 | `discoverFiles` → 工具搜索及 llm-ui 文件候选 |
 | `IIOStream` | `read()/write()/readStream?/close?` | `vfs-core/interfaces/` | 文件/设备句柄 | 文件↔LLM↔TTY 互拷 |
 | `IDeviceDriver` | `open()/ioctl()/close()` | `vfs-core/interfaces/device/` | `LLMDeviceDriver`、TTY driver | `kernel-adapters`、`device-llm` |
@@ -144,3 +144,7 @@
 HTTP 外挂的条件写入、取消与项目授权见 [HTTP VFS 设计](design/vfs-http-driver.md)；调用方必须使用读取字节时返回的 revision，不使用保存前 stat 替代读取版本。
 
 `EditorHostContext.openFile(path, anchor?)` 打开编辑器文件命名空间中的文档。MDX 使用当前文件路径解析普通 Markdown 相对链接，宿主映射到所属项目/会话路由并打开标签；收藏入口仍以实际文件路径为基准，移动与重命名通过 updateNodeId 更新解析基准。外部 URL、附件与 mention 保留各自行为。
+
+## 独立编辑器宿主接口
+
+`packages/mdx/src/editor/contracts.ts` 定义并从 `@itookit/mdxeditor` 导出 `AssetProvider`、`StoreFactory`、`EditorHost`、`EditorOptions` 与 `IEditor`。核心不持有 `IFileSystem`，附件与插件存储按需注入，保存通过 `onSave` 注入。`@itookit/mdx-adapter` 将 `ui-common` 的 target/files/hostContext 转成上述公共端口，在构造编辑器前校验 namespace 与 Session；消息和会话标识保留在宿主，核心只使用可选 `documentPath`。

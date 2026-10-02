@@ -1,11 +1,8 @@
-import { fileReference } from './editor/file-reference';
 import { documentProfile } from './editor/document-policy';
-import { editorFilePath } from '@itookit/ui-common';
-import { normalizeEditorOptions } from '@itookit/ui-common';
 /**
  * @file mdx/factory.ts
  */
-import { IEditor, EditorOptions, EditorFactory } from '@itookit/ui-common';
+import { IEditor, EditorOptions, EditorFactory } from './editor/contracts';
 import { MDxEditor, MDxEditorConfig } from './editor/mdx-editor';
 import { globalPluginRegistry } from './core/plugin-registry';
 import type { MDxPlugin } from './core/types';
@@ -36,7 +33,6 @@ import { SourceSyncPlugin } from './plugins/interactions/source-jump.plugin';
 import { TagPlugin } from './plugins/autocomplete/tag.plugin';
 import { MentionPlugin } from './plugins/autocomplete/mention.plugin';
 import { AssetResolverPlugin } from './plugins/core/asset-resolver.plugin';
-import { AssetManagerPlugin } from './plugins/ui/asset-manager.plugin';
 import { AutoSavePlugin } from './plugins/interactions/auto-save.plugin';
 
 // 批量注册
@@ -66,7 +62,6 @@ const PLUGIN_DEFINITIONS: Array<[string, new (...args: any[]) => MDxPlugin, { pr
   ['plantuml',                 PlantUMLPlugin,         { priority: 70 }],
   ['vega',                     VegaPlugin,             { priority: 71 }],
   ['interaction:auto-save',    AutoSavePlugin,         { priority: 90 }],
-  ['ui:asset-manager',         AssetManagerPlugin,     { priority: 90, dependencies: ['core:titlebar'] }],
   ['core:asset-resolver',      AssetResolverPlugin,    { priority: 95 }],
 ];
 
@@ -165,37 +160,6 @@ function resolvePluginInstance(
 
 // === 配置桥接 ===
 
-function bridgeSaveCallback(config: MDxEditorFactoryConfig): ((content: string) => Promise<void>) | undefined {
-  if (config.onSave) return config.onSave;
-
-  if (config.hostContext?.saveContent && editorFilePath(config)) {
-    return async (content: string) => {
-      await config.hostContext!.saveContent!(editorFilePath(config)!, content);
-    };
-  }
-
-  return undefined;
-}
-
-function bridgeTitleBarOptions(config: MDxEditorFactoryConfig): void {
-  if (!config.hostContext) return;
-
-  config.defaultPluginOptions = config.defaultPluginOptions || {};
-  const existing = config.defaultPluginOptions['core:titlebar'] || {};
-
-  config.defaultPluginOptions['core:titlebar'] = {
-    ...existing,
-    aiCallback: existing.aiCallback ?? (config.hostContext.chatFromFile && editorFilePath(config)
-      ? async (editor: MDxEditor) => {
-          const reference = fileReference(editor);
-          await editor.flushPendingSave();
-          await config.hostContext!.chatFromFile!(reference);
-        } : undefined),
-    onSidebarToggle: existing.onSidebarToggle || (() => config.hostContext?.toggleSidebar()),
-    saveCallback: async (editor: any) => { await editor.save(); },
-  };
-}
-
 // === 主工厂函数 ===
 
 export async function createMDxEditor(
@@ -209,19 +173,13 @@ export async function createMDxEditor(
   const userPlugins = source ? ['core:titlebar', 'interaction:auto-save'] : [...config.plugins || []];
   const defaultOpts = config.defaultPluginOptions || {};
 
-  // 1. 自动加载 Asset Manager
-  if (!source) autoLoadAssetManager(userPlugins, defaultOpts);
-  else {
+  if (source) {
     config.initialMode = 'edit';
     defaultOpts['core:titlebar'] = { ...defaultOpts['core:titlebar'], enableToggleEditMode: false, enableAssetManager: false };
   }
 
-  // 2. 桥接保存回调
-  config.onSave = bridgeSaveCallback(config);
-  bridgeTitleBarOptions(config);
-
   // 3. 创建编辑器
-  const editor = new MDxEditor(normalizeEditorOptions(config) as MDxEditorConfig);
+  const editor = new MDxEditor(config as MDxEditorConfig);
 
   // 4. 核心插件（强制加载）
   editor.use(new CoreEditorPlugin({ ...defaultOpts['editor:core'],
@@ -252,21 +210,6 @@ export async function createMDxEditor(
 }
 
 // === 辅助函数 ===
-
-function autoLoadAssetManager(
-  userPlugins: PluginConfig[],
-  defaultOpts: Record<string, Record<string, any> | undefined>
-): void {
-  const titleBarOpts = defaultOpts['core:titlebar'] || {};
-  const isTitleBarEnabled = userPlugins.some(p => getPluginName(p) === 'core:titlebar') ||
-    DEFAULT_PLUGINS.includes('core:titlebar');
-
-  if (isTitleBarEnabled && titleBarOpts.enableAssetManager !== false) {
-    if (!userPlugins.some(p => getPluginName(p) === 'ui:asset-manager')) {
-      userPlugins.push('ui:asset-manager');
-    }
-  }
-}
 
 function buildPluginMap(
   userPlugins: PluginConfig[],

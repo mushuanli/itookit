@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { expect, it, vi } from 'vitest';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
-import { CoreTitleBarPlugin } from '../src/plugins/ui/titlebar.plugin';
+import { CoreTitleBarPlugin } from '@itookit/mdxeditor';
+import { renameDocument } from '../src/document-host';
 
 it('renames from the actual filename, preserving its suffix until explicitly replaced', async () => {
     const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
@@ -14,8 +15,8 @@ it('renames from the actual filename, preserving its suffix until explicitly rep
     };
     const emit = (name: string, payload: unknown) => events.get(name)?.forEach(callback => callback(payload));
     let path = '/notes.prj';
-    const editor = { getMode: () => 'edit', container, config: { title: 'notes' },
-        updateNodeId: (next: string) => { path = next; },
+    const editor = { getMode: () => 'edit', container, config: { title: 'notes', documentPath: path, host: { renameDocument: (current: string, title: string) => renameDocument(fs, current, title) } },
+        updateDocumentPath: (next: string) => { path = next; editor.config.documentPath = next; },
         setTitle: (title: string) => emit('setTitle', { title }),
     };
     const context = { listen, on: listen, getFileSystem: () => fs, getCurrentNodeId: () => path };

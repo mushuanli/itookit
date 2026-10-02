@@ -57,7 +57,7 @@ yarn add @itookit/mdxeditor
     ```typescript
     import { createMDxEditor } from '@itookit/mdxeditor';
     // 引入基础样式，您可以根据需要覆盖它
-    import '@itookit/mdxeditor/styles/default.css'; 
+    import '@itookit/mdxeditor/style.css';
     // 如果使用了 FontAwesome 图标，请确保已引入
     // import '@fortawesome/fontawesome-free/css/all.min.css';
 
@@ -210,3 +210,33 @@ createMDxEditor(container, {
 ## 📜 许可证
 
 本项目基于 MIT 许可证。
+
+## 独立运行与宿主适配
+
+编辑器不依赖其他 `@itookit/*` 包。创建实例只需 DOM 容器与内容；附件、保存和持久化可按需注入公共接口，接口由 TypeScript 结构化匹配，无需继承特定实现。
+
+```typescript
+import { createMDxEditor, type AssetProvider } from '@itookit/mdxeditor';
+import '@itookit/mdxeditor/style.css';
+
+const assets: AssetProvider = {
+  async read(name) {
+    const response = await fetch(`/attachments/${encodeURIComponent(name)}`);
+    return response.ok ? response.arrayBuffer() : null;
+  },
+};
+const editor = await createMDxEditor(document.getElementById('editor-container')!, {
+  initialContent: '# Hello',
+  contentFormat: 'markdown',
+  assets,
+  onSave: async content => { await saveContent(content); },
+});
+```
+
+`saveContent` 是宿主自己的保存函数。`EditorHost` 提供可选的打开文档、重命名和通知；`StoreFactory` 提供插件存储，默认使用内存。核心默认按 Markdown 处理，纯文本需显式传入 `contentFormat: 'text'`。
+
+MindOS 使用 `@itookit/mdx-adapter` 的 `createMDxEditor` / `defaultEditorFactory`，接收 `ui-common` 的 `EditorOptions`，校验 namespace/Session 上下文并适配 VFS、附件、插件元数据及文件格式。`AssetManagerUI` 和 `LLMPrintService` 也由适配包导出。外部移动文件后调用适配实例的 `updateNodeId(newPath)`，更新后续保存、附件与元数据的文档路径。
+
+适配包样式：`import '@itookit/mdx-adapter/style.css'`。
+
+标签、提及与自动补全也支持用户提供数据：`TagPluginOptions.getTags`、`MentionProvider`、`AutocompleteProvider` 均由核心公开。用户可查询自己的 REST 服务、本地数据或其他存储，再通过 `plugins` 安装插件，无需引入 itookit 的业务服务。`translate` 可接入宿主 i18n；复杂交互可实现 `MDxPlugin`，通过插件上下文使用公开能力。

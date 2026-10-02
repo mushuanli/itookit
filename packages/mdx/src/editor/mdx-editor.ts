@@ -1,14 +1,14 @@
 import { bindDocumentLinks } from './document-links';
 import { documentProfile, type DocumentProfile } from './document-policy';
-import { t } from '@itookit/common';
-import { editorFilePath } from '@itookit/ui-common';
+import { t } from '../utils/i18n';
+import { editorFilePath } from '../editor/contracts';
 // @mdx/editor/mdx-editor.ts
 import {
     Heading,
     extractSearchableText,
     extractSummary
-} from '@itookit/common';
-import { IEditor, EditorOptions, EditorEvent, EditorEventMap, EditorEventCallback, UnifiedSearchResult, CollapseExpandResult } from '@itookit/ui-common';
+} from '../utils/markdown';
+import { IEditor, EditorOptions, EditorEvent, EditorEventMap, EditorEventCallback, UnifiedSearchResult, CollapseExpandResult } from '../editor/contracts';
 import { EventBus } from '../core/event-bus';
 import { CodeMirrorAdapter } from './codemirror-adapter';
 import { NavigationManager } from './navigation';
@@ -30,7 +30,7 @@ export interface MDxEditorConfig extends EditorOptions {
  * 职责：组合子模块，委托具体功能
  * 不再直接操作 CodeMirror、DOM 搜索、标题解析等细节
  */
-export class MDxEditor extends IEditor {
+export class MDxEditor implements IEditor {
     public readonly config: MDxEditorConfig;
 
     // 核心组件（通过组合而非继承）
@@ -53,7 +53,6 @@ export class MDxEditor extends IEditor {
     private releaseDocumentLinks?: () => void;
 
     constructor(config: MDxEditorConfig = {}) {
-        super();
         this.config = config;
 
         // 初始化核心组件
@@ -62,9 +61,8 @@ export class MDxEditor extends IEditor {
         this.renderer = new MDxRenderer({
             signal: config.signal,
             searchMarkClass: config.searchMarkClass,
-            nodeId: editorFilePath(config),
-            ownerNodeId: editorFilePath(config),
-            fs: config.files?.fs,
+            documentPath: config.documentPath,
+            storeFactory: config.storeFactory,
             assets: config.assets,
         });
         this.renderer.setEditorInstance(this);
@@ -110,7 +108,7 @@ export class MDxEditor extends IEditor {
         if (profile.showSourceNotice) {
             const notice = document.createElement('p');
             notice.className = 'mdx-source-notice'; notice.setAttribute('role', 'status');
-            notice.textContent = t('editor.largeDocument.sourceFirst');
+            notice.textContent = this.config.translate?.('editor.largeDocument.sourceFirst') ?? t('editor.largeDocument.sourceFirst', this.config.locale);
             this.modeManager.getEditContainer()?.prepend(notice);
         }
         // 初始化模式
@@ -355,9 +353,9 @@ export class MDxEditor extends IEditor {
         container.innerHTML = '';
         container.className = 'mdx-editor-root-container mdx-editor-container';
         this.modeManager.createContainers(container);
-        if (this.config.hostContext?.openFile) this.releaseDocumentLinks = bindDocumentLinks(
+        if (this.config.host?.openDocument) this.releaseDocumentLinks = bindDocumentLinks(
             this.modeManager.getRenderContainer()!, () => editorFilePath(this.config),
-            (path, anchor) => this.config.hostContext!.openFile!(path, anchor),
+            (path, anchor) => this.config.host!.openDocument!(path, anchor),
             id => this.navigateTo({ elementId: id }));
     }
 
@@ -368,12 +366,12 @@ export class MDxEditor extends IEditor {
             renderContainer.replaceChildren(source); return;
         }
         if (renderContainer) {
-            renderContainer.textContent = t('editor.preview.loading');
+            renderContainer.textContent = this.config.translate?.('editor.preview.loading') ?? t('editor.preview.loading', this.config.locale);
             try { await this.renderer.render(renderContainer, this.getText()); }
             catch (error) {
                 if (error instanceof Error && error.name === 'AbortError') return;
                 const notice = document.createElement('p'); notice.setAttribute('role', 'status');
-                notice.textContent = t('editor.preview.unavailable');
+                notice.textContent = this.config.translate?.('editor.preview.unavailable') ?? t('editor.preview.unavailable', this.config.locale);
                 renderContainer.replaceChildren(notice);
                 console.error('[MDX preview]', error);
             }
@@ -397,11 +395,11 @@ export class MDxEditor extends IEditor {
         this.renderer.getPluginManager().emit('setTitle', { title: newTitle });
     }
 
-    updateNodeId = (newNodeId: string): void => {
+    updateDocumentPath = (newNodeId: string): void => {
         if (!newNodeId || newNodeId === editorFilePath(this.config)) return;
-        if (this.config.target?.kind !== 'file') throw new Error('Only file editors can change paths');
-        this.renderer.getPluginManager().setNodeId(newNodeId);
-        this.config.target = { ...this.config.target, path: newNodeId };
+        this.renderer.getPluginManager().setDocumentPath(newNodeId);
+        this.config.documentPath = newNodeId;
+        this.config.onDocumentPathChange?.(newNodeId);
 
         this.printService?.destroy?.();
         this.printService = null;
@@ -424,7 +422,7 @@ export class MDxEditor extends IEditor {
 
     private getPrintService(): PrintService {
         if (!this.printService) {
-            this.printService = new DefaultPrintService(this.config.files?.fs, editorFilePath(this.config), this.config.assets);
+            this.printService = new DefaultPrintService({ documentPath: this.config.documentPath, assets: this.config.assets, storeFactory: this.config.storeFactory });
         }
         return this.printService;
     }

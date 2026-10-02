@@ -11,7 +11,7 @@ vi.mock('../src/ThemeService', () => ({
     ThemeMode: undefined,
 }));
 
-vi.mock('@itookit/mdxeditor', () => ({
+vi.mock('@itookit/mdx-adapter', () => ({
     defaultEditorFactory: vi.fn(async () => ({ destroy: vi.fn(async () => {}) })),
 }));
 
