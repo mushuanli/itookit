@@ -65,7 +65,7 @@
   "dependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/durable-kernel": "workspace:*",
-    "@itookit/context": "workspace:*"
+    "@itookit/llm-context": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.19.25",

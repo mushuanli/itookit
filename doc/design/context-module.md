@@ -65,7 +65,7 @@
 整个 context 领域归属一个独立包。包内可以分目录，其他包不得深引用这些目录，也不得复制裁剪、摘要或笔记规则。
 
 ```text
-packages/context/                  # Target logical layout; current files are listed in context-api.md
+packages/llm-context/                  # Target logical layout; current files are listed in context-api.md
   src/index.ts                     # Interfaces, DTOs, composition factory
   src/domain/                      # Items, profiles, notes, windows, checkpoints
   src/history/                     # Protocol groups, lineage, bounded queries
@@ -89,7 +89,7 @@ flowchart TD
   Programs --> K[durable-kernel]
   Adapters --> C
   Adapters --> K
-  Adapters --> Devices[device-llm / VFS]
+  Adapters --> Devices[driver-llm / VFS]
   K --> VFS[vfs-core]
 ```
 
@@ -100,7 +100,7 @@ flowchart TD
 | llm-session | 对话 Round、分支拓扑、用户输入接受、会话生命周期、长期 memory 服务 | 提供 `IContextSource`；通过 `IContextReader` 查询、通过命令请求变更 |
 | llm-flow | DAG、依赖、分支运行、输出绑定 | 传 ContextRef 和有来源的输入绑定，不拼 prompt |
 | kernel-adapters | Context 与 Kernel 的事务桥、内容存储、压缩/检索 Effect 适配 | 实现 Context 定义的 ports；不定义压缩优先级或 Notes 合并规则 |
-| device-llm | 厂商协议、网络请求、模型能力 | 实现 `IContextCodec` / token meter；不得自行静默删改已冻结窗口 |
+| driver-llm | 厂商协议、网络请求、模型能力 | 实现 `IContextCodec` / token meter；不得自行静默删改已冻结窗口 |
 | durable-kernel | Task/Effect/lease/交互/事务/资源保留 | 接收可序列化状态、通用 actions 和 refs；不导入 Context 或 LLM 类型 |
 | llm-ui / app-shell | 状态和上下文解释展示 | 消费只读 DTO，不直接访问 store 或修改 head |
 | app-core | 唯一装配位置 | 创建 context 实例、注入所有 ports，再交给各接口消费者 |
@@ -403,7 +403,7 @@ MVP 仍允许 Task.effects 的小型元数据随 Effect 数量线性增长；若
 
 ## 12. 本轮交付边界
 
-已创建零运行时依赖的 `packages/context`，迁入消息/Context 类型、Profile、历史选择、装配、裁剪、协议校验和 hash 实现。旧入口保留兼容转发，Session 保留 Round 拓扑与持久 adapter。新 `IContextService`/`IContextEngine`/`IContextContentStore` 管理不可变请求、原始历史、笔记和窗口；kernel-adapters 与 app-core 通过端口接入，durable-kernel 源码与依赖不变。
+已创建零运行时依赖的 `packages/llm-context`，迁入消息/Context 类型、Profile、历史选择、装配、裁剪、协议校验和 hash 实现。旧入口保留兼容转发，Session 保留 Round 拓扑与持久 adapter。新 `IContextService`/`IContextEngine`/`IContextContentStore` 管理不可变请求、原始历史、笔记和窗口；kernel-adapters 与 app-core 通过端口接入，durable-kernel 源码与依赖不变。
 
 Agent/Chat v2 使用 `context.prepare@1` 与 `llm.chat@2`，head/receipt 写集和下一 Effect 在同一 Decision 提交。`tool.call@2` 在旧截断前保存完整可读输出，提供 `context_history`、`context_read`、`context_checkpoint`；末次助手答案也归档。v1 Task 保持原版本恢复。
 

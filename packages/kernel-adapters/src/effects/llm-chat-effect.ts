@@ -13,7 +13,7 @@ import type {
     ToolCall,
 } from '@itookit/common';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/durable-kernel';
-import { expandMessagesAttachments } from '@itookit/device-llm';
+import { expandMessagesAttachments } from '@itookit/driver-llm';
 import { resolveCapability, type CapabilitySource } from '../ports/capabilities';
 import { InFlightEffects } from './in-flight';
 

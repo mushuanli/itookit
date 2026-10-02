@@ -72,7 +72,7 @@ C4Component
     Component(sources, "来源适配器", "vfs-core / vfsdriver", "打开已有 backend，提供目录文件能力")
     Component(kernel, "Kernel", "durable-kernel", "任务、恢复、IPC、资源账本")
     Component(adapters, "Session capability factory", "kernel-adapters", "为实际 Session 注入文件和执行能力")
-    Component(devices, "设备与配置服务", "device-llm / host", "凭据和设备操作，不暴露为普通可写文件")
+    Component(devices, "设备与配置服务", "driver-llm / host", "凭据和设备操作，不暴露为普通可写文件")
   }
   Rel(shell, sources, "创建并拥有来源")
   Rel(shell, bindings, "注册来源与当前 Session 附件")
@@ -241,7 +241,7 @@ Session manifest 的现有业务类型名仍是 `ConversationManifest`，包含 
 | llm-session | SessionRepository 取代 ChatEngine；绑定、运行状态和 TaskInput 删除重复文件 nodeId；删除 chatFileParser 和隐式文件初始化；Round/Profile 写 history 记录 |
 | vfs-ui / mdx | 删除 .chat 保存特判、模块路径猜测；文档使用 target.path；Session 嵌入 Markdown 使用当前 Session 上下文派生的 /attachments 子视图，上传/预览/管理均随撤销失效；文件文档仍可使用伴生附件 |
 | llm-flow / llm-settings-ui / app-settings | Flow 创建会话返回 sessionId；实体编辑器消费显式 target；配置、同步和备份使用注入的文件来源 |
-| device-llm | 系统配置从 /etc 受限来源注入；凭据通过专用服务；无旧配置迁移探测。Skill 统一 `.yaml`，启动/reload 不加载旧 `.json/.yml`，保存不删除旧格式文件；Provider/Connection/MCP 继续使用各自当前 JSON 格式 |
+| driver-llm | 系统配置从 /etc 受限来源注入；凭据通过专用服务；无旧配置迁移探测。Skill 统一 `.yaml`，启动/reload 不加载旧 `.json/.yml`，保存不删除旧格式文件；Provider/Connection/MCP 继续使用各自当前 JSON 格式 |
 | durable-kernel / kernel-adapters | catalog 和 Session kernel 目录分离；每 Session 创建文件及执行能力；删除全局文件工具 scope 和 Node FS fallback |
 | Web | IndexedDB 固定新 schema；/run 使用内存；Session 恢复与编辑器文件列表无关 |
 | Tauri | /home/admin 物理目录；外部目录通过独立来源；卸载先关闭工作区再关闭 backend；失败清理已打开来源 |

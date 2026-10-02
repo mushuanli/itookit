@@ -55,3 +55,15 @@ test('standalone vfs-ui only depends on vfs-core internally', () => {
     assert.equal(dependencyError(vfs.name, '@itookit/vfs-core'), undefined);
     assert.match(dependencyError(vfs.name, 'immer'), /public ports/);
 });
+
+test('public LLM mechanisms reject host dependencies', () => {
+    for (const name of ['common', 'ui-common', 'vfs-core', 'kernel-adapters/llm', 'llm-session'])
+        assert.match(dependencyError('@itookit/driver-llm', '@itookit/' + name), /public ports/);
+    assert.equal(dependencyError('@itookit/driver-llm', '@itookit/llm-context'), undefined);
+    assert.match(dependencyError('@itookit/llm-context', '@itookit/driver-llm'), /public ports/);
+    const driver = pkg('driver-llm'), context = pkg('llm-context');
+    const inspectDriver = text => sourceErrors(driver, '/repo/packages/driver-llm/src/test.ts', text, [driver, context]);
+    assert.equal(inspectDriver("import type { ChatMessage } from '@itookit/llm-context';").length, 0);
+    assert.equal(inspectDriver("import { createContextService } from '@itookit/llm-context';").length, 1);
+    assert.equal(inspectDriver("import { Client } from 'some-sdk';").length, 1);
+});

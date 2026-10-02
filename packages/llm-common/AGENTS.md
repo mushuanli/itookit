@@ -1,13 +1,13 @@
 # @itookit/llm-common
 
-LLM 领域**共享契约层**：Provider / Connection / Agent / Tool / Skill / TTY / 会话的跨包接口与纯类型。所有 LLM 相关包从这里取类型，而不是从 `@itookit/common` 取。零运行时依赖——只有类型与纯函数。详见 [架构设计](../../doc/architecture.md)、[接口契约](../../doc/interface-contracts.md)。
+LLM 领域**共享契约层**：Provider / Connection / Agent / Tool / Skill / TTY / 会话的跨包接口与纯类型。所有 LLM 相关包从这里取类型，而不是从 `@itookit/common` 取。类型与纯函数契约，并兼容转发 driver-llm 的通信契约。详见 [架构设计](../../doc/architecture.md)、[接口契约](../../doc/interface-contracts.md)。
 
 ## 定位与铁律
 
-- **零运行时依赖**：仅可 type import/re-export `@itookit/context` 的中立消息与 Context 类型，不 import 其他 workspace 或第三方运行时库；只用 TypeScript 类型与纯函数（比较、构造、默认值）。
+- **契约与纯函数**：消息/Context 类型来自 llm-context；通信契约与纯协议函数经 driver-llm/contracts 兼容转发。禁止加载模型客户端、宿主或第三方 SDK。
 - **无副作用**：不得读写文件、DOM、网络或全局状态；需要 I/O 的能力以接口（`ILLMService`、`ISkillService`、`IToolService`、`ITTYDriver`）声明，由实现层提供。
 - **向后兼容的 re-export**：`@itookit/common` 通过 `export * from '@itookit/llm-common'` 转发（历史兼容）。**新代码直接从本包导入**，避免依赖链上多一跳。
-- 类型演进会影响 `device-llm`、`llm-session`、`llm-flow`、`llm-tasks`、`kernel-adapters`、`llm-ui`：改名/改形状前先看 [接口契约](../../doc/interface-contracts.md) 与各实现的编译错误。
+- 类型演进会影响 `driver-llm`、`llm-session`、`llm-flow`、`llm-tasks`、`kernel-adapters`、`llm-ui`：改名/改形状前先看 [接口契约](../../doc/interface-contracts.md) 与各实现的编译错误。
 - **`AgentDefinition` 的字段层级要看清**：`capabilityPolicy`（`toolIds`/`skillIds`/`mcpProfileIds`）、`memoryPolicy`、`modelPolicy`、`defaultContextPolicy` 都在**顶层**，不在 `config` 下。`AgentResolver.buildConfig` 只读顶层字段——把 `capabilityPolicy` 写进 `config` 会**静默**导致模型请求里没有工具（实测 `tools: []`）。新增字段时同步 `agent-resolver` 的映射与 [验收记录 §17](../../doc/minimal-system-acceptance.md)。
 
 ## 结构
@@ -51,7 +51,7 @@ LLMProvider (云厂商) → LLMConnection (tier→model) → AgentDefinition (sy
 ```
 
 - 关键类型集中在 `src/llm/` 与 `src/agent/`，并统一由 `@itookit/common` 间接可用。
-- Provider 实现见 `device-llm/src/providers/`；Skill 触发与作用域见 [Skill 设计](../../doc/design/skill-design.md)。
+- Provider 实现见 `driver-llm/src/providers/`；Skill 触发与作用域见 [Skill 设计](../../doc/design/skill-design.md)。
 
 ## 运行
 
@@ -60,7 +60,7 @@ pnpm --filter @itookit/llm-common typecheck
 pnpm --filter @itookit/llm-common build        # tsup（CJS + ESM + .d.ts）
 ```
 
-本包**没有独立测试套件**：它是类型与纯函数契约，正确性由消费方（`device-llm`、`llm-session`、`llm-flow` 等）的测试与全仓 `pnpm typecheck` 保障。新增纯函数若含分支逻辑，应在使用它的包里覆盖。
+本包**没有独立测试套件**：它是类型与纯函数契约，正确性由消费方（`driver-llm`、`llm-session`、`llm-flow` 等）的测试与全仓 `pnpm typecheck` 保障。新增纯函数若含分支逻辑，应在使用它的包里覆盖。
 
 ## 相关文档
 

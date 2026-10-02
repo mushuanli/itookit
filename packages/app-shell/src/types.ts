@@ -153,7 +153,7 @@ export interface AppOptions {
     /** LLM traffic logger (NoopLLMLogger for web, TauriLLMLogger for Tauri) */
     llmLogger?: import('@itookit/common').ILLMLogger;
     /** Runtime transport for the local Codex app-server (Node/Tauri only). */
-    codexTransport?: import('@itookit/device-llm').CodexAppServerTransport;
+    codexTransport?: import('@itookit/driver-llm').CodexAppServerTransport;
     /** Platform capabilities implemented by the owning application. */
     kernelPlatform?: AppKernelPlatform;
     /** UI implementations (editor factories, AI menu, LLM settings editors) injected by the entry app. */

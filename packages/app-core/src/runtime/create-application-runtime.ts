@@ -7,7 +7,7 @@ import { createFileSystemView, FSError } from '@itookit/vfs-core';
 import { ModelConfigurationCommands } from '../configuration/model-commands';
 import { resumeSessionDeletions } from './resume-session-deletions';
 import type { IStorageBackend, MountOptions } from '@itookit/vfs-core';
-import { LLMDeviceDriver, type CodexAppServerTransport } from '@itookit/device-llm';
+import { LLMDeviceDriver, type CodexAppServerTransport } from '@itookit/kernel-adapters/llm';
 import { t, traceBoot, type ILLMLogger } from '@itookit/common';
 import {
     SessionRepository, SessionDirectoryStorageResolver,

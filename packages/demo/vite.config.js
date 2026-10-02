@@ -20,7 +20,7 @@ export default defineConfig({
       '@itookit/vfs': path.resolve(__dirname, '../../packages/vfs/src/index.ts'),
       '@itookit/mdxeditor': path.resolve(__dirname, '../../packages/mdx/src/index.ts'),
       '@itookit/vfs-ui': path.resolve(__dirname, '../../packages/vfs-ui/src/index.ts'),
-      '@itookit/device-llm': path.resolve(__dirname, '../../packages/device-llm/src/index.ts'),
+      '@itookit/driver-llm': path.resolve(__dirname, '../../packages/driver-llm/src/index.ts'),
       '@itookit/llm-ui': path.resolve(__dirname, '../../packages/llm-ui/src/index.ts'),
       '@itookit/app-settings': path.resolve(__dirname, '../../packages/app-settings/src/index.ts'),
     },
@@ -42,7 +42,7 @@ export default defineConfig({
       '@itookit/vfs',
       '@itookit/mdxeditor',
       '@itookit/vfs-ui',
-      '@itookit/device-llm',
+      '@itookit/driver-llm',
       '@itookit/llm-ui',
       '@itookit/app-settings'
     ],

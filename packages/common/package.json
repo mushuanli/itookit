@@ -54,7 +54,7 @@
   "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/common#readme",
   "dependencies": {
     "@itookit/llm-common": "workspace:*",
-    "@itookit/context": "workspace:*"
+    "@itookit/llm-context": "workspace:*"
   },
   "devDependencies": {
     "@itookit/llm-common": "workspace:*",

@@ -25,7 +25,7 @@ import {
     toolName,
 } from './program-helpers';
 import { collectDependency, dependenciesReady, dependencyWait } from './dependency-collector';
-import { compactMessages, validateContextCompaction } from '@itookit/context';
+import { compactMessages, validateContextCompaction } from '@itookit/llm-context';
 import type {
     DurableAgentInput,
     DurableAgentOutput,

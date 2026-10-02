@@ -18,7 +18,7 @@
   "dependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/kernel-adapters": "workspace:*",
-    "@itookit/device-llm": "workspace:*",
+    "@itookit/driver-llm": "workspace:*",
     "@itookit/device-tty": "workspace:*",
     "@itookit/durable-kernel": "workspace:*",
     "@itookit/llm-flow": "workspace:*",

@@ -16,7 +16,8 @@ import type {
     IDeviceDriver,
     DeviceContext,
 } from '@itookit/vfs-core';
-import { LLM_IOCTL, expandMessagesAttachments } from '@itookit/device-llm';
+import { LLM_IOCTL } from '../llm-management/index';
+import { expandMessagesAttachments } from '@itookit/driver-llm';
 
 const BASE_CTX: DeviceContext = { nodeId: 'llm', name: 'llm' };
 

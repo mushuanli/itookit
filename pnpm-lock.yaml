@@ -62,12 +62,12 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../../packages/common
-      '@itookit/device-llm':
-        specifier: workspace:*
-        version: link:../../packages/device-llm
       '@itookit/device-tty':
         specifier: workspace:*
         version: link:../../packages/device-tty
+      '@itookit/driver-llm':
+        specifier: workspace:*
+        version: link:../../packages/driver-llm
       '@itookit/durable-kernel':
         specifier: workspace:*
         version: link:../../packages/durable-kernel
@@ -163,9 +163,9 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../../packages/common
-      '@itookit/device-llm':
+      '@itookit/driver-llm':
         specifier: workspace:*
-        version: link:../../packages/device-llm
+        version: link:../../packages/driver-llm
       '@itookit/kernel-adapters':
         specifier: workspace:*
         version: link:../../packages/kernel-adapters
@@ -275,9 +275,9 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../../packages/common
-      '@itookit/device-llm':
+      '@itookit/driver-llm':
         specifier: workspace:*
-        version: link:../../packages/device-llm
+        version: link:../../packages/driver-llm
       '@itookit/kernel-adapters':
         specifier: workspace:*
         version: link:../../packages/kernel-adapters
@@ -336,18 +336,18 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/context':
+      '@itookit/driver-llm':
         specifier: workspace:*
-        version: link:../context
-      '@itookit/device-llm':
-        specifier: workspace:*
-        version: link:../device-llm
+        version: link:../driver-llm
       '@itookit/durable-kernel':
         specifier: workspace:*
         version: link:../durable-kernel
       '@itookit/kernel-adapters':
         specifier: workspace:*
         version: link:../kernel-adapters
+      '@itookit/llm-context':
+        specifier: workspace:*
+        version: link:../llm-context
       '@itookit/llm-flow':
         specifier: workspace:*
         version: link:../llm-flow
@@ -386,9 +386,6 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/device-llm':
-        specifier: workspace:*
-        version: link:../device-llm
       '@itookit/mdx-adapter':
         specifier: workspace:*
         version: link:../mdx-adapter
@@ -422,6 +419,9 @@ importers:
       '@itookit/app-core':
         specifier: workspace:*
         version: link:../app-core
+      '@itookit/kernel-adapters':
+        specifier: workspace:*
+        version: link:../kernel-adapters
     devDependencies:
       '@itookit/app-settings':
         specifier: workspace:*
@@ -429,15 +429,12 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/device-llm':
+      '@itookit/driver-llm':
         specifier: workspace:*
-        version: link:../device-llm
+        version: link:../driver-llm
       '@itookit/durable-kernel':
         specifier: workspace:*
         version: link:../durable-kernel
-      '@itookit/kernel-adapters':
-        specifier: workspace:*
-        version: link:../kernel-adapters
       '@itookit/llm-session':
         specifier: workspace:*
         version: link:../llm-session
@@ -483,12 +480,12 @@ importers:
 
   packages/common:
     dependencies:
-      '@itookit/context':
-        specifier: workspace:*
-        version: link:../context
       '@itookit/llm-common':
         specifier: workspace:*
         version: link:../llm-common
+      '@itookit/llm-context':
+        specifier: workspace:*
+        version: link:../llm-context
     devDependencies:
       cpx:
         specifier: ^1.5.0
@@ -499,21 +496,6 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
-
-  packages/context:
-    devDependencies:
-      '@types/node':
-        specifier: 20.19.25
-        version: 20.19.25
-      tsup:
-        specifier: ^8.5.1
-        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@20.19.25))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^1.6.1
-        version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
 
   packages/demo:
     dependencies:
@@ -541,9 +523,9 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/device-llm':
+      '@itookit/driver-llm':
         specifier: workspace:*
-        version: link:../device-llm
+        version: link:../driver-llm
       '@itookit/llm-ui':
         specifier: workspace:*
         version: link:../llm-ui
@@ -576,46 +558,6 @@ importers:
         specifier: ^5.4.21
         version: 5.4.21(@types/node@20.19.25)
 
-  packages/device-llm:
-    dependencies:
-      '@itookit/common':
-        specifier: workspace:*
-        version: link:../common
-      '@itookit/llm-common':
-        specifier: workspace:*
-        version: link:../llm-common
-      '@itookit/ui-common':
-        specifier: workspace:*
-        version: link:../ui-common
-      '@itookit/vfs-core':
-        specifier: workspace:*
-        version: link:../vfs-core
-      '@modelcontextprotocol/client':
-        specifier: 2.0.0
-        version: 2.0.0
-      '@modelcontextprotocol/core':
-        specifier: 2.0.0
-        version: 2.0.0
-      js-yaml:
-        specifier: ^4.1.1
-        version: 4.1.1
-    devDependencies:
-      '@types/js-yaml':
-        specifier: ^4.0.9
-        version: 4.0.9
-      '@types/node':
-        specifier: ^20.19.25
-        version: 20.19.25
-      tsup:
-        specifier: ^8.5.1
-        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@20.19.25))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^1.6.1
-        version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
-
   packages/device-tty:
     dependencies:
       '@itookit/common':
@@ -637,6 +579,24 @@ importers:
       vitest:
         specifier: ^3.2.1
         version: 3.2.4(@types/debug@4.1.13)(@types/node@20.19.25)(jiti@1.21.7)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.2)
+
+  packages/driver-llm:
+    devDependencies:
+      '@itookit/llm-context':
+        specifier: workspace:*
+        version: link:../llm-context
+      '@types/node':
+        specifier: ^20.19.25
+        version: 20.19.43
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@20.19.43))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@20.19.43)(jsdom@27.2.0)
 
   packages/durable-kernel:
     dependencies:
@@ -662,22 +622,40 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/context':
+      '@itookit/driver-llm':
         specifier: workspace:*
-        version: link:../context
-      '@itookit/device-llm':
-        specifier: workspace:*
-        version: link:../device-llm
+        version: link:../driver-llm
       '@itookit/durable-kernel':
         specifier: workspace:*
         version: link:../durable-kernel
+      '@itookit/llm-common':
+        specifier: workspace:*
+        version: link:../llm-common
+      '@itookit/llm-context':
+        specifier: workspace:*
+        version: link:../llm-context
       '@itookit/tools':
         specifier: workspace:*
         version: link:../tools
       '@itookit/vfs-core':
         specifier: workspace:*
         version: link:../vfs-core
+      '@modelcontextprotocol/client':
+        specifier: 2.0.0
+        version: 2.0.0
+      '@modelcontextprotocol/core':
+        specifier: 2.0.0
+        version: 2.0.0
+      js-yaml:
+        specifier: ^4.1.1
+        version: 4.3.2
     devDependencies:
+      '@itookit/vfsdriver-indexeddb':
+        specifier: workspace:*
+        version: link:../vfsdriver-indexeddb
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
       '@types/node':
         specifier: 20.19.25
         version: 20.19.25
@@ -696,9 +674,12 @@ importers:
 
   packages/llm-common:
     dependencies:
-      '@itookit/context':
+      '@itookit/driver-llm':
         specifier: workspace:*
-        version: link:../context
+        version: link:../driver-llm
+      '@itookit/llm-context':
+        specifier: workspace:*
+        version: link:../llm-context
     devDependencies:
       tsup:
         specifier: ^8.5.1
@@ -706,6 +687,21 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/llm-context:
+    devDependencies:
+      '@types/node':
+        specifier: 20.19.25
+        version: 20.19.25
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@20.19.25))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
 
   packages/llm-flow:
     dependencies:
@@ -743,15 +739,15 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/context':
-        specifier: workspace:*
-        version: link:../context
       '@itookit/durable-kernel':
         specifier: workspace:*
         version: link:../durable-kernel
       '@itookit/llm-common':
         specifier: workspace:*
         version: link:../llm-common
+      '@itookit/llm-context':
+        specifier: workspace:*
+        version: link:../llm-context
       '@itookit/llm-flow':
         specifier: workspace:*
         version: link:../llm-flow
@@ -783,9 +779,12 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/device-llm':
+      '@itookit/driver-llm':
         specifier: workspace:*
-        version: link:../device-llm
+        version: link:../driver-llm
+      '@itookit/kernel-adapters':
+        specifier: workspace:*
+        version: link:../kernel-adapters
       '@itookit/llm-common':
         specifier: workspace:*
         version: link:../llm-common
@@ -823,12 +822,12 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/context':
-        specifier: workspace:*
-        version: link:../context
       '@itookit/durable-kernel':
         specifier: workspace:*
         version: link:../durable-kernel
+      '@itookit/llm-context':
+        specifier: workspace:*
+        version: link:../llm-context
     devDependencies:
       '@types/node':
         specifier: ^20.19.25
@@ -860,9 +859,6 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/device-llm':
-        specifier: workspace:*
-        version: link:../device-llm
       '@itookit/durable-kernel':
         specifier: workspace:*
         version: link:../durable-kernel
@@ -2565,11 +2561,6 @@ packages:
   acorn-walk@8.3.4:
     resolution: {integrity: sha512-ueEepnujpqee2o5aIYnvHU6C0A42MNdsIDeqy5BydrkuC5R1ZuUFnm27EeFJGoEHJQgn3uleRvmTXaJgfXbt4g==}
     engines: {node: '>=0.4.0'}
-
-  acorn@8.17.0:
-    resolution: {integrity: sha512-xRQbDb9BnwDafYNn6Vwl839DYVjqXYb1XVGtWAZ1kcDc6iwAL4hg3B1dZlRiuENFeO2H53gFG3in621AdERVAg==}
-    engines: {node: '>=0.4.0'}
-    hasBin: true
 
   acorn@8.18.0:
     resolution: {integrity: sha512-lGq+9yr1/GuAWaVYIHRjvvySG5/4VfKIvC8EWxStPdcDh/Ka7FG3twP6v4d5BkravUilhIAsG4Qj83t02LWUPQ==}
@@ -6488,9 +6479,7 @@ snapshots:
 
   acorn-walk@8.3.4:
     dependencies:
-      acorn: 8.17.0
-
-  acorn@8.17.0: {}
+      acorn: 8.18.0
 
   acorn@8.18.0: {}
 
@@ -7781,7 +7770,6 @@ snapshots:
   js-yaml@4.3.2:
     dependencies:
       argparse: 2.0.1
-    optional: true
 
   js2xmlparser@4.0.2:
     dependencies:

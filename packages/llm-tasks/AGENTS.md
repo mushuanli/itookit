@@ -8,14 +8,14 @@
 src/
 ├── index.ts                        统一导出
 ├── core/
-│   ├── context-assembler.ts        兼容转发到 @itookit/context
-│   └── provider-message-adapter.ts 兼容转发到 @itookit/context
+│   ├── context-assembler.ts        兼容转发到 @itookit/llm-context
+│   └── provider-message-adapter.ts 兼容转发到 @itookit/llm-context
 └── durable/
     ├── types.ts                    Program 状态 / 输入 / 输出类型
     ├── task-spec.ts                llm.agent / llm.chat 的 TaskInput 装配
     ├── program-helpers.ts          Program 共享辅助（事件、用量、失败处理）
     ├── dependency-collector.ts     依赖收集状态机（等待 task-exited → 就绪）
-    ├── context-compaction.ts       兼容转发到 @itookit/context
+    ├── context-compaction.ts       兼容转发到 @itookit/llm-context
     ├── chat-program.ts             DurableChatProgram
     ├── agent-program.ts            DurableAgentProgram（工具调用 / 审批）
     └── plan-program.ts             DurablePlanProgram

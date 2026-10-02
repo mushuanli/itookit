@@ -78,7 +78,6 @@
   "dependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/durable-kernel": "workspace:*",
-    "@itookit/device-llm": "workspace:*",
     "@itookit/llm-session": "workspace:*",
     "@itookit/llm-settings-ui": "workspace:*",
     "@itookit/vfs-core": "workspace:*",

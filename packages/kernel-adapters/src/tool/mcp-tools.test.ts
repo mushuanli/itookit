@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { ToolDeviceDriver } from '@itookit/tools';
-import { LLM_IOCTL } from '@itookit/device-llm';
+import { LLM_IOCTL } from '../llm-management/index';
 import { MCPToolAdapter, mcpToolId, mcpResourceToolId, mcpPromptToolId } from './mcp-tools';
 
 it('exposes only authorized server capabilities, validates arguments and forwards content/progress', async () => {

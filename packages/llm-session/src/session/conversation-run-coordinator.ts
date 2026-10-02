@@ -1,4 +1,4 @@
-import { createContextAssembler, type IContextAssembler, type RetrievedMemoryEntry } from '@itookit/context';
+import { createContextAssembler, type IContextAssembler, type RetrievedMemoryEntry } from '@itookit/llm-context';
 import { FlowHistory } from './flow-history';
 import { CLIENT_WEB_SEARCH_TOOL, directExecutionMode, directToolIds } from './direct-execution-mode';
 import { DEFAULT_AGENT_MAX_EXCHANGES } from '@itookit/llm-common';

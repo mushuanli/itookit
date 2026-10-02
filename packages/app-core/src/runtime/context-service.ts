@@ -1,4 +1,4 @@
-import { ContextError, createContextService, estimateRequestTokens, type IContextContentStore } from '@itookit/context';
+import { ContextError, createContextService, estimateRequestTokens, type IContextContentStore } from '@itookit/llm-context';
 import { createTaskContextStorage, type ContextServiceResolver } from '@itookit/kernel-adapters';
 import type { EffectExecutionContext, Kernel, ResolvedStorageBinding } from '@itookit/durable-kernel';
 import type { ILLMService } from '@itookit/common';

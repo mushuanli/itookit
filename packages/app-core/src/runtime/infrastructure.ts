@@ -1,5 +1,5 @@
 import { createVFS, MemoryBackend, type IFileSystem, type IStorageBackend, type IVFSManager, type MountOptions } from '@itookit/vfs-core';
-import { LLMDeviceDriver, type CodexAppServerTransport } from '@itookit/device-llm';
+import { LLMDeviceDriver, type CodexAppServerTransport } from '@itookit/kernel-adapters/llm';
 import { t, traceBoot, type ILLMLogger } from '@itookit/common';
 
 export interface ApplicationInfrastructureOptions {

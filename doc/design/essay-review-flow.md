@@ -63,7 +63,7 @@ flowchart LR
 | initialResults/inputRevision | 调用方显式提供初始结果和输入版本 |
 | revision | 可选批次间人工修改字段及提示 |
 
-每个 branch 可配置 `when`、`input` 表达式映射、`instruction`、`context`、`publishToHistory`、`output` 选择表达式、`outputFormat`（value/json）、`outputSchema` 和语义 `validate`。表达式使用 literal/path/布尔/比较运算；动态参数通过 inputs 读取，不能执行任意代码。
+每个 branch 可配置 `when`、`input` 表达式映射、`instruction`、`llm-context`、`publishToHistory`、`output` 选择表达式、`outputFormat`（value/json）、`outputSchema` 和语义 `validate`。表达式使用 literal/path/布尔/比较运算；动态参数通过 inputs 读取，不能执行任意代码。
 
 `when` 负责选择候选，missing-first 仅调整候选顺序。如果未满足 until 却没有可选分支，运行明确失败，避免静默成功或无进展死循环。
 

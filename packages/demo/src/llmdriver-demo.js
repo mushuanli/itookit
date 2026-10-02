@@ -1,4 +1,5 @@
-import { LLMDriver, LLMChain, testLLMConnection } from '@itookit/device-llm';
+import { LLMChain } from '@itookit/driver-llm/chain';
+import { LLMDriver, testLLMConnection } from '@itookit/driver-llm';
 
 // ============================================
 // Example 1: Basic Usage with Built-in Providers
@@ -12,7 +13,7 @@ async function basicUsage() {
     });
 
     // Simple chat completion
-    /** @type {import('@itookit/device-llm').ChatCompletionResponse} */
+    /** @type {import('@itookit/driver-llm').ChatCompletionResponse} */
     const response = await client.chat.create({
         messages: [
             { role: 'system', content: 'You are a helpful assistant.' },
@@ -33,7 +34,7 @@ async function streamingExample() {
         apiKey: process.env.ANTHROPIC_API_KEY
     });
 
-    /** @type {AsyncGenerator<import('@itookit/device-llm').ChatCompletionChunk>} */
+    /** @type {AsyncGenerator<import('@itookit/driver-llm').ChatCompletionChunk>} */
     const stream = await client.chat.create({
         messages: [{ role: 'user', content: 'Write a short poem about AI' }],
         model: 'claude-3-5-sonnet-20241022',
@@ -61,7 +62,7 @@ async function thinkingModeExample() {
     });
 
     // Non-streaming with thinking
-    /** @type {import('@itookit/device-llm').ChatCompletionResponse} */
+    /** @type {import('@itookit/driver-llm').ChatCompletionResponse} */
     const response = await client.chat.create({
         messages: [{ 
             role: 'user', 
@@ -77,7 +78,7 @@ async function thinkingModeExample() {
 
     // Streaming with thinking
     console.log('\n--- Streaming with Thinking ---');
-    /** @type {AsyncGenerator<import('@itookit/device-llm').ChatCompletionChunk>} */
+    /** @type {AsyncGenerator<import('@itookit/driver-llm').ChatCompletionChunk>} */
     const stream = await client.chat.create({
         messages: [{ role: 'user', content: 'Calculate 15% tip on $87.32' }],
         thinking: true,
@@ -112,7 +113,7 @@ async function attachmentsExample() {
     });
 
     // Image from URL
-    /** @type {import('@itookit/device-llm').ChatCompletionResponse} */
+    /** @type {import('@itookit/driver-llm').ChatCompletionResponse} */
     const imageResponse = await client.chat.create({
         messages: [{
             role: 'user',
@@ -132,7 +133,7 @@ async function attachmentsExample() {
     console.log(imageResponse.choices[0].message.content);
 
     // Base64 image
-    /** @type {import('@itookit/device-llm').ChatCompletionResponse} */
+    /** @type {import('@itookit/driver-llm').ChatCompletionResponse} */
     const base64Response = await client.chat.create({
         messages: [{
             role: 'user',
@@ -151,7 +152,7 @@ async function attachmentsExample() {
     // PDF Document (Node.js with fs)
     // const fs = require('fs');
     // const pdfBuffer = fs.readFileSync('./document.pdf');
-    // const { processAttachment } = require('@itookit/device-llm');
+    // const { processAttachment } = require('@itookit/driver-llm');
     // const { base64, mimeType } = await processAttachment(pdfBuffer, 'application/pdf');
     
     // const pdfResponse = await client.chat.create({
@@ -176,7 +177,7 @@ async function attachmentsExample() {
 
 async function customProviderExample() {
     // Define a new OpenAI-compatible provider
-    /** @type {Record<string, import('@itookit/device-llm').ProviderConfig>} */
+    /** @type {Record<string, import('@itookit/driver-llm').ProviderConfig>} */
     const myCustomProviders = {
         mycloud: {
             name: 'My Custom Cloud',
@@ -206,7 +207,7 @@ async function customProviderExample() {
         customProviderDefaults: myCustomProviders
     });
 
-    /** @type {import('@itookit/device-llm').ChatCompletionResponse} */
+    /** @type {import('@itookit/driver-llm').ChatCompletionResponse} */
     const response = await client.chat.create({
         messages: [{ role: 'user', content: 'Hello from my custom provider!' }]
     });
@@ -227,7 +228,7 @@ async function advancedOptionsExample() {
         timeout: 30000        // 30 second timeout
     });
 
-    /** @type {import('@itookit/device-llm').ChatCompletionResponse} */
+    /** @type {import('@itookit/driver-llm').ChatCompletionResponse} */
     const response = await client.chat.create({
         messages: [{ role: 'user', content: 'Explain quantum computing' }],
         model: 'gpt-4o',
@@ -275,7 +276,7 @@ async function functionCallingExample() {
         }
     ];
 
-    /** @type {import('@itookit/device-llm').ChatCompletionResponse} */
+    /** @type {import('@itookit/driver-llm').ChatCompletionResponse} */
     const response = await client.chat.create({
         messages: [{ 
             role: 'user', 
@@ -313,7 +314,7 @@ async function hooksExample() {
                 // You can modify response here
                 return response;
             },
-            onError: async (/** @type {import('@itookit/device-llm').LLMError} */ error, params) => {
+            onError: async (/** @type {import('@itookit/driver-llm').LLMError} */ error, params) => {
                 console.error('❌ Request failed:', error.message);
                 console.error('🔧 Provider:', error.provider);
                 console.error('📍 Status:', error.statusCode);
@@ -430,7 +431,7 @@ async function multiProviderComparison() {
 
         console.log(`\n--- ${config.name} (${config.model}) ---`);
         
-        /** @type {import('@itookit/device-llm').ChatCompletionResponse} */
+        /** @type {import('@itookit/driver-llm').ChatCompletionResponse} */
         const response = await client.chat.create({
             messages: [{ role: 'user', content: question }],
             model: config.model,

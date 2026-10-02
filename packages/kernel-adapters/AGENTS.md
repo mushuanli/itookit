@@ -1,10 +1,10 @@
 # @itookit/kernel-adapters
 
-内核**能力适配层**：把 `device-llm`（模型）、`tools`（工具与原生 shell）、Skill 目录、TTY 驱动接到 `durable-kernel` 的 Effect 面与工具面上，并托管 Skill 的加载身份与提示注入。它是 Kernel 与具体能力实现之间的唯一粘合层。详见 [架构设计](../../doc/architecture.md)、[事件流](../../doc/event-flows.md)、[Skill 设计](../../doc/design/skill-design.md)。
+内核**能力适配层**：把 `driver-llm`（模型）、`tools`（工具与原生 shell）、Skill 目录、TTY 驱动接到 `durable-kernel` 的 Effect 面与工具面上，并托管 Skill 的加载身份与提示注入。它是 Kernel 与具体能力实现之间的唯一粘合层。详见 [架构设计](../../doc/architecture.md)、[事件流](../../doc/event-flows.md)、[Skill 设计](../../doc/design/skill-design.md)。
 
 ## 定位与铁律
 
-- **只依赖下层**：`context`、`common`、`device-llm`、`durable-kernel`、`vfs-core`、`tools`；不得依赖 `llm-session` / `llm-flow` / `llm-tasks` / `app-core` / UI 包或任何 app。
+- **只依赖下层**：`llm-context`、`common`、`driver-llm`、`durable-kernel`、`vfs-core`、`tools`；不得依赖 `llm-session` / `llm-flow` / `llm-tasks` / `app-core` / UI 包或任何 app。
 - **Effect 必须可取消且确认停止**：6 个适配器（`llm.chat`、`tool.call`、`skill.load`、`skill.unload`、`process.exec`、`tty.command`）全部实现 `EffectAdapter.cancel`；`effects/in-flight.ts` 记录在途执行，`cancel` 必须等它结束才确认——「取消已发出」不等于「外部已停止」。
 - **装配即接线**：`createKernelAdaptersRuntime` 只做组合与生命周期；策略（工具白名单、Skill 触发、项目规则）由注入的 `SkillSource` / `configureSession` / `additionalTools` 决定，调用方（CLI / app-core）负责宿主差异。
 - **Skill 身份持久化**：成功 `load_skill` 后把身份写入 `kernel-adapters.skills.loaded`（`skill/loaded-state.ts`）；身份写入失败必须回滚（新加载卸载、已加载保留），回滚自身失败以 `AggregateError` 保留原始错误。
@@ -25,7 +25,7 @@ src/
 │   ├── skill-load-effect.ts     skill.load
 │   ├── skill-unload-effect.ts   skill.unload
 │   └── in-flight.ts             在途执行登记（cancel 等待结束）
-├── llm/llm-service-adapter.ts   device-llm 驱动 → ILLMService
+├── llm/llm-service-adapter.ts   driver-llm 驱动 → ILLMService
 ├── skill/                       Skill 子系统
 │   ├── skill-device-driver.ts   Skill 目录的持久实现（save/delete + 变更通知）
 │   ├── session-skill-controls.ts 面板/编辑器操作（load/unload/mountByGlob/onChange）
@@ -88,3 +88,7 @@ pnpm --filter @itookit/kernel-adapters typecheck
 持久身份恢复在 `runtime/create-kernel-adapters-runtime.ts` 的注册表 `restoreScope` 中实现。关闭 Session/运行时时先失效排队操作，等待当前 Skill 操作与身份恢复结束，再释放能力；清理未完成时不能重建作用域。
 
 加载记录支持 format:2 的 ids/snapshots/drifts。默认 require-reload，keep-old 只保留内容而不恢复撤销权限；旧 ID 记录在执行入口要求显式 reload。resolveSessionSelectedSkills 将直接聊天/Flow 初始选择接到同一版本存储和 Session 队列。
+
+## 模型管理子入口
+
+`@itookit/kernel-adapters/llm` 承接旧 device-llm 的 LLMDeviceDriver、LLM_IOCTL、配置、费用、Skill 与 MCP 管理。源码在 `src/llm-management/`，回归在 `tests/llm-management/`；不是额外 npm 包。公开通信客户端与契约来自 driver-llm，禁止其反向依赖本包。MCP stdio 保留 browser/default 条件入口。详见 [模型集成](./doc/llm-management/README.md)。

@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { LLMDriver } from '@itookit/device-llm';
+import { LLMDriver } from '@itookit/driver-llm';
 import type { ChatMessage, Attachment } from '@itookit/common';
 
 // ── Minimal 1×1 pixel PNG (standard test fixture, valid PNG binary) ───────────

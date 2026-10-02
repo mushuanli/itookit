@@ -19,7 +19,7 @@ import type { IConnectionService,
     ApiProtocol
 } from '@itookit/common';
 import { Toast } from '@itookit/ui-common';
-import { fromConnectionDef, serializeLLMConfig } from '@itookit/device-llm';
+import { fromConnectionDef, serializeLLMConfig } from '@itookit/kernel-adapters/llm';
 import { runLLMImport } from './llm-import';
 import { escapeAttr, escapeHTML } from '@itookit/common';
 

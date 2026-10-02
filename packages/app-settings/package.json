@@ -34,7 +34,6 @@
   },
   "peerDependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/device-llm": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
     "@itookit/vfs-ui": "workspace:*",
@@ -43,7 +42,6 @@
   },
   "devDependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/device-llm": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
     "@itookit/vfs-ui": "workspace:*",

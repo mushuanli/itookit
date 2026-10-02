@@ -1,5 +1,5 @@
 import { createContextGc, scheduleContextGc, validateContextGcSchedule, type ContextGcOptions, type ContextGcPolicy,
-    type ContextGcResult, type ContextGcScheduleOptions } from '@itookit/context';
+    type ContextGcResult, type ContextGcScheduleOptions } from '@itookit/llm-context';
 import { createTaskContextStorage } from '@itookit/kernel-adapters';
 import { KernelError, KernelErrorCode } from '@itookit/durable-kernel';
 import type { Kernel, ResolvedStorageBinding, StorageBindingRef, TaskListQuery } from '@itookit/durable-kernel';

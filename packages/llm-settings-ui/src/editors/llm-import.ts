@@ -17,7 +17,7 @@ import {
     toLLMProvider, toRuntimeConnection, toRuntimeAgent,
     getProviderDefs,
     type LLMConfigFile, type LLMConnectionDef,
-} from '@itookit/device-llm';
+} from '@itookit/kernel-adapters/llm';
 import type { ModelPricingConfig } from '@itookit/common';
 
 // ─── Types ────────────────────────────────────────────────────────────────────

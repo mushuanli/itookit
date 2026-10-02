@@ -26,14 +26,21 @@
       }
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm build"
   },
-  "keywords": ["itookit", "llm", "ai", "agent"],
+  "keywords": [
+    "itookit",
+    "llm",
+    "ai",
+    "agent"
+  ],
   "author": "lizlok@gmail.com",
   "license": "MIT",
   "repository": {
@@ -46,6 +53,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@itookit/context": "workspace:*"
+    "@itookit/llm-context": "workspace:*",
+    "@itookit/driver-llm": "workspace:*"
   }
 }

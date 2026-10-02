@@ -25,7 +25,7 @@ import type { IConnectionService,
     ModelCategory,
 } from '@itookit/common';
 import { Modal, Toast } from '@itookit/ui-common';
-import { exportBundleToLLM, fromConnectionDef } from '@itookit/device-llm';
+import { exportBundleToLLM, fromConnectionDef } from '@itookit/kernel-adapters/llm';
 import { runLLMImport } from './llm-import';
 
 /** 模型用途分类选项（顺序即下拉顺序） */

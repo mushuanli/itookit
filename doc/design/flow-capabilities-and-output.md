@@ -61,7 +61,7 @@ Skill 可通过工具绑定声明：
 真实模型与构建后 CLI 的跨进程验证见 [CLI 能力与持久化实测](flow-cli-capabilities-verification.md)。执行记录与 UI 所需的聊天 Round 均已保存，等待输入、跨进程恢复和重复导出均有回归覆盖。
 
 - [CLI 集成](../../apps/cli/tests/flow-capabilities.test.ts)：本地模拟模型 + 真实 stdio MCP 进程，直接工具、Skill 工具、独立 history、批准等待、关闭后恢复及再次运行。
-- [HTTP MCP 测试](../../packages/device-llm/tests/mcp-transport.test.ts)：初始化、认证头、分页、结构化结果和取消。
+- [HTTP MCP 测试](../../packages/kernel-adapters/tests/llm-management/mcp-transport.test.ts)：初始化、认证头、分页、结构化结果和取消。
 - [输出测试](../../packages/llm-ui/src/flows/flow-output.test.ts) 与 [DOM 集成](../../packages/app-shell/tests/flow-output.test.ts)：结构化数据、转义、运行刷新、会话过滤、历史查看和关闭清理。
 
 这些测试不依赖外部模型或用户 MCP 服务，也不等同于真实桌面手工验收。

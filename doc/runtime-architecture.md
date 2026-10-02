@@ -86,7 +86,7 @@ interface HeadlessKernelRuntime extends KernelAdaptersRuntime {
 | 调用方 | 文件 | 说明 |
 |---|---|---|
 | CLI headless | `apps/cli/src/runtime.ts` | `createCliRuntime` 先组装 VFS / TTY / 目录挂载 / 工具，再调用 `createKernelRuntime` |
-| app-core 应用基础设施 | `packages/app-core/src/runtime/infrastructure.ts` | `createInfrastructure`：VFS（含 `/run` 挂载与固定用户布局预热）+ LLM 设备驱动注册/冻结；返回 `vfs`/`systemFS`/`llmDriver`/`logIO`/`closeCodexTransport`，宿主负责释放顺序（VFS 最后） |
+| app-core 应用基础设施 | `packages/app-core/src/runtime/infrastructure.ts` | `createInfrastructure`：VFS（含 `/run` 挂载与固定用户布局预热）+ LLM kernel-adapters/llm 设备驱动注册/冻结；返回 `vfs`/`systemFS`/`llmDriver`/`logIO`/`closeCodexTransport`，宿主负责释放顺序（VFS 最后） |
 | app-core 应用运行时 | `packages/app-core/src/runtime/create-application-runtime.ts` | `createApplicationRuntime` 先调用 `createInfrastructure`，再叠加会话、Flow、`RunCatalog` |
 
 ## app-shell 只负责 UI
@@ -281,3 +281,7 @@ Tauri 每个页面先调用 `sidecar_open_scope`，Rust 以 WebView label 维护
 `ProjectService.personal()` 独立于当前项目解析个人项目，以 `/etc/personal-project.json` 保存稳定项目 ID。旧 profile 首次使用时仅接纳已知中英文默认名称的托管个人项目，否则新建；改名、分组移动和重启后仍按 ID 找回。标题栏 AI 引用产生新的会话输入草稿：项目文件归其项目，Session 文件沿用 Session 所属项目，其余归个人项目。草稿先写入 `uiState.branchDrafts.main.inputText`，再导航到聊天，不触发模型请求。
 
 Web 与 Tauri 共用工作台导航、创建对话框和小屏幕列表／内容切换。项目可放入多级分组，各项目内有“会话”与“文件”；会话可继续用目录组织。旧 `projects` 路由指向工作台，桌面原有目录书签恢复到项目树。删除项目导航及会话不会递归删除其真实文件目录。
+
+## 公共通信与宿主适配
+
+`driver-llm` 发布产物不依赖内部包；消息声明从 llm-context 内联，通信类型和纯协议函数通过 `/contracts` 提供。`kernel-adapters/llm` 保留 LLMDeviceDriver、LLM_IOCTL、VFS 配置和 MCP/Skill 管理，app-core、CLI 与设置页通过该入口接入。旧 device-llm 已拆分；llm-tasks、llm-flow、llm-session 和 llm-ui 的整体重组尚未实施。

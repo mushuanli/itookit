@@ -1,5 +1,5 @@
 import { createFileSystemSource, MemoryBackend, type FileSystemSourceOwner } from '@itookit/vfs-core';
-import { LLM_PROVIDERS } from '@itookit/device-llm';
+import { LLM_PROVIDERS } from '@itookit/kernel-adapters/llm';
 import { ENTITY_ICONS, t, type SystemPromptDefinition, type MCPServer, type IConnectionService, type ToolMeta, type ToolDefinition } from '@itookit/common';
 
 export interface ToolboxTool { id: string; name: string; description: string; source: string; serverId?: string; enabled: boolean; parameters?: unknown }

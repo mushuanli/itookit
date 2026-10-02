@@ -3,7 +3,7 @@
 应用启动引导 + UI 路由 + UI 装配。`initApp()` 是唯一顶层初始化函数。
 平台无关的 Session/Kernel 组合位于 `@itookit/app-core`（直接依赖）；app-shell 依赖它并只保留 UI/路由/编辑器装配。
 
-peerDependencies: `@itookit/{app-settings,common,device-llm,llm-session,durable-kernel,kernel-adapters,mdxeditor,vfs-ui,vfs-core,ui-common}`
+peerDependencies: `@itookit/{app-settings,common,driver-llm,llm-session,durable-kernel,kernel-adapters,mdxeditor,vfs-ui,vfs-core,ui-common}`
 
 ## Architecture
 

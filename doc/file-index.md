@@ -72,16 +72,16 @@
 | 工具定义（human-input/shell-session/tty-write） | `kernel-adapters/src/tool/`、`kernel-adapters/src/tty/` |
 | Kernel 插件注册 | `kernel-adapters/src/plugin/kernel-adapters-plugin.ts` |
 
-## LLM 设备（@itookit/device-llm）
+## LLM 设备（@itookit/driver-llm）
 
 | 场景 | 文件 |
 |---|---|
-| LLMDeviceDriver（IDeviceDriver + LLM_IOCTL） | `device-llm/src/device/llm-device-driver.ts` |
-| Provider 基类 + OpenAI/Responses/Anthropic/Gemini | `device-llm/src/providers/` |
-| Responses API（web_search/reasoning/citations） | `device-llm/src/providers/responses.ts` |
-| Gemini grounding citations | `device-llm/src/providers/gemini.ts` |
-| MCP 客户端 | `device-llm/src/skills/mcp-client.ts` |
-| LLM 错误族 | `device-llm/src/errors.ts` |
+| LLMDeviceDriver（IDeviceDriver + LLM_IOCTL） | `kernel-adapters/src/llm-management/device/llm-device-driver.ts` |
+| Provider 基类 + OpenAI/Responses/Anthropic/Gemini | `driver-llm/src/providers/` |
+| Responses API（web_search/reasoning/citations） | `driver-llm/src/providers/responses.ts` |
+| Gemini grounding citations | `driver-llm/src/providers/gemini.ts` |
+| MCP 客户端 | `kernel-adapters/src/llm-management/skills/mcp-client.ts` |
+| LLM 错误族 | `driver-llm/src/errors.ts` |
 
 ## VFS（@itookit/vfs-core）
 

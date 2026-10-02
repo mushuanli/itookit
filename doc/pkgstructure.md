@@ -14,15 +14,15 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 
 | Package | Role |
 |---|---|
-| `@itookit/common` | 共享接口、类型、i18n、工具。跨包契约之源，依赖 `@itookit/llm-common`（兼容契约）及 `@itookit/context`（hash 与 Context 契约）。 |
-| `@itookit/llm-common` | LLM 领域共享接口/类型：DagNodeDefinition/DagEdgeDefinition/DagRunSpec、FlowDraft/FlowRevision、SerializableExpression、TokenUsage、Tool 定义等纯契约；只对 `@itookit/context` 有类型依赖。 |
-| `@itookit/context` | 零运行时依赖的上下文领域：Profile、装配、窗口预算、Notes、原始历史、不可变请求与内容存储端口。详见 [Context API](context-api.md)。 |
+| `@itookit/common` | 共享接口、类型、i18n、工具。跨包契约之源，依赖 `@itookit/llm-common`（兼容契约）及 `@itookit/llm-context`（hash 与 Context 契约）。 |
+| `@itookit/llm-common` | LLM 领域共享接口/类型；通信类型与纯协议函数兼容转发 driver-llm/contracts，Context 类型来自 llm-context。 |
+| `@itookit/llm-context` | 零运行时依赖的上下文领域：Profile、装配、窗口预算、Notes、原始历史、不可变请求与内容存储端口。详见 [Context API](context-api.md)。 |
 | `@itookit/durable-kernel` | 持久化执行内核：`DurableTaskProgram`（init/reduce 状态机）、`EffectAdapter`、Task/Resource/Budget/Interaction 调度与恢复。 |
 | `@itookit/llm-tasks` | 平台无关的 LLM Durable Program 层：`llm.agent`/`llm.chat`/`llm.plan` 状态机、依赖收集（`collectDependency`/`dependenciesReady`/`dependencyWait`）、`extractNodeOutput`、`buildLlmTaskInput`、ContextTaskProgram v2 bridge。 |
 | `@itookit/llm-flow` | DAG 编排：`DurableFlowExecutor`（route/loop/spawn/compensate/on_failure/budget）、内置插件、Flow programs、环检测（`findCycles`）、FlowDefinitionStore。 |
 | `@itookit/llm-session` | 用户可见的会话语义 + 持久化：SessionManager、Round/Branch、SessionRepository（会话资产）、FlowEngine（Flow 定义存储）、RoundLog、SessionEventBus、UI projections。依赖 llm-flow。 |
-| `@itookit/kernel-adapters` | Kernel 能力适配器：bash/llm-chat/tool-call/tty/skill-load 等 EffectAdapter、Exec/ApprovedEffect 程序、运行时装配。 |
-| `@itookit/device-llm` | LLM 设备驱动：OpenAI/Anthropic/Gemini 通信、SSE 流式、MCP、Skill/Connection 存储。 |
+| `@itookit/kernel-adapters` | Kernel 能力适配器：Effect、Exec/ApprovedEffect 程序与运行时装配；`/llm` 子入口提供 VFS 模型设备、配置、费用、Skill 和 MCP 管理。 |
+| `@itookit/driver-llm` | 独立模型通信：OpenAI/Responses/Anthropic/Gemini/Codex、SSE、取消与注入式网络/日志/重试；发布产物零运行时依赖。 |
 | `@itookit/device-tty` | TTY 设备驱动：node-pty 交互 shell 会话。 |
 | `@itookit/sanbox` | Seatbelt / Bubblewrap 策略与启动计划；根入口平台无关，`/node` 负责真实路径与启动探测，`native/` Rust crate 已接入 Tauri Session/Flow Bash，见 [系统沙箱](design/system-sandbox.md)。 |
 | `@itookit/tools` | 内置工具实现（`buildTool()` 工厂）：File/Search/Shell/Task/Agent/Bash/Skill 等。 |

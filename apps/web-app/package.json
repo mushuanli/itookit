@@ -23,7 +23,7 @@
     "@itookit/app-settings": "workspace:*",
     "@itookit/app-shell": "workspace:*",
     "@itookit/common": "workspace:*",
-    "@itookit/device-llm": "workspace:*",
+    "@itookit/driver-llm": "workspace:*",
     "@itookit/kernel-adapters": "workspace:*",
     "@itookit/llm-session": "workspace:*",
     "@itookit/llm-settings-ui": "workspace:*",

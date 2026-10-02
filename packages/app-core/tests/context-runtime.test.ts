@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { bindCapabilities, type SessionHandle } from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend, type IDeviceDriver } from '@itookit/vfs-core';
-import { createContextService, type ChatMessage } from '@itookit/context';
+import { createContextService, type ChatMessage } from '@itookit/llm-context';
 import { createFileContextContentStore, createTaskContextStorage } from '@itookit/kernel-adapters';
 import { createKernelRuntime, type HeadlessKernelRuntime } from '../src/runtime/create-kernel-runtime';
 

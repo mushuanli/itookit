@@ -1,7 +1,7 @@
 // @file llm-common/src/index.ts
 // LLM-domain shared interfaces, types, and utilities.
 // All LLM-related packages import from here instead of @itookit/common.
-// Zero runtime dependencies — pure TypeScript types and pure utility functions.
+// Communication contracts and pure protocol helpers forward driver-llm/contracts.
 
 export * from './llm';
 export * from './agent';

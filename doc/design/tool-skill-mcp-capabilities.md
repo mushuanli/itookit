@@ -57,9 +57,9 @@ CLI 的 worktree 创建、恢复和清理由宿主 Git 通道执行；Agent 的 
 ## 验证入口
 
 - [配置表单测试](../../packages/app-shell/tests/capability-settings.test.ts)：策略保留、MCP 授权、转义、单位换算、草稿测试和失败处理。
-- [Agent 导入导出](../../packages/device-llm/tests/agent-config-roundtrip.test.ts)：显式空白名单、策略和嵌套配置。
-- [连接管理测试](../../packages/device-llm/tests/mcp-manager.test.ts)：配置失效、并发修改、删除、reload 及旧单位。
-- [宿主 stdio 测试](../../packages/device-llm/tests/mcp-host-transport.test.ts)：真实子进程、SDK 2026-07-28 协商、分页、资源、Prompt、progress 和启动取消。
+- [Agent 导入导出](../../packages/kernel-adapters/tests/llm-management/agent-config-roundtrip.test.ts)：显式空白名单、策略和嵌套配置。
+- [连接管理测试](../../packages/kernel-adapters/tests/llm-management/mcp-manager.test.ts)：配置失效、并发修改、删除、reload 及旧单位。
+- [宿主 stdio 测试](../../packages/kernel-adapters/tests/llm-management/mcp-host-transport.test.ts)：真实子进程、SDK 2026-07-28 协商、分页、资源、Prompt、progress 和启动取消。
 - [MCP 工具适配](../../packages/kernel-adapters/src/tool/mcp-tools.test.ts)：能力 ID、参数验证、external 标记及进度。
 - [Harness 提交](../../packages/llm-session/__tests__/direct-execution-mode.test.ts)：profile 展开进入实际 Task 输入，Chat 不加载 MCP。
 - [CLI 集成](../../apps/cli/tests/flow-capabilities.test.ts)：显式工具 / Skill / profile、真实 stdio、审批、恢复和重跑。
@@ -68,4 +68,4 @@ CLI 的 worktree 创建、恢复和清理由宿主 Git 通道执行；Agent 的 
 
 2026-09-22 的隔离 Tauri/WebKit 验证使用真实配置编辑器、LLMDeviceDriver、MCP SDK、原生 stdio、Session Bash 和 HistoryView：MCP 2026-07-28 progress 约 64ms 可见（约 116ms 完成），Bash 首段输出约 254ms 可见、1058ms 完成；资源与 Prompt 的配置页预览及工具调用均成功。测试使用本地协议 fixture，没有调用远程 LLM。临时报告保存在 `/tmp/x1-capability-tauri-probe/profile/capabilities-result.json`。
 
-MCP 2.0.0 迁移验收：device-llm 全包 80 项测试、CLI MCP 集成 4 项、配置页 6 项通过；全仓类型检查、device-llm 构建、Tauri 前端构建、文档与样式检查通过。协议测试验证旧版本/未知方法/鉴权失败/服务故障均不回退，HTTP JSON-RPC headers 与逐请求元数据、SSE 响应中的实时进度，以及未实现的多轮交互不会被误报成功。完整测试矩阵（含 CLI crash matrix 与 Rust）在本次 SDK 迁移前通过，迁移后复测受影响模块及桌面集成。
+MCP 2.0.0 迁移验收：driver-llm 全包 80 项测试、CLI MCP 集成 4 项、配置页 6 项通过；全仓类型检查、driver-llm 构建、Tauri 前端构建、文档与样式检查通过。协议测试验证旧版本/未知方法/鉴权失败/服务故障均不回退，HTTP JSON-RPC headers 与逐请求元数据、SSE 响应中的实时进度，以及未实现的多轮交互不会被误报成功。完整测试矩阵（含 CLI crash matrix 与 Rust）在本次 SDK 迁移前通过，迁移后复测受影响模块及桌面集成。

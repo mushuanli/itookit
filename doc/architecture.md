@@ -24,7 +24,7 @@
 ├──────────────┼──────────────┼──────────────────────┤
 │  durable-kernel             │                      │  执行内核
 ├──────────────┼──────────────┼──────────────────────┤
-│ kernel-adapters    │  device-llm  │ device-tty   tools   │  能力/引擎层
+│ kernel-adapters    │  driver-llm  │ device-tty   tools   │  能力/引擎层
 ├──────────────┴──────────────┴──────────────────────┤
 │  vfs-core (VFS)                  vfsdriver-*          │  存储层
 ├────────────────────────────────────────────────────┤
@@ -34,7 +34,7 @@
 
 依赖铁律：**上层可依赖下层，下层永不知上层**。跨层通过接口注入：装配下沉在 `app-core/src/runtime/create-application-runtime.ts`（`createApplicationRuntime()`），`app-shell/src/bootstrap.ts` 只是调用方。
 
-上下文实现独立于执行内核，位于零运行时依赖的 `@itookit/context`。接口与 v2 持久执行见 [Context API](context-api.md)，设计依据与扩展边界见 [Context 模块设计](design/context-module.md)。
+上下文实现独立于执行内核，位于零运行时依赖的 `@itookit/llm-context`。接口与 v2 持久执行见 [Context API](context-api.md)，设计依据与扩展边界见 [Context 模块设计](design/context-module.md)。
 
 ## 2. Kernel — 持久化执行内核
 
@@ -101,7 +101,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 - **输入**：`DurableAgentInput`（sessionId/roundId/messages/connectionId/model/approval/tools/…），统一由 `buildLlmTaskInput` 装配。
 - **依赖收集**：`collectDependency`/`dependenciesReady`/`dependencyWait` — 等待上游 task-exited → 提取输出（`extractNodeOutput`）→ 注入消息。
 - **能力**：LLM/tool 通过 `capabilities` signal 获得 handle，走 `llm.chat`/`tool.call` effect。
-- **上下文**：`@itookit/context` 的 `IContextAssembler`（历史/记忆装配）与 `IContextService`（窗口、Notes、原文检索、持久请求）；llm-tasks 仅保留兼容导出与 Program bridge。
+- **上下文**：`@itookit/llm-context` 的 `IContextAssembler`（历史/记忆装配）与 `IContextService`（窗口、Notes、原文检索、持久请求）；llm-tasks 仅保留兼容导出与 Program bridge。
 
 ### 3.2 llm-flow — DAG 编排
 
@@ -144,7 +144,8 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 | 包 | 职责 |
 |---|---|
 | `kernel-adapters` | Kernel 能力适配器：`LlmChatEffectAdapter`（含预算扣减）、`ToolCallEffectAdapter`、`SkillLoadEffectAdapter`、`BashEffectAdapter`、`TtyEffectAdapter`；`LLMServiceAdapter`（ILLMService → LLMDeviceDriver）；`createKernelAdaptersRuntime` 装配。 |
-| `device-llm` | LLM 设备驱动：`LLMDeviceDriver`（IDeviceDriver + `LLM_IOCTL`：CHAT/CHAT_SYNC/ABORT/连接管理/MCP）；providers：OpenAI/Responses/Anthropic/Gemini；`MCPClient`。 |
+| `driver-llm` | 独立模型通信、Provider 协议、SSE、取消和注入式传输；无运行时依赖。 |
+| `kernel-adapters/llm` | `LLMDeviceDriver`、`LLM_IOCTL`、配置、费用、Skill、MCP 和 MindOS VFS 接入。 |
 | `device-tty` | TTY 驱动（node-pty 交互 shell）。 |
 | `tools` | 内置工具 `buildTool()` 工厂：FileRead/Write/Edit、Glob、Grep、Bash、Skill、Agent、AskUserQuestion 等。 |
 

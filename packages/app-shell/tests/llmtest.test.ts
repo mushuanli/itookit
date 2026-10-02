@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { LLMDriver, DEFAULT_AGENTS, LLM_DEFAULT_ID } from '@itookit/device-llm';
+import { LLMDriver, DEFAULT_AGENTS, LLM_DEFAULT_ID } from '@itookit/kernel-adapters/llm';
 import type { ChatMessage, Attachment } from '@itookit/common';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { foldContextHistory } from '@itookit/context';
+import { foldContextHistory } from '@itookit/llm-context';
 // @file: llm-conversation/src/persistence/round-log.ts
 // RoundLog — native Round DAG ILog implementation.
 //

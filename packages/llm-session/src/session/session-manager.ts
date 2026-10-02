@@ -43,7 +43,7 @@ import { SessionQuery } from './session-query';
 import { RoundOperations } from './round-operations';
 import { BranchService } from './branch-service';
 import { ContextProfileStore } from '../persistence/context-profile-store';
-import { createContextAssembler } from '@itookit/context';
+import { createContextAssembler } from '@itookit/llm-context';
 import { RoundLog } from '../persistence/round-log';
 import type { Kernel, SessionHandle } from '@itookit/durable-kernel';
 import { sessionDirectoryStorage } from '../persistence/session-directory-storage';

@@ -20,7 +20,7 @@ packages/demo/
     ├── editor.html / editor.js  插件化编辑器演示
     ├── mdx.html / mdx.js        MDxEditor 完整演示
     ├── memory-manager.html/.js  记忆管理演示（模拟导入）
-    ├── llmdriver-demo.js        device-llm 驱动/连接演示
+    ├── llmdriver-demo.js        driver-llm 驱动/连接演示
     └── configmanager-demo.js    ConfigManager 演示（legacy 包名）
 ```
 

@@ -1,4 +1,4 @@
-import { DEFAULT_AGENTS } from '@itookit/device-llm';
+import { DEFAULT_AGENTS } from '@itookit/kernel-adapters/llm';
 
 export const TPL_AGENT = JSON.stringify(DEFAULT_AGENTS, null, 2);
 

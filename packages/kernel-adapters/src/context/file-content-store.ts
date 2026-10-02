@@ -1,4 +1,4 @@
-import { createContextContentStore, type IContextContentStore } from '@itookit/context';
+import { createContextContentStore, type IContextContentStore } from '@itookit/llm-context';
 import type { IFileSystem } from '@itookit/vfs-core';
 
 /** Content is immutable and scoped to the owning Task's Session storage. */

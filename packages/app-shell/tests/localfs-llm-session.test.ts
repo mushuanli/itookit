@@ -19,7 +19,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
-import { LLMDriver } from '@itookit/device-llm';
+import { LLMDriver } from '@itookit/driver-llm';
 import type { ChatMessage } from '@itookit/common';
 import {
     setupLocalVFS, type LocalTestVFS,

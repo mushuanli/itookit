@@ -57,8 +57,8 @@ export interface OutputValidationPolicy {
     onInvalid?: 'fail' | 'repair' | 'continue';
 }
 
-import type { ContextCompactionPolicy } from '@itookit/context';
-export type { ContextCompactionPolicy } from '@itookit/context';
+import type { ContextCompactionPolicy } from '@itookit/llm-context';
+export type { ContextCompactionPolicy } from '@itookit/llm-context';
 
 /**
  * Unified node configuration: reference configuration entities by id plus

@@ -4,7 +4,7 @@
 
 ## 1. 三态决策（WebSearchMode）
 
-权威决策点只有一个：`resolveWebSearchStrategy`（`llm-common/src/llm/connection.ts`，纯函数；单测见 `packages/device-llm/tests/web-search-strategy.spec.ts`）。下游只做**派生**，不再重推。
+权威决策点只有一个：`resolveWebSearchStrategy`（`llm-common/src/llm/connection.ts`，纯函数；单测见 `packages/kernel-adapters/tests/llm-management/web-search-strategy.spec.ts`）。下游只做**派生**，不再重推。
 
 ```ts
 export type WebSearchMode = 'builtin' | 'client-tool' | 'disabled';
@@ -37,7 +37,7 @@ C4Container
         Container(ui, "llm-ui", "DOM", "开关 + citations 渲染")
         Container(session, "llm-session", "TS", "三态决策 + 事件投影")
         Container(effects, "kernel-adapters", "TS", "参数下发 + citations 事件")
-        Container(driver, "device-llm", "TS", "内置 search 注入 + citations 提取")
+        Container(driver, "driver-llm", "TS", "内置 search 注入 + citations 提取")
         Container(contracts, "llm-common", "TS", "WebSearchMode 纯函数契约")
     }
 
@@ -71,7 +71,7 @@ C4Component
     Container_Boundary(effects, "kernel-adapters") {
         Component(effect, "LlmChatEffectAdapter", "TS", "转发 params.webSearch / 发射 citations")
     }
-    Container_Boundary(driver, "device-llm") {
+    Container_Boundary(driver, "driver-llm") {
         Component(prov, "Responses/Gemini Provider", "TS", "注入 web_search / 提取 citations")
     }
     Container_Boundary(ui, "llm-ui") {
@@ -134,8 +134,8 @@ Provider.collectCitations
 | 策略解析 | `llm-session/src/session/agent-resolver.ts` |
 | 派生 + 剥离客户端工具 + 事件投影 | `llm-session/src/session/conversation-run-coordinator.ts` |
 | override（toggle 关闭 → disabled） | `llm-session/src/session/session-run-coordinator.ts` |
-| Responses API（web_search/reasoning/citations） | `device-llm/src/providers/responses.ts` |
-| Gemini grounding citations | `device-llm/src/providers/gemini.ts` |
+| Responses API（web_search/reasoning/citations） | `driver-llm/src/providers/responses.ts` |
+| Gemini grounding citations | `driver-llm/src/providers/gemini.ts` |
 | citations 事件发射 + 流式聚合 | `kernel-adapters/src/effects/llm-chat-effect.ts` |
 | citations 渲染 | `llm-ui/src/components/{HistoryView,history/StreamController,templates/NodeTemplates}.ts` |
 | 联网搜索开关 | `llm-ui/src/components/input/ChatInputView.ts`、`templates/ChatInputTemplates.ts` |

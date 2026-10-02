@@ -67,7 +67,7 @@ export interface ToolProgress {
 export interface ToolInvokeRequest {
     onProgress?: (progress: ToolProgress) => Promise<void>;
     /** Host-only admission before legacy output truncation; never a model argument. */
-    admitOutput?: (output: string) => Promise<{ output: string; contentRef?: import('@itookit/context').ContentRef }>;
+    admitOutput?: (output: string) => Promise<{ output: string; contentRef?: import('@itookit/llm-context').ContentRef }>;
     /** 工具 ID */
     toolId: string;
     /** 调用参数（JSON Schema 验证后的对象） */
@@ -85,7 +85,7 @@ export interface ToolInvokeRequest {
  */
 export interface ToolInvokeResult {
     /** Immutable source evidence for an externalized output. */
-    contentRef?: import('@itookit/context').ContentRef;
+    contentRef?: import('@itookit/llm-context').ContentRef;
     /** 工具 ID */
     toolId: string;
     /** 是否成功 */

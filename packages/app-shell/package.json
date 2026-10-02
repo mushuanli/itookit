@@ -20,12 +20,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@itookit/app-core": "workspace:*"
+    "@itookit/app-core": "workspace:*",
+    "@itookit/kernel-adapters": "workspace:*"
   },
   "peerDependencies": {
     "@itookit/app-settings": "workspace:*",
     "@itookit/common": "workspace:*",
-    "@itookit/device-llm": "workspace:*",
+    "@itookit/driver-llm": "workspace:*",
     "@itookit/llm-session": "workspace:*",
     "@itookit/durable-kernel": "workspace:*",
     "@itookit/kernel-adapters": "workspace:*",
@@ -38,7 +39,7 @@
   "devDependencies": {
     "@itookit/app-settings": "workspace:*",
     "@itookit/common": "workspace:*",
-    "@itookit/device-llm": "workspace:*",
+    "@itookit/driver-llm": "workspace:*",
     "@itookit/llm-session": "workspace:*",
     "@itookit/durable-kernel": "workspace:*",
     "@itookit/kernel-adapters": "workspace:*",

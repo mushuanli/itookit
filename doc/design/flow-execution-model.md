@@ -223,7 +223,7 @@ C4Container
     }
 
     System_Boundary(engine, "引擎/能力层") {
-        Container(devicellm, "device-llm", "TS", "LLMDeviceDriver / providers")
+        Container(devicellm, "driver-llm", "TS", "LLMDeviceDriver / providers")
         Container(kernel, "durable-kernel", "TS", "执行内核")
     }
 

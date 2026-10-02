@@ -8,31 +8,31 @@
 |---|---|---|---|---|
 | `FileStorageBackend` / `OperationOptions` | `files` + 可选 `mutations`，signal/timeoutMs，opaque revision | `vfs-core/src/interfaces/storage/file-storage.ts`、`vfs-core/src/interfaces/core/operation.ts` | `vfsdriver-http` | `FileStorageAdapter` → VFS |
 | `IStorageBackend` | `stat/list/read/write/mkdir/delete/rename` | `vfs-core/interfaces/storage/` | `vfsdriver-indexeddb`、`vfsdriver-localfs` | `vfs-core (VFSEngine)` |
-| `IVFSManager` | `openFileSystem()/mounts/devices/plugins` | `vfs-core/interfaces/services/vfs-manager.ts` | `vfs-core (VFSManager)` | `app-core`、`app-shell`、`device-llm` |
+| `IVFSManager` | `openFileSystem()/mounts/devices/plugins` | `vfs-core/interfaces/services/vfs-manager.ts` | `vfs-core (VFSManager)` | `app-core`、`app-shell`、`driver-llm` |
 | `IFileSystem` | `openFile()/driver/meta/capabilities/capabilitiesAt()/discoveryRoot?()` | `vfs-core/interfaces/services/file-system.ts` | `vfs-core (FileSystemView)` | `vfs-ui`、`llm-ui`、`llm-session`、`app-core` |
 | `IFSDriver` | `getNode/getChildren/readContent/writeContent/createFile/createDirectory/rename/move/delete/search` | `vfs-core/interfaces/services/fs-driver.ts` | `FileSystemView.driver` | `vfs-ui`、`mdx-adapter`、`llm-session` |
 | `IFSMetaDriver` | `assets/tags/seq/refs/watcher` | `vfs-core/interfaces/services/fs-meta-driver.ts` | `FileSystemView.meta` | `llm-session`、`mdx-adapter` |
 | `IFile` | `read()/write()`（extends `IIOStream`） | `vfs-core/interfaces/IFile.ts` | `FileHandle`、`MDXFileHandle` | `mdx-adapter`、`llm-session` |
 | `FileDiscoverySource` / `FileDiscoveryOptions` | `list/stat/readIgnoreFile/rootFor`；`includeIgnored/excludeDirectories/signal` | `vfs-core/interfaces/services/file-discovery.ts` | VFS 适配器、tools Node 适配器 | `discoverFiles` → 工具搜索及 llm-ui 文件候选 |
 | `IIOStream` | `read()/write()/readStream?/close?` | `vfs-core/interfaces/` | 文件/设备句柄 | 文件↔LLM↔TTY 互拷 |
-| `IDeviceDriver` | `open()/ioctl()/close()` | `vfs-core/interfaces/device/` | `LLMDeviceDriver`、TTY driver | `kernel-adapters`、`device-llm` |
+| `IDeviceDriver` | `open()/ioctl()/close()` | `vfs-core/interfaces/device/` | `LLMDeviceDriver`、TTY driver | `kernel-adapters`、`driver-llm` |
 
 ## LLM 契约（@itookit/llm-common + @itookit/common）
 
 | 接口/类型 | 核心字段/方法 | 定义 | 实现 | 消费 |
 |---|---|---|---|---|
 | `ILLMService` | `chat()`、`chatStream()`、`abort()`、`getConnection()` | `llm-common/llm/llm-service.ts` | `kernel-adapters LLMServiceAdapter` | `llm-tasks`（经 effect）、`llm-session` |
-| `ChatMessage` | `role/content/attachments?` | `llm-common/llm/` | device-llm | 全部 LLM 层 |
-| `ChatCompletionParams/ChatCompletionResponse/ChatCompletionChunk` | `messages/model/tools/stream/webSearch`… | `llm-common/llm/completion.ts` | device-llm providers | `llm-tasks`、`kernel-adapters` |
-| `Citation` | `text/source/title/url`（联网搜索引用） | `llm-common/llm/completion.ts` | device-llm providers | `kernel-adapters`、`llm-ui` |
-| `TokenUsage` | `prompt_tokens/completion_tokens/total_tokens` | `llm-common/llm/completion.ts` | device-llm | `llm-tasks`、预算扣减 |
-| `LLMConnection/ConnectionMeta` | `id/name/providerId/tiers/model/protocol` | `llm-common/llm/connection.ts` | `device-llm` | `llm-session AgentResolver` |
+| `ChatMessage` | `role/content/attachments?` | `llm-common/llm/` | driver-llm | 全部 LLM 层 |
+| `ChatCompletionParams/ChatCompletionResponse/ChatCompletionChunk` | `messages/model/tools/stream/webSearch`… | `llm-common/llm/completion.ts` | driver-llm providers | `llm-tasks`、`kernel-adapters` |
+| `Citation` | `text/source/title/url`（联网搜索引用） | `llm-common/llm/completion.ts` | driver-llm providers | `kernel-adapters`、`llm-ui` |
+| `TokenUsage` | `prompt_tokens/completion_tokens/total_tokens` | `llm-common/llm/completion.ts` | driver-llm | `llm-tasks`、预算扣减 |
+| `LLMConnection/ConnectionMeta` | `id/name/providerId/tiers/model/protocol` | `llm-common/llm/connection.ts` | `driver-llm` | `llm-session AgentResolver` |
 | `WebSearchMode` | `'builtin'\|'client-tool'\|'disabled'` | `llm-common/llm/connection.ts` | `resolveWebSearchStrategy`（纯函数） | `llm-session` |
 | `SettingsAutoSave` / `requestSettingsSave` | 设置表单延迟保存、串行写入、失败重试与安全释放；不重建编辑 DOM | `ui-common/src/components/SettingsAutoSave.ts` | `BaseSettingsEditor`、`configuration-form.ts` | 七类 LLM 设置编辑器 |
 | `IConnectionService.listProviderModels` | 接受完整未保存 Provider，返回归一化模型目录；无持久化副作用 | `llm-common/llm/agent.ts` | `LLMDeviceDriver` → `providers/model-catalog.ts`，`VFSAgentService` 转发 | `ProviderSettingsEditor` |
-| `LLMProvider.supportedProtocols/defaultProtocol/modelsPath`、`LLMModel.preferredProtocol` | Provider 协议集合与默认、模型目录覆盖、模型首选；连接显式协议优先 | `llm-common/llm/connection.ts`、`provider-protocols.ts` | `device-llm` registry / Driver / `.llm` 转换 | Provider / Connection 设置页 |
-| `LLMProvider.capabilities.serverSideWebSearch` | 服务端内置联网搜索能力（唯一事实源） | `llm-common/llm/connection.ts` | `device-llm/src/constants/providers.ts` | `resolveWebSearchStrategy` |
-| `ToolCall` / `ToolDefinition` | `id/name/arguments` | `llm-common/llm/` | device-llm / `tools` | `llm-tasks` |
+| `LLMProvider.supportedProtocols/defaultProtocol/modelsPath`、`LLMModel.preferredProtocol` | Provider 协议集合与默认、模型目录覆盖、模型首选；连接显式协议优先 | `llm-common/llm/connection.ts`、`provider-protocols.ts` | `driver-llm` registry / Driver / `.llm` 转换 | Provider / Connection 设置页 |
+| `LLMProvider.capabilities.serverSideWebSearch` | 服务端内置联网搜索能力（唯一事实源） | `llm-common/llm/connection.ts` | `kernel-adapters/src/llm-management/constants/providers.ts` | `resolveWebSearchStrategy` |
+| `ToolCall` / `ToolDefinition` | `id/name/arguments` | `llm-common/llm/` | driver-llm / `tools` | `llm-tasks` |
 | `ToolInvokeResult` | `success/output/durationMs`；可选 `data/errorCode/recoverable/truncated` | `llm-common/tools/tool-types.ts` | `tools`、`kernel-adapters` | `llm-tasks`：显式 recoverable 失败反馈模型，其余失败终止任务 |
 | `DagNodeDefinition/DagEdgeDefinition/DagRunSpec/DagNodeOutcome` | `id/plugin/config/outputs/effects` | `llm-common/agent/dag-plugin.ts` | `llm-flow` | `llm-session`、`cli` |
 | `FlowDraft/FlowRevision/FlowNodeDefinition` | `nodes/edges/layout` | `llm-common/agent/flow-definition.ts` | `llm-flow FlowDefinitionStore` | `llm-ui`、`llm-session` |
@@ -68,9 +68,9 @@
 | `extractNodeOutput` | `outputs[name].content → message.content → raw` 统一提取 |
 | `collectDependency/dependenciesReady/dependencyWait` | 依赖收集状态机 |
 | `ContextTaskProgram` | v2 执行 bridge：Context 写集、Task 状态与下一 Effect 联合提交 |
-| `ContextAssembler` / `ProviderMessageAdapter` | 兼容转发至 `@itookit/context` |
+| `ContextAssembler` / `ProviderMessageAdapter` | 兼容转发至 `@itookit/llm-context` |
 
-## 上下文（@itookit/context）
+## 上下文（@itookit/llm-context）
 
 独立接口为 `IContextAssembler`、`IContextProfiles`、`IContextEngine`、`IContextService`、`IContextReader`、`IContextContentStore`、`IContextGcStore`。`PreparedContext` 返回 cursor、explanation 和 CAS writes；消费方通过 Kernel 通用 action 提交，Context 不依赖 Kernel。GC 端口提供与发布和根提交串行化的原子视图，默认仅回收静止终态 Task 的过期孤儿。完整字段与调用链见 [Context API](context-api.md)。
 
@@ -152,3 +152,5 @@ HTTP 外挂的条件写入、取消与项目授权见 [HTTP VFS 设计](design/v
 ### 独立 VFS UI 接入
 
 `vfs-ui` 仅依赖 `vfs-core`。`BrowserSource` / `BrowserAction` 接收自定义资源与动作；`VFSPresentationOptions` 按实例注入翻译、SVG 和启动跟踪；`TagEditorFactory` / `ContextMenuConfig` / `UIPersistencePort` 接收宿主组件、菜单和存储。消费方从 vfs-ui 导入这些类型，或提供结构兼容实现，无需依赖 common/ui-common。MindOS 展示适配位于 `app-shell/src/browser/vfs-presentation.ts`。
+
+通信契约的权威实现已迁到 `driver-llm/src/types/`，llm-common 的 completion、connection、日志和协议模块保留兼容转发。中立消息契约归 `llm-context/src/domain/message.ts`；驱动的发布声明内联这些类型。模型设备与配置实现已迁到 `kernel-adapters/src/llm-management/`，通过 `@itookit/kernel-adapters/llm` 公开。

@@ -58,7 +58,7 @@ ChatInput.send (llm-ui)
 | 程序 | `DurableChatProgram` / `DurableAgentProgram` | `llm-tasks/src/durable/` |
 | 能力绑定 | `bindCapabilities` → capabilities signal | `durable-kernel/src/application/capabilities.ts` |
 | Effect | `LlmChatEffectAdapter`（llm.chat） | `kernel-adapters/src/effects/llm-chat-effect.ts` |
-| LLM | `ILLMService.chatStream` → provider | `kernel-adapters/llm/llm-service-adapter.ts`、`device-llm/src/` |
+| LLM | `ILLMService.chatStream` → provider | `kernel-adapters/llm/llm-service-adapter.ts`、`driver-llm/src/` |
 
 输入工具栏提供「对话 / 执行」：`executionMode` 随 Session settings 保存，发送时写入 `SendIntent.execution.mode`，在异步上传/任务准入前复制。Task 固定 `labels.executionMode`、工具列表和预算；执行中的模式按钮禁用，程序恢复不重新读取 UI 设置。对话模式只允许已授权的 WebSearch 客户端工具或 Provider 内置搜索；执行模式使用 llm.agent，最多 50 次模型交换，外部操作继续审批。Flow 选择后禁用该开关，按 Flow 定义执行。两种模式均使用既有 Context/GC。
 

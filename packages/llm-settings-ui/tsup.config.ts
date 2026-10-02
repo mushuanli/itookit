@@ -9,7 +9,7 @@ export default defineConfig({
     external: [
         '@itookit/common',
         '@itookit/ui-common',
-        '@itookit/device-llm',
+        '@itookit/driver-llm',
         '@itookit/vfs-core',
     ],
 });

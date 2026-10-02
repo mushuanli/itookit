@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createContextContentStore, createContextService } from '@itookit/context';
+import { createContextContentStore, createContextService } from '@itookit/llm-context';
 import type { EffectExecutionContext } from '@itookit/durable-kernel';
 import { ContextLlmEffect, ContextPrepareEffect, ContextToolEffect } from './effects';
 

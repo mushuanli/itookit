@@ -14,12 +14,28 @@ src/
   programs/ Durable Interaction programs
   runtime/  session-scoped capability assembly
   llm/      platform-neutral LLM device adapter
+  llm-management/ VFS model device, configuration, MCP and Skill management
   skill/    platform-neutral Skill registry and routing
   tool/     runtime-bound tools
   tty/      interactive shell tools
 ```
 
-本包不包含 Node、Browser 或 Tauri 平台实现，不得导入 `node:*`、Tauri API 或直接执行 `fetch`。平台能力由 `apps/*` 创建并通过 `KernelAdaptersRuntimeOptions` 注入。
+根入口的 Effect 与执行能力通过 `KernelAdaptersRuntimeOptions` 注入，不直接操作原生进程或 Tauri API。模型管理子入口提供 HTTP 配置测试和 MCP 网络接入；MCP stdio 按 browser/default 条件选择宿主桥或 Node SDK transport。
+
+## 模型管理子入口
+
+`@itookit/kernel-adapters/llm` 提供 `LLMDeviceDriver`、`LLM_IOCTL`、Provider/Connection 配置、费用、默认 Agent、Skill、MCP 和 `.llm` 导入导出，承接旧 device-llm 的宿主集成功能。它是本包的公开子入口，不是额外 npm 包。
+
+```ts
+import { LLMDeviceDriver } from '@itookit/kernel-adapters/llm';
+
+const driver = new LLMDeviceDriver(vfs, { llmLogger });
+await driver.init();
+// Existing device and management APIs are available after initialization.
+await driver.dispose();
+```
+
+只需要模型通信时使用独立的 `@itookit/driver-llm`；它没有运行时依赖，不需要本包。模型集成详情见 [管理接口](./doc/llm-management/README.md)。
 
 ## 使用
 

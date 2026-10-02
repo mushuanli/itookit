@@ -15,7 +15,7 @@
 ├──────────────┼──────────────┼──────────────────────┤
 │ llm-session  │  llm-flow    │ llm-tasks durable-kernel │  业务层
 ├──────────────┼──────────────┼──────────────────────┤
-│ kernel-adapters    │  device-llm  │ device-tty    vfs-core  │  引擎/能力层
+│ kernel-adapters    │  driver-llm  │ device-tty    vfs-core  │  引擎/能力层
 ├──────────────┼──────────────┼──────────────────────┤
 │ tools        │ vfsdriver-*  │ llm-common           │  工具/存储/契约
 ├──────────────┴──────────────┴──────────────────────┤
@@ -62,7 +62,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 
 | 任务 | 文档引用 |
 |---|---|
-| 新增 Provider | [dev-patterns](../doc/dev-patterns.md) → `device-llm/AGENTS.md` |
+| 新增 Provider | [dev-patterns](../doc/dev-patterns.md) → `driver-llm/AGENTS.md` |
 | 修改 ChatInput UI | [file-index](../doc/file-index.md) `#chat-input` |
 | 新增 i18n | [dev-patterns](../doc/dev-patterns.md) `#i18n` → `common/AGENTS.md` |
 | 新增工具 | [dev-patterns](../doc/dev-patterns.md) `#tools` → `tools/AGENTS.md` |

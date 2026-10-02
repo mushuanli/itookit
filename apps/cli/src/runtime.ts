@@ -8,7 +8,7 @@ import path from 'node:path';
 import type { DagRunSpec, LLMConnection, LLMProvider } from '@itookit/common';
 import { parse } from 'yaml';
 import { SessionFileSkillSource, resolveSessionSkillContext } from '@itookit/kernel-adapters';
-import { LLMDeviceDriver } from '@itookit/device-llm';
+import { LLMDeviceDriver } from '@itookit/kernel-adapters/llm';
 import { NodePtyDriver } from '@itookit/device-tty';
 import {
     Kernel,

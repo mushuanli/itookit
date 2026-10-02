@@ -2,7 +2,7 @@
 
 > 平台无关的 LLM Durable Program 层：把"一项 LLM 工作如何向前运行"表达为 Kernel `DurableTaskProgram`（init/reduce 状态机）。提供 `llm.chat` / `llm.agent` / `llm.plan` 三个程序、上下文组装与 Provider 消息适配。所有 API 从 `@itookit/llm-tasks` 根导出。
 
-**依赖方向**：包依赖为 `@itookit/common` + `@itookit/durable-kernel` + `@itookit/context`；`ChatMessage` / `ToolDefinition` / `ResponseFormat` / `ContextCompactionPolicy` 等类型经 `@itookit/common` 的 re-export 取得。不依赖 `llm-session`、`llm-flow`、UI、DOM 或具体设备；所有外部能力（LLM/Tool）经 Kernel Effect 使用。
+**依赖方向**：包依赖为 `@itookit/common` + `@itookit/durable-kernel` + `@itookit/llm-context`；`ChatMessage` / `ToolDefinition` / `ResponseFormat` / `ContextCompactionPolicy` 等类型经 `@itookit/common` 的 re-export 取得。不依赖 `llm-session`、`llm-flow`、UI、DOM 或具体设备；所有外部能力（LLM/Tool）经 Kernel Effect 使用。
 
 ## 目录
 
@@ -117,7 +117,7 @@ interface DurableCapabilitySignal {
 
 ## ContextAssembler
 
-此入口为兼容转发，实现归 `@itookit/context`。新代码消费 `IContextAssembler`/`createContextAssembler`；v2 Agent/Chat 使用 `ContextTaskProgram` 经 Effect 接入持久窗口，见 [Context API](context-api.md)。
+此入口为兼容转发，实现归 `@itookit/llm-context`。新代码消费 `IContextAssembler`/`createContextAssembler`；v2 Agent/Chat 使用 `ContextTaskProgram` 经 Effect 接入持久窗口，见 [Context API](context-api.md)。
 
 构建 LLM 调用的上下文（system + history + 压缩摘要 + 记忆）。
 

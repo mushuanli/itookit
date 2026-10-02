@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { registerMCPStdioHost, type MCPProcessBatch } from '@itookit/device-llm';
+import { registerMCPStdioHost, type MCPProcessBatch } from '@itookit/kernel-adapters/llm';
 
 /** One native process per MCP connection, with explicit lifetime and bounded output. */
 export function installTauriMCP(): void {

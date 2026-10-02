@@ -6,13 +6,15 @@ import { builtinModules } from 'node:module';
 import ts from 'typescript';
 
 const application = new Set(['@itookit/app-core', '@itookit/app-shell', '@itookit/app-settings']);
-const coreDependencies = new Set(['common', 'context', 'vfs-core', 'durable-kernel', 'kernel-adapters',
-    'llm-flow', 'llm-session', 'device-llm'].map(name => '@itookit/' + name));
+const coreDependencies = new Set(['common', 'llm-context', 'vfs-core', 'durable-kernel', 'kernel-adapters',
+    'llm-flow', 'llm-session', 'driver-llm'].map(name => '@itookit/' + name));
 const browserGlobals = new Set(['window', 'document', 'localStorage', 'sessionStorage', 'navigator',
     'Window', 'Document', 'Element', 'Node', 'MutationObserver', 'ResizeObserver']);
 
 export function dependencyError(source, target) {
     if (source === target) return;
+    if (source === '@itookit/driver-llm' && target !== '@itookit/llm-context') return 'driver-llm must receive host capabilities through its public ports';
+    if (source === '@itookit/llm-context') return 'llm-context must receive I/O through its public ports';
     if (source === '@itookit/mdxeditor' && target.startsWith('@itookit/')) return 'mdxeditor must receive host capabilities through its public ports';
     if (source === '@itookit/vfs-ui' && target !== '@itookit/vfs-core') return 'vfs-ui must not depend on host packages; use its public ports';
     if (source === '@itookit/app-core' && !coreDependencies.has(target)) return 'app-core may only depend on its platform-neutral capabilities';
@@ -37,7 +39,8 @@ export function importError(source, file, specifier, packages) {
         const target = ownerOf(resolve(file, '..', specifier), packages);
         return target && target !== source ? 'cross-package relative imports bypass public exports' : undefined;
     }
-    if (source.name === '@itookit/app-core') {
+    if (['@itookit/app-core', '@itookit/driver-llm', '@itookit/llm-context'].includes(source.name) &&
+        !specifier.startsWith('node:') && !builtinModules.includes(specifier)) {
         const name = specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/');
         const error = dependencyError(source.name, name);
         if (error) return error;
@@ -77,6 +80,11 @@ export function sourceErrors(source, file, text, packages) {
         if (specifier && ts.isStringLiteralLike(specifier)) {
             const error = importError(source, file, specifier.text, packages);
             if (error) report(node, `${error} (${specifier.text})`);
+            if (source.name === '@itookit/driver-llm' && specifier.text === '@itookit/llm-context' &&
+                ((ts.isImportDeclaration(node) && !node.importClause?.isTypeOnly) ||
+                    (ts.isExportDeclaration(node) && !node.isTypeOnly))) {
+                report(node, 'driver-llm may only use neutral message contracts through type imports');
+            }
         }
         if (source.name === '@itookit/app-core' && browserReference(node)) report(node, 'app-core must not reference DOM or browser storage');
         if (source.name === '@itookit/app-core' && file === resolve(source.dir, 'src/index.ts') &&
@@ -118,6 +126,7 @@ export async function checkBoundaries(root) {
             if (error) errors.push(`${relative(root, pkg.dir)}/package.json: ${error} (${name})`);
         }
         for (const file of await filesIn(resolve(pkg.dir, 'src'))) {
+            if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(file)) continue;
             errors.push(...sourceErrors(pkg, file, await readFile(file, 'utf8'), packages));
         }
     }
