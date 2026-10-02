@@ -25,7 +25,7 @@
   - 强大的**自动完成**框架，支持标签 (`#`)、提及 (`@`) 等。
   - **源码同步**: 在渲染视图上按住 `Ctrl/Cmd` 并双击，可立即跳转到其源码位置。
   - 为挖空填词集成了**间隔重复系统 (SRS)**。
-- **💾 灵活集成**: 设计用于与持久化层和虚拟文件系统 (`@itookit/vfs`) 协同工作。
+- **💾 灵活集成**: 通过公开接口接入宿主的保存、附件与持久化服务；不依赖其他 `@itookit/*` 包。
 
 ## 📦 安装
 
@@ -58,8 +58,6 @@ yarn add @itookit/mdxeditor
     import { createMDxEditor } from '@itookit/mdxeditor';
     // 引入基础样式，您可以根据需要覆盖它
     import '@itookit/mdxeditor/style.css';
-    // 如果使用了 FontAwesome 图标，请确保已引入
-    // import '@fortawesome/fontawesome-free/css/all.min.css';
 
     async function initializeEditor() {
       const container = document.getElementById('editor-container');
@@ -112,8 +110,10 @@ const editor = await createMDxEditor(container, {
   // 自定义插件列表
   plugins: [
     '-mermaid', // 禁用默认的 Mermaid 插件
-    'cloze',      // 添加 Cloze 插件
-    'memory',     // 添加 SRS 记忆插件
+    'core:titlebar',
+    'autocomplete:tag',
+    'cloze:cloze', // Add cloze syntax
+    'cloze:memory', // Add spaced repetition
   ],
 
   // 为特定插件提供配置
@@ -137,11 +137,11 @@ const editor = await createMDxEditor(container, {
 });
 ```
 
--   **启用插件**: 在 `plugins` 数组中添加插件名称 (e.g., `'cloze'`)。
+-   **启用插件**: 在 `plugins` 数组中添加插件名称 (e.g., `'cloze:cloze'`)。
 -   **禁用默认插件**: 在插件名称前添加 `-` (e.g., `'-mermaid'`)。
 -   **禁用所有默认插件**: 将 `'-all'` 作为 `plugins` 数组的第一个元素。
 
-##🔌 核心插件
+## 🔌 核心插件
 
 
 ### 模块功能说明表
@@ -151,7 +151,7 @@ const editor = await createMDxEditor(container, {
 | 模块/插件名称 | 注册名称 (Name) | 功能说明 | 默认状态 (Default) | 常用选项 (Common Options) |
 | :--- | :--- | :--- | :--- | :--- |
 | **Core Editor** | `editor:core` | 提供基础编辑能力 (CodeMirror 6)，包括行号、软换行、折叠、撤销重做等。 | **已启用**<br>行号: 关闭<br>自动换行: 开启<br>折叠: 开启 | `enableLineNumbers`: boolean (行号)<br>`enableLineWrapping`: boolean (长行自动换行)<br>`enableHistory`: boolean (历史记录)<br>`enableAutocompletion`: boolean (自动补全) |
-| **Title Bar** | `core:titlebar` | 顶部标题栏，包含标题、模式切换、保存、打印及 AI 按钮。 | **已启用**<br>模式切换: 关闭 | `enableToggleEditMode`: boolean<br>`title`: string<br>`onSidebarToggle`: function |
+| **Title Bar** | `core:titlebar` | 顶部标题栏，包含标题、模式切换、保存、打印及 AI 按钮。 | `defaultEditorFactory` 默认启用；`createMDxEditor` 需在 `plugins` 中添加 | `enableToggleEditMode`: boolean<br>`title`: string<br>`onSidebarToggle`: function |
 | **Toolbar** | `ui:toolbar` | 编辑器工具栏容器，用于放置格式化按钮。 | **已启用** | `className`: string (自定义样式类) |
 | **Formatting** | `ui:formatting` | 提供加粗、斜体、列表、链接等基础 Markdown 格式化按钮和命令。 | **已启用**<br>功能: All | `enabledFormats`: string[] (如 `['bold', 'italic']`)<br>`customIcons`: object (自定义图标) |
 | **Clipboard** | `interaction:clipboard` | 智能粘贴：富文本转 Markdown；`Cmd/Ctrl+Shift+V` 原始粘贴。 | **已启用**<br>模式: smart | `pasteMode`: `'smart'\|'plain'\|'rich'`<br>`enablePlainPasteShortcut`: boolean |
@@ -161,7 +161,7 @@ const editor = await createMDxEditor(container, {
 | **MathJax** | `mathjax` | 渲染 LaTeX 数学公式 (`$$...$$`, `$..$`)。 | **已启用**<br>自动加载 CDN | `cdnUrl`: string (自定义 CDN)<br>`config`: object (MathJax 配置) |
 | **Media** | `media` | 渲染视频、音频、嵌入内容 (YouTube/Bilibili/Office/PDF)。 | **已启用**<br>视频控制条: 开启 | `videoAutoplay`: boolean<br>`videoControls`: boolean |
 | **Callout** | `callout` | 支持 GitHub/Obsidian 风格的提示块 (`> [!NOTE]`)。 | **已启用** | `defaultFolded`: boolean (暂未实现) |
-| **Mermaid** | `mermaid` | 渲染 Mermaid 流程图、时序图等。 | **已启用**<br>自动加载 CDN | `theme`: 'default'\|'dark'等<br>`cdnUrl`: string |
+| **Mermaid** | `mermaid` | 渲染 Mermaid 流程图、时序图等。 | **已启用**<br>按需加载本地 mermaid 依赖 | `theme`: 'default'\|'dark'等 |
 | **SVG** | `svg` | 将 ` ```svg ` 代码块直接渲染为内联 SVG 图片 (带安全过滤)。 | **已启用**<br>Sanitize: 开启 | `sanitize`: boolean (防XSS)<br>`containerClass`: string |
 | **Code Controls** | `codeblock-controls` | 代码块增强：复制、下载、折叠过长代码。 | **已启用**<br>折叠阈值: 250px | `enableCopy`: boolean<br>`enableCollapse`: boolean<br>`collapseThreshold`: number (高度阈值) |
 | **Task List** | `task-list` | 交互式任务列表 (`- [ ]`)，支持点击勾选并**回写 Markdown**。 | **已启用**<br>自动回写: 开启 | `autoUpdateMarkdown`: boolean (点击更新源码)<br>`checkboxSelector`: string |
@@ -197,14 +197,14 @@ createMDxEditor(container, {
 
 ## API
 
-`createMDxEditor` 返回一个 `MDxEditor` 实例，您可以使用它来与编辑器进行交互。
+`createMDxEditor` 返回实现 `IEditor` 公共接口的 `MDxEditor` 实例，您可以使用它来与编辑器进行交互。
 
 -   `editor.getText(): string`: 获取当前编辑器的 Markdown 全文。
 -   `editor.setText(markdown: string): void`: 设置编辑器的内容。
--   `editor.switchToMode(mode: 'edit' | 'render'): void`: 切换编辑或渲染模式。
+-   `editor.switchToMode(mode: 'edit' | 'render'): Promise<void>`: 切换编辑或渲染模式。
 -   `editor.getHeadings(): Promise<Heading[]>`: 获取文档中的标题列表（用于大纲）。
 -   `editor.setReadOnly(isReadOnly: boolean): void`: 设置编辑器为只读模式。
--   `editor.destroy(): void`: 销毁编辑器实例并释放资源。
+-   `editor.destroy(): Promise<void>`: 销毁编辑器实例并释放资源。
 -   `editor.on(event, callback)`: 监听编辑器事件，如 `change` 或 `ready`。
 
 ## 📜 许可证
@@ -225,6 +225,9 @@ const assets: AssetProvider = {
     return response.ok ? response.arrayBuffer() : null;
   },
 };
+async function saveContent(content: string): Promise<void> {
+  localStorage.setItem('my-document', content);
+}
 const editor = await createMDxEditor(document.getElementById('editor-container')!, {
   initialContent: '# Hello',
   contentFormat: 'markdown',
@@ -235,8 +238,38 @@ const editor = await createMDxEditor(document.getElementById('editor-container')
 
 `saveContent` 是宿主自己的保存函数。`EditorHost` 提供可选的打开文档、重命名和通知；`StoreFactory` 提供插件存储，默认使用内存。核心默认按 Markdown 处理，纯文本需显式传入 `contentFormat: 'text'`。
 
-MindOS 使用 `@itookit/mdx-adapter` 的 `createMDxEditor` / `defaultEditorFactory`，接收 `ui-common` 的 `EditorOptions`，校验 namespace/Session 上下文并适配 VFS、附件、插件元数据及文件格式。`AssetManagerUI` 和 `LLMPrintService` 也由适配包导出。外部移动文件后调用适配实例的 `updateNodeId(newPath)`，更新后续保存、附件与元数据的文档路径。
+本仓库的 MindOS 使用 `@itookit/mdx-adapter` 的 `createMDxEditor` / `defaultEditorFactory`，接收 `ui-common` 的 `EditorOptions`，校验 namespace/Session 上下文并适配 VFS、附件、插件元数据及文件格式。`AssetManagerUI` 和 `LLMPrintService` 也由适配包导出。外部移动文件后调用适配实例的 `updateNodeId(newPath)`，更新后续保存、附件与元数据的文档路径。
 
-适配包样式：`import '@itookit/mdx-adapter/style.css'`。
+适配包目前在 monorepo 内使用；独立用户可直接实现核心公共接口。适配包样式：`import '@itookit/mdx-adapter/style.css'`。
 
 标签、提及与自动补全也支持用户提供数据：`TagPluginOptions.getTags`、`MentionProvider`、`AutocompleteProvider` 均由核心公开。用户可查询自己的 REST 服务、本地数据或其他存储，再通过 `plugins` 安装插件，无需引入 itookit 的业务服务。`translate` 可接入宿主 i18n；复杂交互可实现 `MDxPlugin`，通过插件上下文使用公开能力。
+
+### 保存与生命周期
+
+`onSave` 接收 Markdown 内容，保存失败时应抛出异常，使编辑器保留 dirty 状态。程序调用 `setText()` 后若需要保存，请显式标记修改：
+
+```typescript
+editor.setText('# Updated');
+editor.setDirty(true);
+await editor.save();
+await editor.destroy();
+```
+
+用户编辑支持自动保存；`flushPendingSave()` 可在导航或引用内容前等待保存。标题栏的保存按钮通过 `core:titlebar.saveCallback` 配置，例如 `async editor => { await editor.save(); }`。
+
+### 公共接口
+
+| 能力 | 配置 | 使用者实现 |
+|---|---|---|
+| 附件 | `assets: AssetProvider` | 必需 `read(name)`；可选 `upload`、`prune`、`mimeType` |
+| 插件存储 | `storeFactory: StoreFactory` | 为插件返回含 `get`、`set`、`remove` 的 `ScopedPersistenceStore`；默认内存存储 |
+| 文档交互 | `host: EditorHost` | 可选 `openDocument`、`renameDocument`、`notify` |
+| 保存 | `onSave` | 异步保存函数 |
+| 文档标识 | `documentPath` | 移动文件后调用 `updateDocumentPath(newPath)`；可通过 `onDocumentPathChange` 接收更新 |
+| 本地化 | `locale` / `translate` | 内置 `zh-CN`、`en`，或提供自己的翻译函数 |
+
+以上类型均可从 `@itookit/mdxeditor` 根入口导入。接口采用结构化匹配，用户无需依赖 itookit 的 VFS、LLM 或上下文模块。未配置能力时，相关功能按需省略；核心默认把内容当作 Markdown，纯文本可显式设置 `contentFormat: 'text'`。
+
+### 从旧宿主接口迁移
+
+`0.5.0` 使用 `documentPath`、`assets`、`storeFactory`、`host` 和 `onSave` 接收能力，原 `target/files/hostContext` 应由宿主转成上述配置。核心的 `updateNodeId` 改为 `updateDocumentPath`；VFS 附件管理 UI 与会话专用打印迁入本仓库的 `mdx-adapter`。
