@@ -22,7 +22,7 @@ src/
 │   └── Workbench.ts          ← 通用工作区控制器
 ├── lifecycle/            ← 可替换视图读取与订阅释放机制（不含业务策略）
 ├── projects/             ← createProjectModule、SessionWorkbench、project-favorites（收藏端口适配）、
-│                            项目导航（ProjectFileView 文件列策略）与归档目标适配
+│                            单侧栏项目导航与归档目标适配
 ├── toolbox/              ← 工具箱模块入口、分类/分组显示、编辑器装配
 ├── configuration/        ← 删除影响确认（调用 app-core 的共享命令）
 ├── navigation/           ← URL 适配与移动端切换
@@ -67,7 +67,8 @@ const factory = factories[strategyType] ?? defaultEditorFactory;
 
 - `initApp()` 是唯一 UI 装配点 — VFS/LLM/Kernel 由 `app-core` 的 `createApplicationRuntime()` 装配，编辑器/AI 菜单/LLM 设置编辑器经 `AppOptions.ui` 注入
 - 项目收藏只做端口适配：`project-favorites.ts` 把 `resolveBrowserTarget` 路由翻译成 `ProjectFavorites` 命令。远程命令由 fs-agent 能力声明控制，工作台不提供启用/禁用开关。
-- 文件列跟随策略用 `ProjectFileView`（`preserve` 保持当前内容列，`directory` 固定到该路径）表达，`SessionWorkbench.openResource` 只解析一次路由并交给 `ProjectNavigation.sync`；收藏行解析在 `openFavorite` 内完成。
+- 项目进入文件复用单侧栏；`ProjectNavigation` 投影当前项目目录、收藏与会话，目录详情和编辑标签位于 `workbench/`。`ProjectFileView` 只保留收藏导航的选择兼容提示；收藏解析在 `openFavorite` 完成。
+- `WorkbenchTabs` 保留每个标签的编辑器 DOM；修改将预览转为保持打开，固定标签受批量关闭保护。`WorkbenchSidebar` 管理上下分区与可访问分隔线，布局/非预览标签通过宿主 workbenchPort 存到 etc:/ui。关闭先完成保存，失败保留编辑器及文件租约。
 - 项目与工具箱分别通过 `createProjectModule` / `createToolboxModule` 装配，返回统一 WorkspaceModule；bootstrap 只消费工作区能力，不用具体工作台类做 instanceof 判断。模块销毁同时释放目录投影和事件订阅，动态移除与应用退出共用一次释放。
 - `loadWorkspace()` 包含去重 — 并发加载同一工作区共享同一个 Promise (`pendingLoads`)
 - chat 工作区在 `SessionWorkbench` 完成侧栏树加载后立即触发 `onSidebarReady`，宿主的 `onWorkspaceReady` 因此先把加载遮罩限制在正文列；让出一帧后再恢复选中项、项目正文和深链编辑器。侧栏初始化完成后 `onSidebarInteractive` 允许桌面端提前开放点击；显式深链不额外打开旧的侧栏选中项。`onEditorReady` 仍在正文首挂载后触发。

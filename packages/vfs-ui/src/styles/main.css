@@ -1494,7 +1494,7 @@
 }
 
 /* Type color is a secondary cue: shape and filename remain readable without color. */
-.vfs-ui {
+:is(.vfs-ui, .file-type-icon) {
   --file-folder: #a56b16;
   --file-document: #526b89;
   --file-code: #356cc2;
@@ -1508,7 +1508,7 @@
   --file-audio: #8e59ae;
   --file-database: #487da0;
 }
-[data-theme="dark"] .vfs-ui {
+[data-theme="dark"] :is(.vfs-ui, .file-type-icon) {
   --file-folder: #dfb45f;
   --file-document: #a2b5cc;
   --file-code: #85b3f0;
@@ -1522,18 +1522,18 @@
   --file-audio: #c19ade;
   --file-database: #89bedb;
 }
-.vfs-ui [data-file-icon="folder"] { color: var(--file-folder); fill: color-mix(in srgb, currentColor 14%, transparent); }
-.vfs-ui [data-file-icon="document"] { color: var(--file-document); }
-.vfs-ui [data-file-icon="code"] { color: var(--file-code); }
-.vfs-ui [data-file-icon="config"] { color: var(--file-config); }
-.vfs-ui [data-file-icon="image"] { color: var(--file-image); }
-.vfs-ui [data-file-icon="media"] { color: var(--file-media); }
-.vfs-ui [data-file-icon="archive"] { color: var(--file-archive); }
-.vfs-ui [data-file-icon="pdf"] { color: var(--file-pdf); }
-.vfs-ui [data-file-icon="spreadsheet"] { color: var(--file-spreadsheet); }
-.vfs-ui [data-file-icon="slides"] { color: var(--file-slides); }
-.vfs-ui [data-file-icon="audio"] { color: var(--file-audio); }
-.vfs-ui [data-file-icon="database"] { color: var(--file-database); }
+:is(.vfs-ui, .file-type-icon) [data-file-icon="folder"] { color: var(--file-folder); fill: color-mix(in srgb, currentColor 14%, transparent); }
+:is(.vfs-ui, .file-type-icon) [data-file-icon="document"] { color: var(--file-document); }
+:is(.vfs-ui, .file-type-icon) [data-file-icon="code"] { color: var(--file-code); }
+:is(.vfs-ui, .file-type-icon) [data-file-icon="config"] { color: var(--file-config); }
+:is(.vfs-ui, .file-type-icon) [data-file-icon="image"] { color: var(--file-image); }
+:is(.vfs-ui, .file-type-icon) [data-file-icon="media"] { color: var(--file-media); }
+:is(.vfs-ui, .file-type-icon) [data-file-icon="archive"] { color: var(--file-archive); }
+:is(.vfs-ui, .file-type-icon) [data-file-icon="pdf"] { color: var(--file-pdf); }
+:is(.vfs-ui, .file-type-icon) [data-file-icon="spreadsheet"] { color: var(--file-spreadsheet); }
+:is(.vfs-ui, .file-type-icon) [data-file-icon="slides"] { color: var(--file-slides); }
+:is(.vfs-ui, .file-type-icon) [data-file-icon="audio"] { color: var(--file-audio); }
+:is(.vfs-ui, .file-type-icon) [data-file-icon="database"] { color: var(--file-database); }
 
 /* Favorites mirror host state: an active star always shows, an inactive one
    follows the row action reveal and is never hidden on devices without hover. */

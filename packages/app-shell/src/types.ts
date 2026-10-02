@@ -195,6 +195,7 @@ export interface WorkbenchConfig {
     onNavigate?: (request: NavigationRequest) => Promise<void>;
     onSessionChange?: (sessionId: string | null) => void;
     onSidebarToggle?: (collapsed: boolean) => void;
+    workbenchState?: import('./workbench/state').WorkbenchStatePort;
     uiOptions?: Partial<Omit<VFSUIOptions, 'defaultEditorFactory'>>;
     /** Host-owned sidebar snapshot storage; omitted means the workspace restores nothing. */
     uiPersistence?: import('@itookit/vfs-ui').UIPersistencePort;

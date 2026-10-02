@@ -1,3 +1,4 @@
+import { bindDocumentLinks } from './document-links';
 import { documentProfile, type DocumentProfile } from './document-policy';
 import { t } from '@itookit/common';
 import { editorFilePath } from '@itookit/ui-common';
@@ -49,6 +50,7 @@ export class MDxEditor extends IEditor {
     private profile?: DocumentProfile;
     private docVersion = 0;
     private renderLineWrapping = false;
+    private releaseDocumentLinks?: () => void;
 
     constructor(config: MDxEditorConfig = {}) {
         super();
@@ -353,6 +355,10 @@ export class MDxEditor extends IEditor {
         container.innerHTML = '';
         container.className = 'mdx-editor-root-container mdx-editor-container';
         this.modeManager.createContainers(container);
+        if (this.config.hostContext?.openFile) this.releaseDocumentLinks = bindDocumentLinks(
+            this.modeManager.getRenderContainer()!, () => editorFilePath(this.config),
+            (path, anchor) => this.config.hostContext!.openFile!(path, anchor),
+            id => this.navigateTo({ elementId: id }));
     }
 
     private async renderContent(): Promise<void> {
@@ -457,6 +463,7 @@ export class MDxEditor extends IEditor {
         try { await this.flushPendingSave(); }
         catch (error) { this.isDestroying = false; throw error; }
         this.renderer.getPluginManager().emit('beforeDestroy', undefined);
+        this.releaseDocumentLinks?.();
         this.navigationManager.destroy();
         this.modeManager.destroy();
 

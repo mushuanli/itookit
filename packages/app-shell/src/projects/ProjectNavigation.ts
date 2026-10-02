@@ -2,198 +2,139 @@ import { fileFirst, projectItems } from './navigation-policy';
 import { t, FILE_BROWSER_ICONS } from '@itookit/common';
 import { browserTargetFolder, folderBrowserPath, resolveBrowserTarget, type ProjectFolder, type ProjectNavigationSnapshot, type ProjectService } from '@itookit/app-core';
 import type { VFSToolbarContext, VFSColumnsOptions, VFSNodeUI, VFSUIShell } from '@itookit/vfs-ui';
+import { decorateButton } from '../workbench/controls';
 
 interface Actions {
     createProject(path?: string | null): Promise<unknown>; createSession(path?: string): Promise<unknown>;
-    createChild(id: string): Promise<unknown>; importItems(context: VFSToolbarContext): Promise<void>; exportItems(context: VFSToolbarContext): Promise<void>; report(error: unknown): void;
-    retryDeletions(): Promise<void>;
+    createChild(id: string): Promise<unknown>; importItems(context: VFSToolbarContext): Promise<void>; exportItems(context: VFSToolbarContext): Promise<void>;
+    report(error: unknown): void; retryDeletions(): Promise<void>;
     contentChanged(visible: boolean, family: boolean): void;
+    navigate?(path: string): Promise<void>;
 }
-
-/** How the content column follows a file opened inside a project. */
+/** Compatibility hint: favorites may preserve selection while their file opens. */
 export type ProjectFileView = 'preserve' | 'directory';
+export interface ProjectNavigationOptions { reveal?: boolean; project?: ProjectFolder; draft?: boolean; fileView?: ProjectFileView }
 
-/** Projection runs on every state change; report each stale path once. */
-const warnedPaths = new Set<string>();
-/**
- * Persisted selection can outlive the routes that produced it (e.g. a Flow path
- * remembered while Flows were mounted at `/@flows`). Mapping the canonical
- * activeId onto a column is presentation, so an unknown id degrades to "no
- * selection" instead of aborting bootstrap.
- */
-function tryResolveBrowserTarget(path: string): ReturnType<typeof resolveBrowserTarget> | undefined {
-    try { return resolveBrowserTarget(path); }
-    catch {
-        if (!warnedPaths.has(path)) { warnedPaths.add(path); console.warn('[project-navigation] ignoring unresolvable browser path', path); }
-        return undefined;
-    }
-}
-
-export interface ProjectNavigationOptions {
-    reveal?: boolean;
-    project?: ProjectFolder;
-    draft?: boolean;
-    /** `preserve` keeps the current content column; `directory` pins it to this path. */
-    fileView?: ProjectFileView;
-}
-
-/** Project semantics stay in the host; both panes use the generic VFS browser. */
+/** Project context replaces the contents of one sidebar; file details belong to main tabs. */
 export class ProjectNavigation {
-    readonly options: VFSColumnsOptions;
+    readonly header = document.createElement('div');
+    readonly toolbarContainer = document.createElement('span');
+    readonly options: Pick<VFSColumnsOptions, 'navigationAction' | 'navigationToolbarOptions'>;
+    private readonly create = document.createElement('button');
+    private readonly filesButton = document.createElement('button');
+    private readonly selector = document.createElement('select');
+    private readonly retry = document.createElement('button');
     private project?: ProjectFolder;
     private path = '/';
-    private draftActive = false;
-    /** Content root pinned by the last `fileView: 'directory'` request. */
-    private fileContentRoot?: string;
-    /** A file open must not reset the content column to the project file root. */
-    private keepFileContent = false;
     private session?: string;
+    private familyVisible = false;
     private family?: string;
-    private contentScope?: string;
-    private hiddenScope?: string;
+    private draftActive = false;
     private revision = 0;
-    private readonly retry = document.createElement('button');
-    constructor(private readonly projects: ProjectService, private readonly ui: () => VFSUIShell | undefined,
-        private readonly actions: Actions) {
-        this.options = { navigationTitle: t('vfs.toolbar.projects'), navigationSearchPlaceholder: t('project.searchProjects'), navigationItems: projectItems,
-            navigationActiveId: id => {
-                if (!id) return id;
-                const target = tryResolveBrowserTarget(id);
-                if (!target) return null;
-                if (target.kind === 'project-files') return folderBrowserPath(target.folder) + '/@files';
-                return target.kind === 'session' && this.family && target.sessionId === this.session ? id.slice(0, id.lastIndexOf('/') + 1) + this.family : id;
-            },
-            navigationSearch: query => { if (query.trim()) void this.loadSearch().catch(this.actions.report); },
-            navigationCard: node => !!node.metadata.custom.projectId,
-            navigationDirectoryPreview: node => node.metadata.custom.projectId ? 6 : undefined,
-            navigationChildren: node => node.metadata.custom.projectId ? [node.id + '/folder:%40sessions'] : [],
-            navigationLeaf: node => ['session', 'project-files', 'favorite'].includes(resolveBrowserTarget(node.id).kind),
-            navigationCompareItems: (a, b) => fileFirst(a, b),
-            navigationAction: { label: t('project.createSession'), icon: FILE_BROWSER_ICONS.newSession, active: path => this.draftActive && path === folderBrowserPath(this.project?.path), afterChildId: path => path + '/@files', visible: path => this.projectPaths.has(path), disabled: path => this.offlinePaths.has(path),
-                run: async path => { await this.actions.createSession(path); } },
-            contentLeaf: node => resolveBrowserTarget(node.id).kind === 'session',
-            contentCompareItems: (a, b) => this.family ? this.compareFamily(a, b) : undefined,
-            contentItems: items => {
-                const nodes = this.family ? this.familyItems(items) : items;
-                return resolveBrowserTarget(this.path).kind === 'project-files' && this.project && this.projects.remoteMounts?.projectOffline(this.project.project.id)
-                    ? nodes.map(node => ({ ...node, metadata: { ...node.metadata, custom: { ...node.metadata.custom, _disabled: true, _readOnly: true } } })) : nodes;
-            },
-            navigationToolbar: 'full', navigationToolbarOptions: { directoryFirst: true, directoryLabel: t('vfs.toolbar.project'), fileLabel: t('vfs.toolbar.session'),
-                hiddenActions: ['create-file'],
-                actions: this.projectToolbarActions() }, navigationHeader: this.retryHeader() };
-    }
-    private searchLoading?: Promise<void>;
-    private loadSearch(): Promise<void> {
-        if (!this.searchLoading) this.searchLoading = this.projects.sessions.navigation()
-            .then(({ folders }) => this.ui()?.loadDirectories(folders.map(folder => folderBrowserPath(folder.path))))
-            .finally(() => { this.searchLoading = undefined; });
-        return this.searchLoading;
-    }
     private projectPaths = new Set<string>();
     private offlinePaths = new Set<string>();
-    private projectToolbarActions() {
-        return {
-            'create-directory': async (context: VFSToolbarContext) => { await this.actions.createProject(context.selectedIds[0] ?? context.parentPath); },
-            'create-file': async (context: VFSToolbarContext) => { await this.actions.createSession(context.selectedIds[0] ?? context.activeId ?? undefined); },
-            import: this.actions.importItems, export: this.actions.exportItems,
+    private readonly revealedFiles = new Set<string>();
+    constructor(private readonly projects: ProjectService, private readonly ui: () => VFSUIShell | undefined, private readonly actions: Actions) {
+        this.buildHeader();
+        this.updateHeader([], 0);
+        this.options = {
+            navigationAction: { label: t('project.createSession'), icon: FILE_BROWSER_ICONS.newSession,
+                active: path => this.draftActive && path === folderBrowserPath(this.project?.path), afterChildId: path => path + '/@files',
+                visible: path => this.projectPaths.has(path), disabled: path => this.offlinePaths.has(path),
+                run: async path => { await this.actions.createSession(path); } },
+            navigationToolbarOptions: { directoryFirst: true, directoryLabel: t('vfs.toolbar.project'), fileLabel: t('vfs.toolbar.session'),
+                hiddenActions: ['create-file', 'create-directory'], actions: {
+                    'create-directory': context => this.actions.createProject(context.selectedIds[0] ?? context.parentPath).then(() => {}),
+                    import: this.actions.importItems, export: this.actions.exportItems,
+                } },
         };
     }
-    private retryHeader(): HTMLElement {
-        this.retry.type = 'button'; this.retry.hidden = true; this.retry.className = 'vfs-node-list__secondary-action';
-        this.retry.onclick = () => { this.retry.disabled = true; void this.actions.retryDeletions().catch(this.actions.report).finally(() => { this.retry.disabled = false; }); };
-        return this.retry;
+    private buildHeader(): void {
+        this.header.className = 'workbench-project-navigation';
+        this.button(this.create, t('project.createSession'), () => this.actions.createSession(folderBrowserPath(this.project?.path)));
+        this.create.className = 'workbench-project-navigation__create';
+        decorateButton(this.create, FILE_BROWSER_ICONS.newSession, t('project.createSession'), true);
+        this.button(this.filesButton, t('project.files'), () => this.actions.navigate?.(folderBrowserPath(this.project?.path) + '/@files') ?? Promise.resolve());
+        decorateButton(this.filesButton, FILE_BROWSER_ICONS.root, t('project.files'), true);
+        this.button(this.retry, '', () => this.actions.retryDeletions()); this.retry.hidden = true;
+        this.selector.setAttribute('aria-label', t('project.workspace'));
+        this.selector.onchange = () => {
+            if (this.selector.value === '@new-project') {
+                this.selector.value = this.project ? folderBrowserPath(this.project.path) : '/';
+                void this.actions.createProject('/').catch(this.actions.report);
+            } else void this.actions.navigate?.(this.selector.value).catch(this.actions.report);
+        };
+        this.toolbarContainer.className = 'workbench-project-navigation__transfer';
+        this.header.append(this.selector, this.filesButton, this.create, this.toolbarContainer, this.retry);
     }
-    private contentToolbar(files: boolean): void {
-        this.ui()?.setContentToolbar({ directoryFirst: true, directoryLabel: t(files ? 'vfs.toolbar.directory' : 'vfs.toolbar.project'),
-            fileLabel: t(files ? 'vfs.toolbar.file' : 'vfs.toolbar.child'),
-            actions: { ...(files ? {} : { 'create-directory': this.projectToolbarActions()['create-directory'],
-                'create-file': async () => { if (this.session) await this.actions.createChild(this.session); } }),
-                import: this.actions.importItems, export: this.actions.exportItems },
-            secondary: { label: t('project.hideFamily'), run: () => { this.hiddenScope = this.contentScope; this.ui()?.setContentVisible(false); this.ui()?.showColumn('navigation'); this.actions.contentChanged(false, !!this.family); } },
-        });
+    private button(button: HTMLButtonElement, label: string, action: () => Promise<unknown>): void {
+        button.type = 'button'; button.textContent = label;
+        button.onclick = () => { void action().catch(this.actions.report); };
     }
     cancelPending(): void { ++this.revision; }
     async sync(path: string, options: ProjectNavigationOptions = {}): Promise<void> {
-        const { reveal = false, project, draft = false, fileView } = options;
-        const target = resolveBrowserTarget(path);
-        this.path = path;
-        this.session = 'sessionId' in target ? target.sessionId : undefined;
-        this.keepFileContent = fileView === 'preserve';
-        if (fileView === 'directory') this.fileContentRoot = path;
-        // A pinned root only survives while we stay inside it.
-        else if (this.fileContentRoot && path !== this.fileContentRoot && !path.startsWith(this.fileContentRoot + '/')) this.fileContentRoot = undefined;
-        this.draftActive = draft;
+        this.path = path; this.draftActive = options.draft ?? false;
+        const target = resolveBrowserTarget(path); this.session = 'sessionId' in target ? target.sessionId : undefined;
         const revision = ++this.revision;
         const snapshot = await this.projects.sessions.navigation({ includeSessions: target.kind !== 'project-files' });
-        if (revision !== this.revision) return;
-        await this.apply(snapshot, path, reveal, revision, project);
+        if (revision === this.revision) await this.apply(snapshot, path, revision, options.project);
     }
-    /** One organization snapshot drives the whole projection: folders/catalog come from it. */
-    private async apply(snapshot: ProjectNavigationSnapshot, path: string, reveal: boolean, revision: number,
-        resolved?: ProjectFolder): Promise<void> {
-        const target = resolveBrowserTarget(path);
-        const manifest = 'sessionId' in target ? snapshot.sessions.find(item => item.id === target.sessionId) : undefined;
+    private async apply(snapshot: ProjectNavigationSnapshot, path: string, revision: number, resolved?: ProjectFolder): Promise<void> {
+        const target = resolveBrowserTarget(path), manifest = 'sessionId' in target ? snapshot.sessions.find(item => item.id === target.sessionId) : undefined;
         const folder = browserTargetFolder(target, path, manifest?.folder);
         const project = resolved ?? await this.projects.forFolder(folder, snapshot.folders);
         const projects = await this.projects.list(snapshot.folders);
         if (revision !== this.revision) return;
-        this.retry.hidden = !snapshot.pending.length; this.retry.textContent = t('project.retryDeletion', { count: snapshot.pending.length });
+        if (this.project?.project.id !== project?.project.id) this.familyVisible = false;
+        const family = manifest ? snapshot.roots.get(manifest.id) : undefined;
+        if (family !== this.family) this.familyVisible = false; this.family = family;
+        this.project = project; this.path = path; this.session = manifest?.id;
         this.projectPaths = new Set(projects.map(item => folderBrowserPath(item.path)));
         this.offlinePaths = new Set(projects.filter(item => this.projects.remoteMounts?.projectOffline(item.project.id)).map(item => folderBrowserPath(item.path)));
-        this.options.navigationAction!.visible = path => this.projectPaths.has(path);
-        // `sync` records the requested path eagerly; after the snapshot the resolved path wins.
-        this.project = project; this.path = path; this.session = manifest?.id;
-        this.family = manifest ? snapshot.roots.get(manifest.id) : undefined;
-        const members = this.family ? snapshot.sessions.filter(item => snapshot.roots.get(item.id) === this.family) : [];
-        const files = target.kind === 'project-files';
-        if (files && reveal) this.hiddenScope = undefined;
-        await this.updateContent(manifest, members.length, files, reveal, revision);
-        this.ui()?.refreshNavigationActions();
+        this.updateHeader(projects, snapshot.pending.length);
+        this.ui()?.setTitle(project?.name ?? t('workbench.allProjects')); this.ui()?.refreshList();
+        if (project) {
+            await this.ui()?.expandPath(folderBrowserPath(project.path));
+            if (revision !== this.revision) return;
+            await this.ui()?.loadDirectories([folderBrowserPath(project.path) + '/folder:%40sessions']);
+            const files = folderBrowserPath(project.path) + '/@files';
+            if (!this.revealedFiles.has(files) && !this.offlinePaths.has(folderBrowserPath(project.path))) {
+                await this.ui()?.expandPath(files); this.revealedFiles.add(files);
+            }
+        }
+        if (revision === this.revision) this.ui()?.refreshList();
     }
-    private async updateContent(manifest: import('@itookit/llm-session').SessionSummary | undefined, count: number, files: boolean, reveal: boolean, revision: number): Promise<void> {
+    private updateHeader(projects: ProjectFolder[], pending: number): void {
         const project = this.project;
-        if (files && this.keepFileContent) return;
-        const scope = this.family ?? (files ? folderBrowserPath(project?.path) + '/@files' : undefined);
-        if (scope !== this.contentScope) this.ui()?.resetContentState();
-        this.contentScope = scope;
-        const visible = (files || count > 1) && scope !== this.hiddenScope;
-        this.ui()?.setNavigationTitle(project?.name ?? t('project.workspace'));
-        this.contentToolbar(files);
-        if (project) await this.ui()?.expandPath(folderBrowserPath(project.path));
-        if (revision !== this.revision) return;
-        const root = files && project ? this.fileContentRoot ?? folderBrowserPath(project.path) + '/@files' : manifest ? folderBrowserPath(manifest.folder) || '/' : null;
-        const title = this.family ? t('project.familyCount', { count }) : project?.name ?? t('project.files');
-        await this.ui()?.setContentRoot(root, title, reveal && visible);
-        if (revision !== this.revision) return;
-        this.ui()?.setContentVisible(visible);
-        if (!visible) this.ui()?.showColumn('navigation');
-        this.actions.contentChanged(visible, !!this.family);
+        this.create.hidden = !project; this.filesButton.hidden = !project;
+        this.create.disabled = !!project && this.offlinePaths.has(folderBrowserPath(project.path));
+        this.create.setAttribute('aria-current', this.draftActive ? 'page' : 'false');
+        this.retry.hidden = !pending; this.retry.textContent = t('project.retryDeletion', { count: pending });
+        this.selector.replaceChildren();
+        const all = document.createElement('option'); all.value = '/'; all.textContent = t('workbench.allProjects'); this.selector.append(all);
+        for (const item of projects) { const option = document.createElement('option'); option.value = folderBrowserPath(item.path); option.textContent = item.name; this.selector.append(option); }
+        const create = document.createElement('option'); create.value = '@new-project'; create.textContent = t('project.create') + '…'; this.selector.append(create);
+        this.selector.value = project ? folderBrowserPath(project.path) : '/';
     }
-    showContent(): void {
-        this.hiddenScope = undefined; this.ui()?.setContentVisible(true); this.ui()?.showColumn('content');
-        this.actions.contentChanged(true, !!this.family);
+    navigationItems(items: VFSNodeUI[], query = ''): VFSNodeUI[] {
+        const root = this.project ? findNode(items, folderBrowserPath(this.project.path)) : undefined;
+        const nodes = projectItems(this.project ? root?.children ?? [] : items, query, this.familyVisible ? this.family : undefined);
+        return nodes.sort((a, b) => fileFirst(a, b) ?? 0);
     }
-    private compareFamily(a: VFSNodeUI, b: VFSNodeUI): number {
-        const root = (item: VFSNodeUI) => item.id.split('/').pop() === this.family;
-        if (root(a) !== root(b)) return root(a) ? -1 : 1;
-        return new Date(b.metadata.lastModified).getTime() - new Date(a.metadata.lastModified).getTime() || a.id.localeCompare(b.id);
-    }
-    private familyItems(items: VFSNodeUI[]): VFSNodeUI[] {
-        return items.filter(item => item.metadata.custom.familyRoot === this.family).map(item => {
-            const root = item.id.split('/').pop() === this.family;
-            const parent = item.metadata.custom.parentTitle;
-            return { ...item, content: { format: 'text/plain', summary: '', data: null, ...item.content, searchableText: String(parent ?? '') }, metadata: { ...item.metadata, custom: { ...item.metadata.custom,
-                navigationDescription: root ? t('project.rootSession') : parent ? t('project.parentSession', { name: String(parent) }) : '' } } };
-        });
-    }
+    showContent(): void { this.familyVisible = !this.familyVisible; this.ui()?.refreshList(); }
     async refresh(): Promise<void> {
         const revision = ++this.revision;
         const snapshot = await this.projects.sessions.navigation({ includeSessions: resolveBrowserTarget(this.path).kind !== 'project-files' });
         if (revision !== this.revision) return;
-        const session = this.session ? snapshot.sessions.find(item => item.id === this.session) : undefined;
-        const path = this.session && !session ? folderBrowserPath(this.project?.path)
-            : session ? `${folderBrowserPath(session.folder)}/${session.id}` : this.path;
-        await this.apply(snapshot, path, false, revision);
+        const manifest = this.session ? snapshot.sessions.find(item => item.id === this.session) : undefined;
+        const path = this.session && !manifest ? folderBrowserPath(this.project?.path) : manifest ? `${folderBrowserPath(manifest.folder)}/${manifest.id}` : this.path;
+        await this.apply(snapshot, path, revision);
     }
     currentProject(): ProjectFolder | undefined { return this.project; }
+}
+function findNode(items: VFSNodeUI[], id: string): VFSNodeUI | undefined {
+    for (const node of items) {
+        if (node.id === id) return node;
+        const child = node.children && findNode(node.children, id); if (child) return child;
+    }
 }

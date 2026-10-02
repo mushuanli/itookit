@@ -142,3 +142,5 @@
 `EditorOptions.signal` 用于编辑器初始化期间的视图取消；完成初始化后解除绑定。宿主隐藏已创建的编辑器时调用 `cancelPendingRender`，独立于 `flushPendingSave`。取消预览不取消保存或持久任务。
 
 HTTP 外挂的条件写入、取消与项目授权见 [HTTP VFS 设计](design/vfs-http-driver.md)；调用方必须使用读取字节时返回的 revision，不使用保存前 stat 替代读取版本。
+
+`EditorHostContext.openFile(path, anchor?)` 打开编辑器文件命名空间中的文档。MDX 使用当前文件路径解析普通 Markdown 相对链接，宿主映射到所属项目/会话路由并打开标签；收藏入口仍以实际文件路径为基准，移动与重命名通过 updateNodeId 更新解析基准。外部 URL、附件与 mention 保留各自行为。

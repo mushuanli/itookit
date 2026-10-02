@@ -2,7 +2,7 @@ import { PROJECT_EDITOR_MAX_BYTES, showLargeFilePreview } from './large-file-pre
 import type { ProjectService } from '@itookit/app-core';
 import { buildRenamedFilename, traceBoot, t } from '@itookit/common';
 import type { EditorFactory, EditorHostContext, IEditor } from '@itookit/ui-common';
-import { FSError, type FileSystemContextOwner } from '@itookit/vfs-core';
+import { FSError, type FSNode, type FileSystemContextOwner } from '@itookit/vfs-core';
 import { fileContentFormat } from '../browser/file-format';
 import { ViewLoad, ViewLoadCancelled } from '../lifecycle/view-load';
 
@@ -14,7 +14,7 @@ interface ProjectFileOptions {
     changed(): void;
     host: EditorHostContext;
 }
-interface OpenedProjectFile { editor?: IEditor; context: FileSystemContextOwner; previewCleanup?: () => void }
+interface OpenedProjectFile { node: FSNode; editor?: IEditor; context: FileSystemContextOwner; previewCleanup?: () => void }
 
 export async function openProjectFileEditor(projects: ProjectService, target: { folder: string; path: string },
     load: ViewLoad, options: ProjectFileOptions): Promise<OpenedProjectFile | undefined> {
@@ -34,7 +34,7 @@ export async function openProjectFileEditor(projects: ProjectService, target: { 
         mount = await options.mount(); load.check();
         const large = async () => {
             previewCleanup = await showLargeFilePreview(context, target.path, node.type === 'file' ? node.size : undefined, mount!, load);
-            return { context, previewCleanup };
+            return { node, context, previewCleanup };
         };
         if (node.type === 'file' && node.size !== undefined && node.size > PROJECT_EDITOR_MAX_BYTES) return await large();
         let revision: string | undefined;
@@ -45,7 +45,7 @@ export async function openProjectFileEditor(projects: ProjectService, target: { 
         if (content === undefined) previewCleanup = options.showBinary(mount, target.path, bytes);
         else editor = await load.read(async () => editor = await createTextEditor(context, target.path, content, mount!, load, options, revision));
         load.check();
-        return { editor, context, previewCleanup };
+        return { node, editor, context, previewCleanup };
     } catch (error) {
         mount?.remove();
         const cleanup = load.drain().then(async () => { await editor?.destroy(); previewCleanup?.(); await owner?.dispose(); });
@@ -72,7 +72,7 @@ async function createTextEditor(context: FileSystemContextOwner, path: string, c
         hostContext: { ...options.host,
             saveContent: readOnly ? undefined : async (file, text) => {
                 try {
-                    await fs.driver.writeContent(file, text, { ifRevision: revision, signal: load.signal, onRevision: value => { revision = value; } }); options.changed();
+                    await fs.driver.writeContent(file, text, { ifRevision: revision, onRevision: value => { revision = value; } }); options.changed();
                 } catch (error) {
                     throw localizeRemoteWriteError(error);
                 }

@@ -13,7 +13,7 @@ import {
     traceBoot,
 } from '@itookit/common';
 import type { BrowserBaseOptions, VFSRowActionOptions } from '../contracts/options';
-import type { IFileSystem } from '@itookit/vfs-core';
+import type { IFileSystem, FSNode } from '@itookit/vfs-core';
 
 import type {
   VFSNodeUI,
@@ -25,6 +25,7 @@ import type {
   IStatePort,
   ICommandPort,
   IEventPort,
+  IFileTypePort,
 } from '../contracts/ports';
 import type { PublicEventMap, PublicEventName } from '../contracts/events';
 
@@ -45,6 +46,10 @@ import { MoveToModal } from '../ui/components/MoveToModal/MoveToModal';
 import { findNodeById } from '../utils/helpers';
 
 export interface VFSUIShellOptions extends BrowserBaseOptions, VFSRowActionOptions {
+  /** Replaces the title row, for example with a project selector and compact actions. */
+  titleHeader?: HTMLElement;
+  /** Mount the existing toolbar controls in a host header. */
+  toolbarContainer?: HTMLElement;
   onError?: (error: unknown) => void;
   /**
    * Where the versioned UI snapshot is kept. `true` opts into the bundled
@@ -100,6 +105,7 @@ export class VFSUIShell {
   private readonly statePort: IStatePort;
   private commandPort: ICommandPort;
   private readonly eventPort: IEventPort;
+  private readonly fileTypePort: IFileTypePort;
 
   // Services (保留具体类型仅因为 public API 需要返回)
   private readonly vfsService?: VFSService;
@@ -147,6 +153,7 @@ export class VFSUIShell {
     this.statePort = parts.store;
     this.commandPort = parts.commandBus;
     this.eventPort = parts.eventBus;
+    this.fileTypePort = parts.fileTypePort;
     this.vfsService = parts.service;
     this.engineAdapter = parts.engineAdapter;
     this.persistence = typeof options.persistence === 'object' && options.persistence ? options.persistence : undefined;
@@ -173,6 +180,8 @@ export class VFSUIShell {
   }
 
   getNode(id: string): VFSNodeUI | undefined { return findNodeById(this.statePort.getState().items, id); }
+  /** Uses exactly the same explicit-icon and registered-file-type precedence as the explorer. */
+  getResourceIcon(node: FSNode): string { return node.icon || this.fileTypePort.getIcon(node.name, node.type === 'directory'); }
   updateNodeMetadata(itemId: string, metadata: Partial<VFSNodeUI['metadata']>): void {
     this.statePort.dispatch({ type: 'ITEM_METADATA_UPDATE', payload: { itemId, metadata } });
   }
@@ -182,6 +191,12 @@ export class VFSUIShell {
   }
   setQuery(query: string): void { this.statePort.dispatch({ type: 'SEARCH_QUERY_UPDATE', payload: { query } }); }
   setSelection(ids: string[]): void { this.statePort.dispatch({ type: 'ITEM_SELECTION_REPLACE', payload: { ids } }); }
+  allowsBulkAction(action: 'delete' | 'move', ids: string[]): boolean {
+    this.setSelection(ids); return this.nodeList.allowsBulkAction(action);
+  }
+  async runBulkAction(action: 'delete' | 'move', ids: string[]): Promise<void> {
+    this.setSelection(ids); await this.nodeList.runBulkAction(action);
+  }
   getSnapshot(): import('../contracts/source').BrowserSnapshot {
     const state = this.statePort.getState();
     return Object.freeze({ activeId: state.activeId, query: state.searchQuery,
@@ -269,6 +284,13 @@ export class VFSUIShell {
       if (f) return f;
     }
     return null;
+  }
+
+  /** Open the same action menu for a row rendered by the host's details view. */
+  async showItemMenu(event: MouseEvent, path: string): Promise<void> {
+    event.preventDefault();
+    if (!this.getNode(path)) await this.expandPath(path.slice(0, path.lastIndexOf('/')) || '/');
+    if (this.getNode(path)) this.nodeList.showItemMenu(event, path);
   }
 
   refreshList(): void { this.nodeList.refreshView(); }
@@ -478,11 +500,13 @@ export class VFSUIShell {
         this.options.searchPlaceholder || 'Search (tag:xx type:file|dir)...',
       fileCreation: this.options.fileCreation,
       listItems: this.options.listItems, listHeader: this.options.listHeader, cardDirectory: this.options.cardDirectory, directoryPreview: this.options.directoryPreview,
+      titleHeader: this.options.titleHeader, toolbarContainer: this.options.toolbarContainer,
       title: this.options.title,
       toolbar: this.options.toolbar, toolbarOptions: this.options.toolbarOptions,
       activateDirectories: this.options.activateDirectories,
       directoryAction: this.options.directoryAction,
       onQuickDelete: this.options.onQuickDelete,
+      rowCreation: this.options.rowCreation,
       favoriteAction: this.options.favoriteAction,
       primaryAction: this.options.primaryAction,
       exportDirectories: this.options.exportDirectories,

@@ -22,4 +22,7 @@ export { createSelectionOperation, type OperationResult, type OperationBatch, ty
 export { createMoveOperation, type MoveRequest, type MovePlan, type MoveOperationOptions } from './interaction/movement';
 
 export { filterGitignoredFiles } from './utils/gitignore-visibility';
+export { formatFileSize } from './utils/file-size';
 export { describeCauseChain, describeErrorReason } from './utils/error-detail';
+
+export { allowsRowAction } from './utils/row-policy';

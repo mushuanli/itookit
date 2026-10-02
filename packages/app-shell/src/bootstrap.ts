@@ -300,6 +300,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                 factory, fileFactory: defaultEditorFactory, createFlowContextMenu: options.ui.createFlowContextMenu,
                 initialResourceId, onSidebarReady: revealSidebar,
                 uiPersistence: await uiState.port(SESSION_BROWSER_SCOPE),
+                workbenchState: await uiState.workbenchPort(SESSION_BROWSER_SCOPE),
                 onSelect: (id, mode = 'replace') => updateHistory(elementId, id, mode),
                 hostContext: { chatFromFile, toggleSidebar: collapsed => sidebarEl.classList.toggle('is-collapsed', collapsed ?? !sidebarEl.classList.contains('is-collapsed')), navigate: handleNavigationRequest } });
             cleanupFns.push(module.dispose);
@@ -369,6 +370,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             editorFactory: factory,
             scopeId:       elementId,
             uiPersistence: await uiState.port(elementId),
+            workbenchState: await uiState.workbenchPort(elementId),
             fileTypes,
             uiOptions,
             showFileExtensions,

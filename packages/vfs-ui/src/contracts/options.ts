@@ -19,6 +19,8 @@ export interface DirectoryAction {
 
 /** Host-owned row actions shared by the shell and the list that renders them. */
 export interface VFSRowActionOptions {
+    /** Inline creation controls on writable directory rows; the host owns the target semantics. */
+    rowCreation?: { visible(node: VFSNodeUI): boolean; run(node: VFSNodeUI, type: 'file' | 'directory'): Promise<void> };
     /** Favorite state and toggle; rows without state hide the control. */
     favoriteAction?: FavoriteAction;
     /** Host deletion for entries that declare `presentation.quickDelete`, after inline confirmation. */

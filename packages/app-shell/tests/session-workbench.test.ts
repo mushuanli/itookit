@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FSError } from '@itookit/vfs-core';
 import { t } from '@itookit/common';
@@ -6,9 +7,8 @@ vi.mock('@itookit/vfs-ui', async (importOriginal) => ({ ...(await importOriginal
     filterGitignoredFiles: async (_fs: unknown, _path: string, nodes: unknown[]) => nodes,
     createVFSUI: vi.fn(() => ({ on: () => () => {}, start: async () => {}, getActiveSession: () => undefined, refresh: async () => {}, selectPath: async () => {}, destroy: () => {} })) }));
 import { SessionWorkbench } from '../src/projects/SessionWorkbench';
-const element = () => ({ replaceChildren: vi.fn(), append: vi.fn(), setAttribute: vi.fn(), classList: { add: vi.fn() }, remove: vi.fn(), title: '', textContent: '', hidden: false });
+const element = () => document.createElement('div');
 function setup() {
-    vi.stubGlobal('document', { createElement: () => element() });
     const release = vi.fn(async () => {}), dispose = vi.fn(async () => {});
     const manifest = { currentBranch: 'main' };
     const listeners: Array<() => void> = [];
@@ -254,7 +254,8 @@ it('pauses hidden view loads without cancelling Kernel tasks and resumes the req
 
 it('keeps the editor, active route and file capability when final saving fails, then allows retry', async () => {
     const f = setup(); await f.workbench.openResource('old');
-    f.destroy.mockRejectedValueOnce(new Error('save failed'));
+    const editor = await f.factory.mock.results[0].value;
+    editor.flushPendingSave = vi.fn().mockRejectedValueOnce(new Error('save failed')).mockResolvedValue(undefined);
     await expect(f.workbench.openResource('new')).rejects.toThrow('save failed');
     expect(f.workbench.getActiveResourceId()).toBe('old?branch=main');
     expect(f.release).not.toHaveBeenCalled();
@@ -274,5 +275,6 @@ it('flushes edits on hiding while retaining the editor on save failure', async (
     expect(f.release).not.toHaveBeenCalled(); expect(f.destroy).not.toHaveBeenCalled();
     await f.workbench.setVisible(true);
     expect(f.workbench.getActiveResourceId()).toBe('s?branch=main');
+    flushPendingSave.mockResolvedValue(undefined);
     await f.workbench.destroy();
 });

@@ -131,18 +131,20 @@ it('routes a real vfs-ui tree to chat, Task history and the Session mapped file 
         driver.writeContent = writeContent;
         expect([...main.querySelectorAll<HTMLElement>('[role="alert"]')].map(node => node.textContent))
             .toContain('EROFS: mount is read-only');
-        await workbench.openResource(id); expect(chat).toHaveBeenCalledTimes(2);
+        await workbench.openResource(id); expect(chat).toHaveBeenCalledTimes(1);
         // Leaving the file editor releases the glob mount.
         expect(sessionSkills.unmountByGlob).toHaveBeenCalledWith(id, '/workspace/note.md');
         await Promise.all([workbench.openResource(`/${id}/tasks`), workbench.openResource(`/${id}/tasks/task-one`)]);
         await new Promise(resolve => setTimeout(resolve, 30));
         expect(workbench.getActiveResourceId()).toBe(`/${id}/tasks/task-one`);
-        expect(chat).toHaveBeenCalledTimes(2);
+        expect(chat).toHaveBeenCalledTimes(1);
         await workbench.openResource(`/${id}/files/workspace/document.pdf`);
         expect(file).toHaveBeenCalledOnce();
         expect(main.querySelector<HTMLAnchorElement>('a[download]')?.download).toBe('document.pdf');
         expect(createURL).toHaveBeenCalledOnce();
-        await workbench.openResource(id); expect(revokeURL).toHaveBeenCalledWith('blob:test-preview');
+        await workbench.openResource(id); expect(revokeURL).not.toHaveBeenCalled();
+        main.querySelector<HTMLButtonElement>(`[data-tab-id="/${id}/files/workspace/document.pdf"] .workbench-tabs__close`)!.click();
+        await vi.waitFor(() => expect(revokeURL).toHaveBeenCalledWith('blob:test-preview'));
         await root.driver.createDirectory({ parentPath: '/home/admin', name: 'extra' });
         await repository.updateManifest(id, { currentBranch: 'experiment' });
         const chatOptions = (chat.mock.calls as unknown as Array<[HTMLElement, any]>).at(-1)![1];

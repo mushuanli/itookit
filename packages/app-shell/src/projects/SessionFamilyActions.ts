@@ -13,8 +13,9 @@ interface Actions {
 export class SessionFamilyActions {
     private headerEvents?: AbortController;
     private currentHeader?: HTMLElement;
+    private readonly controllers = new Map<HTMLElement, AbortController>();
     constructor(private readonly sessions: ProjectSessions,
-        private readonly signal: AbortSignal, private readonly actions: Actions) { signal.addEventListener('abort', () => this.headerEvents?.abort(), { once: true }); }
+        private readonly signal: AbortSignal, private readonly actions: Actions) { signal.addEventListener('abort', () => { for (const controller of this.controllers.values()) controller.abort(); this.controllers.clear(); }, { once: true }); }
     async header(manifest: ConversationManifest): Promise<HTMLElement> {
         const { members } = await this.sessions.family(manifest.id);
         const header = document.createElement('div'); header.className = 'session-family__toolbar';
@@ -24,7 +25,7 @@ export class SessionFamilyActions {
         const summary = document.createElement('summary'); summary.textContent = t('project.sessionActions');
         const items = document.createElement('div'); items.className = 'session-family__menu-items';
         items.append(this.information()); menu.append(summary, items); header.append(primary, menu);
-        this.bindMenu(menu); this.updateMetadata(manifest);
+        this.bindMenu(menu); this.controllers.set(header, this.headerEvents!); this.updateMetadata(manifest);
         const actions = this.headerActions(manifest, members).map(action => {
             const button = this.button(action.label, async () => { menu.open = false; await action.run(); });
             items.append(button); return { button, primary: action.primary };
@@ -67,6 +68,12 @@ export class SessionFamilyActions {
         const hint = document.createElement('small'); hint.textContent = t('project.activityHint');
         const wrapper = document.createElement('div'); wrapper.className = 'session-family__metadata'; wrapper.append(info, hint); return wrapper;
     }
+    activate(header: HTMLElement | null): void { this.currentHeader = header ?? undefined; }
+    release(header: HTMLElement | null): void {
+        if (!header) return;
+        this.controllers.get(header)?.abort(); this.controllers.delete(header);
+        if (this.currentHeader === header) this.currentHeader = undefined;
+    }
     updateMetadata(manifest: ConversationManifest): void {
         if (this.currentHeader?.dataset.sessionId !== manifest.id) return;
         for (const time of this.currentHeader.querySelectorAll<HTMLTimeElement>('time[data-session-time]')) {
@@ -79,7 +86,7 @@ export class SessionFamilyActions {
         }
     }
     private bindMenu(menu: HTMLDetailsElement): void {
-        this.headerEvents?.abort(); this.headerEvents = new AbortController();
+        this.headerEvents = new AbortController();
         const signal = this.headerEvents.signal;
         document.addEventListener('click', event => { if (!menu.contains(event.target as Node)) menu.open = false; }, { signal });
         menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.open = false; menu.querySelector('summary')?.focus(); } }, { signal });

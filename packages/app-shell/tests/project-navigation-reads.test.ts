@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { SessionRepository } from '@itookit/llm-session';
 import { DirectoryMountService, ProjectService, SessionFilesService, folderBrowserPath } from '@itookit/app-core';
@@ -18,13 +19,18 @@ it('resolves project folders from one organization snapshot per sync and refresh
     try {
         const project = await repository.createFolder('/Demo', { id: 'p1', directory: '/home/admin/projects/p1' });
         const projects = new ProjectService(root, repository, undefined as never, undefined as never);
-        const navigation = new ProjectNavigation(projects, () => undefined, actions());
+        const commands = actions(); commands.createProject.mockResolvedValue(undefined);
+        const navigation = new ProjectNavigation(projects, () => undefined, commands);
         const list = vi.spyOn(repository, 'listSummaries'), folders = vi.spyOn(repository, 'listFolders');
         list.mockClear(); folders.mockClear();
         await navigation.sync(folderBrowserPath(project.path));
         expect(list).toHaveBeenCalledTimes(1);
         expect(folders).toHaveBeenCalledTimes(1);
         expect(navigation.currentProject()?.path).toBe('/Demo');
+        const selector = navigation.header.querySelector('select')!;
+        expect(selector.querySelector('option[value="/"]')?.textContent).toBe('所有项目');
+        selector.value = '@new-project'; selector.dispatchEvent(new Event('change'));
+        expect(commands.createProject).toHaveBeenCalledWith('/'); expect(selector.value).toBe(folderBrowserPath('/Demo'));
         await navigation.refresh();
         expect(list).toHaveBeenCalledTimes(2);
         expect(folders).toHaveBeenCalledTimes(2);
@@ -58,8 +64,9 @@ it('boots when the persisted selection names a route this build no longer serves
         fileFactory: factory as never, directoryMounts: mounts, projects: projects, uiPersistence: { load: () => restored } });
     try {
         await workbench.start();
-        expect(sidebar.querySelector('.vfs-columns')).toBeTruthy();
-        expect(warn).toHaveBeenCalledWith('[project-navigation] ignoring unresolvable browser path', '/@flows');
+        expect(sidebar.querySelector('.workbench-sidebar__navigation')).toBeTruthy();
+        expect(sidebar.querySelector('.vfs-columns')).toBeNull();
+        expect(workbench.getActiveResourceId()).not.toBe('/@flows');
     } finally {
         await workbench.destroy(); await mounts.dispose(); await files.dispose(); await repository.dispose(); await manager.dispose();
         document.body.replaceChildren(); warn.mockRestore(); vi.unstubAllGlobals();
@@ -91,11 +98,11 @@ it('opens project files before blocked navigation and discards stale navigation 
         fileFactory: factory as never, directoryMounts: mounts, projects: projects, uiPersistence: { load: () => restored } });
     try {
         await workbench.start();
-        // Inspect root capabilities for the fixed Files entry without enumerating its children.
-        expect(openFiles).toHaveBeenCalledTimes(1);
+        // The single sidebar now expands Files and restores its remembered descendants.
+        expect(openFiles).toHaveBeenCalledTimes(6);
         const startup = await projects.current();
         expect(startup).toBeDefined();
-        expect(sync).toHaveBeenCalledWith(folderBrowserPath(startup!.path), { project: expect.objectContaining({ path: startup!.path }) });
+        expect(sync).toHaveBeenCalledWith(folderBrowserPath(startup!.path), { reveal: true });
         const owner = await projects.openFiles(startup!.path);
         await owner.fs.driver.createFile({ parentPath: '/', name: 'notes.md', content: 'body before navigation' });
         await owner.dispose();
@@ -117,7 +124,7 @@ it('opens project files before blocked navigation and discards stale navigation 
         releaseNavigation();
         await sync.mock.results[1]!.value;
         expect(workbench.getActiveResourceId()).toBe(folderBrowserPath(startup!.path));
-        expect(sidebar.querySelector('.vfs-columns')?.getAttribute('data-content-visible')).toBe('false');
+        expect(sidebar.querySelector('.vfs-columns')).toBeNull();
         await projects.favorites.toggle(startup!.project.id, { kind: 'file', path: '/workspace/notes.md', nodeType: 'file' }, 'Notes');
         const favorite = (await projects.favorites.list(startup!.project.id))[0];
         let releaseFavorite!: () => void, started!: () => void;
@@ -140,4 +147,25 @@ it('opens project files before blocked navigation and discards stale navigation 
         await workbench.destroy(); await mounts.dispose(); await files.dispose(); await repository.dispose(); await manager.dispose();
         document.body.replaceChildren(); vi.unstubAllGlobals(); sync.mockRestore();
     }
+});
+
+it('shows session cleanup only while a deletion is pending, including its rendered visibility', async () => {
+    const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+    const root = await manager.openFileSystem('/');
+    const repository = new SessionRepository(root); await repository.init();
+    const style = document.createElement('style');
+    style.textContent = readFileSync('src/styles/workspace.css', 'utf8'); document.head.append(style);
+    const navigation = new ProjectNavigation(new ProjectService(root, repository, undefined as never, undefined as never), () => undefined, actions());
+    document.body.append(navigation.header);
+    try {
+        await navigation.sync('/');
+        const cleanup = [...navigation.header.querySelectorAll('button')].find(button => button.textContent?.startsWith('会话清理'))!;
+        expect(cleanup.hidden).toBe(true); expect(getComputedStyle(cleanup).display).toBe('none');
+        const session = await repository.createSession('Pending'); await repository.prepareSessionDeletion(session);
+        await navigation.refresh();
+        expect(cleanup.textContent).toBe('会话清理（1）'); expect(cleanup.hidden).toBe(false);
+        expect(getComputedStyle(cleanup).display).not.toBe('none');
+        await repository.deleteSession(session); await navigation.refresh();
+        expect(cleanup.hidden).toBe(true); expect(getComputedStyle(cleanup).display).toBe('none');
+    } finally { navigation.header.remove(); style.remove(); await repository.dispose(); await manager.dispose(); }
 });

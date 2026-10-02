@@ -144,7 +144,7 @@ export const createFileItemHTML = (
           
           <div class="vfs-node-item__body">
             <div class="vfs-node-item__row-primary">
-              <span class="vfs-node-item__title">${highlight(title, searchQueries)}</span>
+              <span class="vfs-node-item__title" title="${escapeHTML(title)}">${highlight(title, searchQueries)}</span>
               ${isPinned ? `<span class="vfs-node-item__pin" aria-hidden="true">${FILE_ICONS.pin}</span>` : ''}
               ${hasWaitingInput ? `<span class="vfs-node-item__indicator vfs-node-item__indicator--waiting" title="${escapeHTML(hasWaitingInput)}"></span>` : ''}
               ${hasUnreadUpdate && !hasWaitingInput ? '<span class="vfs-node-item__indicator"></span>' : ''}
@@ -216,7 +216,7 @@ export const createDirectoryItemHTML = (
           ${props.isLeaf ? '' : `<span class="vfs-directory-item__toggle ${isExpanded ? 'is-expanded' : ''}" data-action="toggle-folder"></span>`}
           <span class="vfs-directory-item__icon">${icon || FILE_ICONS.folder}</span>
           <div class="vfs-directory-item__title-container">
-            <span class="vfs-directory-item__title">${highlight(title, searchQueries)}</span>
+            <span class="vfs-directory-item__title" title="${escapeHTML(title)}">${highlight(title, searchQueries)}</span>
             ${typeof metadata.custom.navigationDescription === 'string' ? `<span class="vfs-directory-item__description">${escapeHTML(metadata.custom.navigationDescription)}</span>` : ''}
             ${tagsHtml}
           </div>

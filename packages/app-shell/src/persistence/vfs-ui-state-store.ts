@@ -1,3 +1,4 @@
+import { readWorkbenchSnapshot, type WorkbenchStatePort } from '../workbench/state';
 /**
  * @file app-shell/persistence/vfs-ui-state-store.ts
  * @desc Host storage for browser UI snapshots (`etc:/ui/<scope>.ui.json`).
@@ -24,6 +25,10 @@ export class VfsUIPersistence {
     async port(scopeId: string): Promise<UIPersistencePort> {
         await this.load(scopeId);
         return { load: () => this.snapshots.get(scopeId), save: snapshot => this.store.write(docName(scopeId), snapshot) };
+    }
+    async workbenchPort(scopeId: string): Promise<WorkbenchStatePort> {
+        let snapshot = readWorkbenchSnapshot(await this.store.read(`${scopeId}.workbench`));
+        return { load: () => snapshot, save: value => { snapshot = value; this.store.write(`${scopeId}.workbench`, value); } };
     }
     /** Wait for already-queued writes (shutdown and tests). */
     async flush(): Promise<void> { await this.store.flush(); }

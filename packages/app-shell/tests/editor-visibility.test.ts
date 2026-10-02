@@ -27,7 +27,7 @@ it('does not render a hidden read and reloads the requested file when visible ag
     await new Promise(resolve => setTimeout(resolve, 10));
     expect(f.factory).not.toHaveBeenCalled();
     await f.lifecycle.setVisible(true);
-    await vi.waitFor(() => expect(f.container.textContent).toBe('/old'));
+    await vi.waitFor(() => expect(f.container.querySelector('.workbench-tabs__panel:not([hidden])')?.textContent).toBe('/old'));
     expect(f.read).toHaveBeenCalledTimes(2); await f.lifecycle();
 });
 
@@ -42,9 +42,9 @@ it('isolates a late factory so its cleanup cannot erase the newer editor', async
     await f.select('/old');
     await vi.waitFor(() => expect(f.factory).toHaveBeenCalledOnce());
     await f.select('/new');
-    await vi.waitFor(() => expect(f.container.textContent).toBe('/new'));
+    await vi.waitFor(() => expect(f.container.querySelector('.workbench-tabs__panel:not([hidden])')?.textContent).toBe('/new'));
     finish(); await vi.waitFor(() => expect(destroyed).toHaveBeenCalledOnce());
-    expect(f.container.textContent).toBe('/new'); await f.lifecycle();
+    expect(f.container.querySelector('.workbench-tabs__panel:not([hidden])')?.textContent).toBe('/new'); await f.lifecycle();
 });
 
 it('flushes on hide and retains the active editor if saving fails', async () => {
@@ -55,7 +55,7 @@ it('flushes on hide and retains the active editor if saving fails', async () => 
     await expect(f.lifecycle.setVisible(false)).rejects.toThrow('disk full');
     expect(editor.destroy).not.toHaveBeenCalled();
     await f.lifecycle.setVisible(true);
-    expect(f.container.textContent).toBe('/edited'); await f.lifecycle();
+    expect(f.container.querySelector('.workbench-tabs__panel:not([hidden])')?.textContent).toBe('/edited'); await f.lifecycle();
 });
 
 it('uses the editor save coordinator and retains the editor on a failed switch', async () => {
@@ -66,7 +66,7 @@ it('uses the editor save coordinator and retains the editor on a failed switch',
     await f.select('/other');
     expect(editor.destroy).not.toHaveBeenCalled();
     expect(f.factory).toHaveBeenCalledOnce();
-    expect(f.container.textContent).toBe('/draft');
+    expect(f.container.querySelector('.workbench-tabs__panel:not([hidden])')?.textContent).toContain('/draft');
     await f.select('/other');
     await vi.waitFor(() => expect(f.factory).toHaveBeenCalledTimes(2));
     expect(editor.destroy).toHaveBeenCalledOnce();

@@ -82,7 +82,7 @@ export class NavigationManager {
 
     async navigateInRenderer(container: HTMLElement, elementId: string, smooth: boolean): Promise<void> {
         try {
-            const element = container.querySelector(`#${CSS.escape(elementId)}`);
+            const element = container.querySelector(`#${CSS.escape(elementId)}`) ?? container.querySelector(`#${CSS.escape("heading-" + elementId)}`);
             if (!element) {
                 console.warn(`[Navigation] Element not found: #${elementId}`);
                 return;
@@ -104,7 +104,7 @@ export class NavigationManager {
         isDestroying: boolean
     ): Promise<void> {
         const positions = this.getPositions(text, docVersion);
-        let position = positions.get(elementId);
+        let position = positions.get(elementId) ?? positions.get("heading-" + elementId);
 
         // 模糊匹配回退
         if (!position) {

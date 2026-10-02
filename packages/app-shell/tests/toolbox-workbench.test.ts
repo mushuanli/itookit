@@ -95,7 +95,7 @@ it('opens one MCP form and exposes tool provenance without execution or creation
     await f.workbench.openResource('/tools/' + encodeURIComponent(tool.id));
     await vi.waitFor(() => expect(f.main.textContent).toContain('管理来源连接'));
     expect(f.main.textContent).toContain('Documentation');
-    expect(f.main.querySelector('button')?.textContent).toBe('管理来源连接');
+    expect(f.main.querySelector('.workbench-tabs__panel:not([hidden]) button')?.textContent).toBe('管理来源连接');
 });
 it('preserves original paths in every legacy resource route', () => {
     for (const kind of TOOLBOX_KINDS) expect(legacyToolboxRoute(kind, '/目录/item')).toEqual({ kind, path: '/' + kind + '/目录/item' });

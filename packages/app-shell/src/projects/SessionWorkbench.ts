@@ -1,4 +1,12 @@
+import { WorkbenchTabs, type WorkbenchTab } from '../workbench/tabs';
+import { WorkbenchSidebar } from '../workbench/sidebar';
+import { createDirectoryList, refreshDirectoryList } from '../workbench/directory-list';
+import { directoryBulkActions } from '../workbench/vfs-actions';
+import { ENTITY_ICONS, FILE_BROWSER_ICONS, FILE_ICONS } from '@itookit/common';
+import { watchDirectoryList } from '../workbench/directory-watch';
+import type { WorkbenchStatePort } from '../workbench/state';
 import { projectFavoriteAction } from './project-favorites';
+import { directoryEntryName, directoryPathLabel } from './directory-label';
 import { WORKSPACE_PATH, projectRelativePath, resolveProjectFavorite } from '@itookit/app-core';
 import { createProjectDraftControls } from './project-draft-editor';
 import { monitorRemoteConnections } from '../files/remote-status-monitor';
@@ -12,14 +20,14 @@ import { chooseArchive, downloadArchive } from '../files/archive-transfer';
 import { SessionFamilyActions } from './SessionFamilyActions';
 import { buildRenamedFilename, formatDefaultFileTitle, t, traceBoot, type SessionSkillControls } from '@itookit/common';
 import { ProjectNavigation, type ProjectFileView } from './ProjectNavigation';
-import { showProjectDialog } from '../files/project-dialog';
+import { showNameDialog, showProjectDialog } from '../files/project-dialog';
 import { showMountDialog } from '../files/mount-dialog';
 import { localizeMountError } from '../files/localize-mount-error';
 
 import type { EditorFactory, IEditor, EditorHostContext, ContextMenuConfig } from '@itookit/ui-common';
 import type { ISessionRepository } from '@itookit/llm-session';
 import type { Kernel } from '@itookit/durable-kernel';
-import { filterGitignoredFiles, createVFSUI, describeErrorReason, type VFSToolbarContext, type VFSUIShell, type VFSNodeUI, type UIPersistencePort } from '@itookit/vfs-ui';
+import { allowsRowAction, filterGitignoredFiles, createVFSUI, describeErrorReason, type VFSToolbarContext, type VFSUIShell, type VFSNodeUI, type UIPersistencePort } from '@itookit/vfs-ui';
 import { FSError, createFileSystemView, type IFileSystem, type FileSystemContextOwner, type FileSystemView } from '@itookit/vfs-core';
 
 
@@ -82,6 +90,7 @@ export interface SessionWorkbenchOptions {
     initialResourceId?: string;
     /** Host-owned snapshot storage; omitted means the sidebar restores nothing. */
     uiPersistence?: UIPersistencePort;
+    workbenchState?: WorkbenchStatePort;
 }
 
 function afterSidebarPaint(): Promise<void> {
@@ -93,9 +102,18 @@ function afterSidebarPaint(): Promise<void> {
     });
 }
 
+interface RetainedEditor {
+    editor?: IEditor; context?: FileSystemContextOwner; assets?: FileSystemView;
+    previewCleanup?: () => void; renameCleanup?: () => void;
+    active: string | null; branch?: string; cancel?: () => void; lease?: EditorLease;
+    skills?: { sessionId: string; path: string };
+}
+
 /** vfs-ui owns the sidebar; this host owns business views and their file leases. */
 export class SessionWorkbench implements WorkspaceController {
     private readonly dialogs = new AbortController();
+    private readonly tabs: WorkbenchTabs<RetainedEditor>;
+    private readonly sidebarLayout: WorkbenchSidebar;
     private editor?: IEditor;
     private editorLease?: EditorLease;
     private previewCleanup?: () => void;
@@ -165,6 +183,12 @@ export class SessionWorkbench implements WorkspaceController {
         this.initialResourceId = options.initialResourceId;
         this.uiPersistence = options.uiPersistence;
         this.sessions = options.projects?.sessions ?? new ProjectSessions(options.repository);
+        this.tabs = new WorkbenchTabs(this.container, {
+            activate: id => this.openResource(id), dispose: tab => this.disposeTab(tab),
+            empty: () => { this.clearEditorFields(); this.showWelcome(); this.onSelect('', 'replace'); },
+            error: error => this.report(error), changed: () => this.sidebarLayout?.save(this.tabs.snapshot()),
+        }, options.workbenchState?.load()?.tabs);
+        this.sidebarLayout = new WorkbenchSidebar(this.sidebar, this.tabs.opened, options.workbenchState);
     }
     async start(): Promise<void> {
         this.browser = await createSessionBrowser({ repository: this.repository, files: this.files, kernel: this.kernel, projects: this.projects,
@@ -175,12 +199,18 @@ export class SessionWorkbench implements WorkspaceController {
         ] });
         this.lifecycle = new SessionLifecycleService({ repository: this.repository, kernel: this.kernel });
         const tree = document.createElement('div'); tree.className = 'project-workbench__tree';
-        this.sidebar.append(tree);
+        this.sidebarLayout.navigation.append(tree);
         if (this.projects) this.installProjectNavigation();
         this.sidebarUI = createVFSUI({ sessionListContainer: tree, title: this.projects ? t('project.workspace') : '会话', scopeId: SESSION_BROWSER_SCOPE,
             persistence: this.uiPersistence,
-            columns: this.projectNavigation?.options, toolbar: 'full', hideGitignored: false,
-            searchPlaceholder: t(this.projects ? 'project.searchContents' : 'project.search'), showFileExtensions: !this.projects,
+            listItems: items => this.projectNavigation?.navigationItems(items, this.sidebarUI?.getSnapshot().query) ?? items,
+            titleHeader: this.projectNavigation?.header, toolbarContainer: this.projectNavigation?.toolbarContainer,
+            directoryAction: this.projectNavigation?.options.navigationAction,
+            toolbarOptions: this.projectNavigation?.options.navigationToolbarOptions,
+            rowCreation: { visible: node => !isFlowPath(node.id) && ['project-files', 'files'].includes(resolveBrowserTarget(node.id).kind),
+                run: (node, type) => this.createDirectoryEntry(node.id, type) },
+            toolbar: 'full', hideGitignored: false,
+            searchPlaceholder: t(this.projects ? 'project.searchContents' : 'project.search'), showFileExtensions: true,
             readOnly: false, activateDirectories: true, autoSelectFirst: !this.projects, defaultUiSettings: { sortBy: 'lastModified' },
             compareItems: compareSessionEntries,
             restoreExpandedDirectory: isExpandableDirectory,
@@ -250,7 +280,7 @@ export class SessionWorkbench implements WorkspaceController {
             const current = await traceBoot('sessionWorkbench.currentProject', () => this.projects!.current());
             // The startup project is already resolved; hand it to the first sync so it does
             // not look it up again from the folder catalog.
-            if (current) await traceBoot('sessionWorkbench.projectNavigation', () => this.projectNavigation!.sync(folderBrowserPath(current.path), { project: current }));
+            if (current) await traceBoot('sessionWorkbench.projectNavigation', () => this.openResource(folderBrowserPath(current.path)));
         }
         if (!this.active) {
             if (this.projects) this.showWelcome();
@@ -305,7 +335,7 @@ export class SessionWorkbench implements WorkspaceController {
     private updateRemoteAvailability(): void {
         if (!this.projects?.remoteMounts) return;
         const project = this.projectNavigation?.currentProject();
-        const target = this.active ? resolveBrowserTarget(parseSessionRoute(this.active).path) : undefined;
+        const target = this.active && !this.active.startsWith('draft:') ? resolveBrowserTarget(parseSessionRoute(this.active).path) : undefined;
         const offline = (target?.kind === 'project-files' || target?.kind === 'files') && !!project && !!this.projects?.remoteMounts?.projectOffline(project.project.id);
         this.container.inert = offline;
         this.container.classList.toggle('project-workbench--offline', offline);
@@ -352,7 +382,7 @@ export class SessionWorkbench implements WorkspaceController {
     }
     private message(text: string): void {
         const node = document.createElement('div'); node.className = 'mm-placeholder'; node.textContent = text;
-        this.container.replaceChildren(node);
+        this.tabs.content.replaceChildren(node);
     }
     private report(error: unknown): void {
         if (this.closed) return;
@@ -361,7 +391,7 @@ export class SessionWorkbench implements WorkspaceController {
         if (!this.editor && !this.previewCleanup) this.message(text);
         else {
             const notice = document.createElement('div'); notice.className = 'session-detail__error';
-            notice.setAttribute('role', 'alert'); notice.textContent = text; this.container.append(notice);
+            notice.setAttribute('role', 'alert'); notice.textContent = text; this.tabs.content.append(notice);
         }
     }
     /** Stale bookmarks must not abort the entire application bootstrap. */
@@ -394,7 +424,7 @@ export class SessionWorkbench implements WorkspaceController {
             this.cancelViewLoad();
             this.editor?.cancelPendingRender?.();
             if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = undefined; }
-            try { await this.editor?.flushPendingSave?.(); }
+            try { await Promise.all(this.tabs.values().map(tab => tab.value?.editor?.flushPendingSave?.())); }
             catch (error) { this.report(error); throw error; }
         } else {
             const pending = this.pendingTarget;
@@ -437,7 +467,8 @@ export class SessionWorkbench implements WorkspaceController {
                     this.container.inert = true;
                     this.container.classList.add('project-workbench--offline');
                     this.container.setAttribute('aria-disabled', 'true');
-                    this.message(t('remote.projectOffline'));
+                    if (this.editor || this.previewCleanup) this.report(new Error(t('remote.projectOffline')));
+                    else this.message(t('remote.projectOffline'));
                     return;
                 }
             }
@@ -465,32 +496,43 @@ export class SessionWorkbench implements WorkspaceController {
                 return;
             }
             if (target.kind === 'favorite') throw new Error('Favorite navigation was not resolved');
+            const openingManifest = 'sessionId' in target ? await load.read(() => this.sessions.get(target.sessionId)) : undefined;
+            load.check();
+            const tabId = id;
+            const old = this.tabs.current;
+            if (old?.value && !old.value.editor && !old.value.previewCleanup && old.id !== id && id.startsWith(old.id + '/')) this.tabs.keep(old.id);
+            await this.leaveEditor(); load.check();
+            const existing = this.tabs.get(tabId);
+            if (existing?.value && !options.reload && target.kind !== 'task' && target.kind !== 'tasks' && (target.kind !== 'session' || existing.value.branch === (branch ?? openingManifest!.currentBranch ?? 'main'))) {
+                this.tabs.activate(tabId); this.restoreEditor(existing.value);
+                await refreshDirectoryList(existing.panel); load.check();
+                const navigationPath = openingManifest ? `${folderBrowserPath(openingManifest.folder)}/${openingManifest.id}` : path;
+                await this.projectNavigation?.sync(navigationPath, { reveal: true }); load.check();
+                this.onSelect(this.getActiveResourceId()!); return;
+            }
+            if (existing?.value) await this.tabs.close(tabId, false);
+            await this.tabs.open(tabId, path.split('/').pop() || t('project.workspace'), target.kind !== 'session'); load.check();
+            if (target.kind === 'session') this.tabs.setIcon(tabId, ENTITY_ICONS.chat);
             if (target.kind === 'folder' || target.kind === 'favorites') {
-                await this.closeEditor(); load.check();
                 this.active = id;
                 this.activeBranch = undefined;
                 await load.read(async () => this.projectNavigation?.sync(path, { reveal: true })); load.check();
-                const folder = folderPathFromBrowserPath(path);
-                const project = this.projectNavigation?.currentProject();
-                if (target.kind !== 'favorites' && this.projectNavigation && (!project || folder === project.path)) this.showWelcome();
-                else await this.showDirectory(path);
+                await this.showDirectory(path);
                 this.onSelect(id);
                 this.selectionSync = path;
                 try { await this.sidebarUI?.selectPath(path); } finally { this.selectionSync = undefined; }
                 return;
             }
             if (target.kind === 'project-files') {
-                await this.closeEditor(); load.check();
                 await this.openProjectFile(path, target, load); load.check();
                 if (this.closed) throw new Error('Session workspace closed');
-                this.active = path; this.onSelect(path); this.scheduleFileNavigation(path, options.fileNavigation); return;
+                this.active = path; this.activeBranch = undefined; this.onSelect(path); this.scheduleFileNavigation(path, options.fileNavigation); return;
             }
-            const manifest = await load.read(() => this.sessions.get(target.sessionId));
+            const manifest = openingManifest!;
             const suffix = target.kind === 'session' ? '' : target.kind === 'files' ? '/files' + (target.path === '/' ? '' : target.path)
                 : target.kind === 'tasks' ? '/tasks' : '/tasks/' + target.taskId;
             path = `${folderBrowserPath(manifest.folder)}/${target.sessionId}${suffix}`;
             await load.read(async () => this.projectNavigation?.sync(path)); load.check();
-            await this.closeEditor(); load.check();
             if (target.kind === 'session' || target.kind === 'files') {
                 const cwd = target.kind === 'session' ? undefined : target.path.slice(0, target.path.lastIndexOf('/')) || '/';
                 let acquired: FileSystemContextOwner | undefined;
@@ -503,7 +545,9 @@ export class SessionWorkbench implements WorkspaceController {
                     load.check();
                     mount = await this.editorMount(manifest.folder, target.kind === 'session' ? manifest.id : undefined);
                     load.check();
-                    if (target.kind === 'files' && (await load.read(() => context.context.fs.driver.getNode(target.path)))?.type === 'directory') {
+                    const fileNode = target.kind === 'files' ? await load.read(() => context.context.fs.driver.getNode(target.path)) : undefined;
+                    if (fileNode) this.tabs.setIcon(tabId, this.sidebarUI!.getResourceIcon(fileNode));
+                    if (fileNode?.type === 'directory') {
                         await context.release(); acquired = undefined;
                         load.check(); await this.showDirectory(path);
                     } else if (target.kind === 'session') {
@@ -552,11 +596,12 @@ export class SessionWorkbench implements WorkspaceController {
                                 initialContent: content, signal: load.signal, title: target.path.split('/').pop(), readOnly,
                                 hostContext: { chatFromFile: this.hostContext?.chatFromFile
                                     ? reference => this.hostContext!.chatFromFile!(reference, { sessionId: target.sessionId }) : undefined,
+                                    openFile: async (file, anchor) => this.openLinkedFile((await this.sessionPath(target.sessionId)) + '/files' + file, anchor),
                                     toggleSidebar: () => this.sidebarUI?.toggleSidebar(), navigate: request => this.hostContext?.navigate(request) ?? Promise.resolve(),
                                     saveContent: readOnly ? undefined : async (_path, text) => {
                                         // A failed write must never look like a successful save: the
                                         // editor keeps its dirty state, and the user is told now.
-                                        try { await context.context.fs.driver.writeContent(target.path, text, { ifRevision: revision, signal: load.signal, onRevision: value => { revision = value; } }); }
+                                        try { await context.context.fs.driver.writeContent(target.path, text, { ifRevision: revision, onRevision: value => { revision = value; } }); }
                                         catch (error) { const failure = localizeRemoteWriteError(error); this.report(failure); throw failure; }
                                         this.refresh();
                                     } },
@@ -589,8 +634,16 @@ export class SessionWorkbench implements WorkspaceController {
             this.selectionSync = path;
             try { await this.sidebarUI?.selectPath(path); } finally { this.selectionSync = undefined; }
         });
-        const result = operation.catch(error => {
-            if (!(error instanceof ViewLoadCancelled)) throw error;
+        const result = operation.then(() => {
+            if (this.viewLoads.isCurrent(load) && this.tabs.current) {
+                this.pendingTarget = undefined;
+                this.retainEditor(this.viewLoads.detach(load));
+            }
+        }).catch(error => {
+            if (!(error instanceof ViewLoadCancelled)) {
+                if (!this.editor && this.tabs.current?.value) this.restoreEditor(this.tabs.current.value);
+                throw error;
+            }
             if (this.closed) throw new Error('Session workspace closed');
         }).finally(() => {
             if (load.signal.aborted) this.finishReads(load.drain());
@@ -602,12 +655,14 @@ export class SessionWorkbench implements WorkspaceController {
         // Serialize reconciliation with navigation so a stale read cannot close a newer editor.
         const operation = this.tail.then(async () => {
             if (this.closed || !this.visible || !this.active) return;
-            const id = this.active, target = resolveBrowserTarget(id.startsWith('/') ? id : '/' + id);
+            const id = this.active; if (id.startsWith('draft:')) return;
+            const target = resolveBrowserTarget(id.startsWith('/') ? id : '/' + id);
             if (!('sessionId' in target)) return;
             const manifest = await this.sessions.get(target.sessionId).catch(async error => {
                 if (!this.visible || this.closed) return undefined;
                 if (error?.code !== 'ENOENT') throw error;
-                await this.closeEditor();
+                if (this.tabs.current) await this.tabs.close(this.tabs.current.id, false);
+                else await this.closeEditor();
                 this.message('选择一个会话，或新建会话');
                 this.onSelect('', 'replace');
                 return undefined;
@@ -617,6 +672,8 @@ export class SessionWorkbench implements WorkspaceController {
             const current = manifest.currentBranch ?? 'main';
             if (current !== this.activeBranch) {
                 this.activeBranch = current;
+                const tab = this.tabs.current;
+                if (tab?.value) { tab.value.branch = current; }
                 this.onSelect(sessionRoute(id, current), 'push');
             }
         });
@@ -650,11 +707,13 @@ export class SessionWorkbench implements WorkspaceController {
         const target = resolveBrowserTarget(path);
         if (target.kind === 'tasks') return this.showTasks(target.sessionId);
         const generation = ++this.taskRefresh;
+        await this.sidebarUI?.expandPath(path);
         const nodes = await this.navigationFiles!.driver.getChildren(path);
         if (this.closed || generation !== this.taskRefresh) return;
         const panel = document.createElement('div'); panel.className = 'session-detail';
         const heading = document.createElement('h2');
-        heading.textContent = String((await this.navigationFiles!.driver.getNode(path))?.metadata.title ?? t('project.workspace'));
+        const directoryNode = await this.navigationFiles!.driver.getNode(path);
+        heading.textContent = path === '/' ? t('workbench.allProjects') : directoryNode ? directoryEntryName(directoryNode) : t('workbench.allProjects');
         if (this.closed || generation !== this.taskRefresh) return;
         panel.append(heading);
         if (this.projects && target.kind === 'folder') {
@@ -680,15 +739,50 @@ export class SessionWorkbench implements WorkspaceController {
             button.onclick = () => { void this.manageMemory!(target.sessionId, this.dialogs.signal).catch(error => this.report(error)); };
             panel.append(button);
         }
-        for (const node of nodes) {
-            const button = document.createElement('button'); button.type = 'button'; button.className = 'session-detail__entry';
-            button.textContent = String(node.metadata.title ?? node.name);
-            button.disabled = node.metadata._disabled === true;
-            button.title = String(node.metadata.navigationDescription ?? '');
-            button.onclick = () => { void this.openResource(node.path).catch(error => this.report(error)); }; panel.append(button);
-        }
-        if (!nodes.length) { const empty = document.createElement('p'); empty.textContent = '暂无内容'; panel.append(empty); }
-        if (!this.closed) this.container.replaceChildren(panel);
+        const parent = path.slice(0, path.lastIndexOf('/')) || '/';
+        const row = this.sidebarUI?.getNode(path);
+        const writable = (target.kind === 'project-files' || target.kind === 'files') && !!row
+            && allowsRowAction('create-in-folder-session', false, row) && !(await this.navigationFiles!.capabilitiesAt(path)).readonly;
+        const list = createDirectoryList({ title: heading.textContent || t('project.workspace'), path: directoryPathLabel(path, heading.textContent),
+            entries: nodes.map(node => ({ id: node.path, name: directoryEntryName(node), type: resolveBrowserTarget(node.path).kind === 'session' ? 'session' : node.type,
+                icon: this.sidebarUI!.getResourceIcon(node), created: node.createdAt, modified: node.modifiedAt, size: node.type === 'file' ? node.size : undefined,
+                disabled: node.metadata._disabled === true, description: String(node.metadata.navigationDescription ?? '') })),
+            open: id => { void this.openResource(id).catch(error => this.report(error)); },
+            parent: path === '/' ? undefined : () => { void this.openResource(parent).catch(error => this.report(error)); },
+            refresh: () => this.directoryEntries(path),
+            contextMenu: (event, id) => { void this.sidebarUI?.showItemMenu(event, id).catch(error => this.report(error)); },
+            select: ids => this.sidebarUI?.setSelection(ids),
+            bulkActions: this.sidebarUI && (target.kind === 'project-files' || target.kind === 'files') ? directoryBulkActions(this.sidebarUI) : undefined,
+            favorite: this.projects ? this.directoryFavorites() : undefined,
+            actions: writable ? [
+                { label: t('project.createFile'), icon: FILE_BROWSER_ICONS.addFile, run: () => { void this.createDirectoryEntry(path, 'file').catch(error => this.report(error)); } },
+                { label: t('project.createFolder'), icon: FILE_BROWSER_ICONS.addFolder, run: () => { void this.createDirectoryEntry(path, 'directory').catch(error => this.report(error)); } },
+            ] : undefined });
+        heading.remove(); panel.append(list); this.tabs.title(this.tabs.current!.id, list.querySelector('h2')!.textContent!);
+        this.tabs.setIcon(this.tabs.current!.id, this.sidebarUI?.getNode(path)?.icon ?? FILE_ICONS.folder);
+        if (!this.closed) this.tabs.content.replaceChildren(panel);
+        if (this.navigationFiles?.on) this.tabs.current!.subscriptions.push(watchDirectoryList(this.navigationFiles, panel, error => this.report(error)));
+    }
+    private async directoryEntries(path: string) {
+        await this.sidebarUI?.refresh(); await this.sidebarUI?.expandPath(path);
+        const nodes = await this.navigationFiles!.driver.getChildren(path);
+        return nodes.map(node => ({ id: node.path, name: directoryEntryName(node), type: resolveBrowserTarget(node.path).kind === 'session' ? 'session' : node.type,
+            icon: this.sidebarUI!.getResourceIcon(node), created: node.createdAt, modified: node.modifiedAt, size: node.type === 'file' ? node.size : undefined,
+            disabled: node.metadata._disabled === true, description: String(node.metadata.navigationDescription ?? '') }));
+    }
+    private directoryFavorites() {
+        const favorite = projectFavoriteAction(this.projects!, this.repository), cache = new Map<string, boolean>();
+        return { state: (id: string) => { const node = this.sidebarUI?.getNode(id); return cache.get(id) ?? (node ? favorite.state(node) : undefined); },
+            toggle: async (id: string) => { const node = this.sidebarUI?.getNode(id); if (node) { const before = cache.get(id) ?? favorite.state(node); await favorite.toggle(node); cache.set(id, !before); } } };
+    }
+    private async createDirectoryEntry(path: string, type: 'file' | 'directory'): Promise<void> {
+        await showNameDialog(t(type === 'file' ? 'project.createFile' : 'project.createFolder'), t('project.newFileName'), this.dialogs.signal, async name => {
+            const driver = this.navigationFiles!.driver;
+            if (type === 'file') await driver.createFile({ parentPath: path, name, content: '' });
+            else await driver.createDirectory({ parentPath: path, name });
+            await this.sidebarUI?.refresh();
+            await this.openResource(path, { reload: true });
+        });
     }
     private async showTasks(sessionId: string): Promise<void> {
         const generation = ++this.taskRefresh;
@@ -718,7 +812,7 @@ export class SessionWorkbench implements WorkspaceController {
                 page = next; append();
             }).catch(error => this.report(error)).finally(() => { more.disabled = false; });
         };
-        this.container.replaceChildren(panel);
+        this.tabs.content.replaceChildren(panel);
     }
     private async showTask(path: string): Promise<void> {
         const target = resolveBrowserTarget(path); if (target.kind !== 'task') return;
@@ -787,7 +881,7 @@ export class SessionWorkbench implements WorkspaceController {
             }).catch(error => this.report(error)).finally(() => { moreEvents.disabled = false; });
         };
         render();
-        this.container.replaceChildren(panel);
+        this.tabs.content.replaceChildren(panel);
     }
     private async exportSelection(context: VFSToolbarContext): Promise<void> {
         if (!context.selectedIds.length) throw new Error(t('vfs.toolbar.selectExport'));
@@ -852,7 +946,7 @@ export class SessionWorkbench implements WorkspaceController {
     private async creationFolder(parent?: string | null): Promise<string | null> {
         const root = this.sidebarUI?.getContentRoot?.();
         const selected = this.active?.startsWith('/') ? this.active : this.sidebarUI?.getActiveSession()?.id;
-        const path = parent ?? (root && selected?.startsWith(root + '/') ? selected : root) ?? selected ?? this.active;
+        const path = parent ?? (root && selected?.startsWith(root + '/') ? selected : root) ?? selected ?? (this.active?.startsWith('draft:') ? folderBrowserPath(this.projectNavigation?.currentProject()?.path) : this.active);
         let folder = path ? folderPathFromBrowserPath(path) : null;
         if (path && !isFlowPath(path)) {
             const target = resolveBrowserTarget(path.startsWith('/') ? path : '/' + path);
@@ -871,7 +965,7 @@ export class SessionWorkbench implements WorkspaceController {
     }
     private async removeSession(id: string): Promise<void> {
         await this.lifecycle.deleteSession(id);
-        if (this.active === id) { await this.closeEditor(); this.showWelcome(); this.onSelect('', 'replace'); }
+        for (const tab of this.tabs.values()) if (tab.value?.active === id) await this.tabs.close(tab.id);
         await this.sidebarUI?.refresh();
         await this.projectNavigation?.refresh();
     }
@@ -885,12 +979,13 @@ export class SessionWorkbench implements WorkspaceController {
             report: error => this.report(error),
         });
         this.projectNavigation = new ProjectNavigation(this.projects!, () => this.sidebarUI, {
+            navigate: path => this.openResource(path),
             createSession: path => this.startSessionDraft(path), createChild: id => this.createChild(id),
             retryDeletions: async () => {
                 for (const entry of await this.repository.pendingSessionDeletions()) await this.lifecycle.deleteSession(entry.id);
                 await this.sidebarUI?.refresh(); await this.projectNavigation?.refresh();
             },
-            contentChanged: visible => { this.sidebar.classList.toggle('project-workbench--single', !visible); }, importItems: context => this.importSelection(context), exportItems: context => this.exportSelection(context),
+            contentChanged: () => {}, importItems: context => this.importSelection(context), exportItems: context => this.exportSelection(context),
             createProject: path => this.createProject(path), report: error => this.report(error),
         });
     }
@@ -928,19 +1023,20 @@ export class SessionWorkbench implements WorkspaceController {
         const hint = document.createElement('p'); hint.textContent = t('project.welcomeHint');
         panel.append(mark, title, hint);
         if (this.projects) this.actionButton(panel, t('project.create'), () => this.createProject('/'));
-        this.container.replaceChildren(panel);
+        this.tabs.content.replaceChildren(panel);
     }
     private async editorMount(folder?: string | null, sessionId?: string): Promise<HTMLElement> {
         const mount = document.createElement('div'); mount.className = 'session-editor-mount';
         const project = await this.projects?.forFolder(folder);
-        this.container.replaceChildren();
+        this.tabs.content.replaceChildren();
         if (project) {
             const context = document.createElement('div'); context.className = 'project-workbench__context';
             context.textContent = t('project.current', { name: project.name });
-            this.container.append(context);
+            this.tabs.content.append(context);
         }
-        if (sessionId && this.familyActions) this.container.append(await this.familyActions.header(await this.sessions.get(sessionId)));
-        this.container.append(mount); return mount;
+        if (sessionId) this.tabs.title(this.tabs.current!.id, (await this.sessions.get(sessionId)).title);
+        if (sessionId && this.familyActions) this.tabs.content.append(await this.familyActions.header(await this.sessions.get(sessionId)));
+        this.tabs.content.append(mount); return mount;
     }
     private async openProjectFile(_path: string, target: { folder: string; path: string }, load: ViewLoad): Promise<void> {
         if (!this.projects) throw new Error('Projects unavailable');
@@ -951,44 +1047,66 @@ export class SessionWorkbench implements WorkspaceController {
             changed: () => this.refresh(),
             host: { chatFromFile: this.hostContext?.chatFromFile
                 ? reference => this.hostContext!.chatFromFile!(reference, { projectFolder: target.folder }) : undefined,
+                openFile: (file, anchor) => this.openLinkedFile(folderBrowserPath(target.folder) + '/@files' + projectRelativePath(file), anchor),
                 toggleSidebar: () => this.sidebarUI?.toggleSidebar(),
                 navigate: request => this.hostContext?.navigate(request) ?? Promise.resolve() },
         });
-        if (!opened) { this.message(t('project.selectFile')); return; }
+        if (!opened) { await this.showDirectory(_path); return; }
         this.editor = opened.editor; this.context = opened.context; this.previewCleanup = opened.previewCleanup;
+        this.tabs.setIcon(this.tabs.current!.id, this.sidebarUI!.getResourceIcon(opened.node));
+        this.tabs.title(this.tabs.current!.id, target.path.split('/').pop() || target.path);
         if (opened.editor) this.trackProjectFileRenames(opened.context.context.fs, target.folder, target.path);
     }
 
+    private async openLinkedFile(path: string, anchor?: string): Promise<void> {
+        await this.openResource(path);
+        if (anchor) await this.editor?.navigateTo({ elementId: anchor });
+    }
+
     private trackProjectFileRenames(fs: IFileSystem, folder: string, path: string): void {
-        this.fileRenameCleanup = fs.on('node:renamed', event => {
+        const editor = this.editor, tab = this.tabs.current!;
+        const remap = (event: { payload: { nodes: { oldPath: string; newPath: string }[] } }) => {
             for (const { oldPath, newPath } of event.payload.nodes) {
                 if (path !== oldPath && !path.startsWith(oldPath + '/')) continue;
                 path = newPath + path.slice(oldPath.length);
                 const filename = path.split('/').pop()!;
-                this.editor?.updateNodeId?.(path);
-                this.editor?.setTitle?.(buildRenamedFilename(filename, filename).title);
-                this.active = folderBrowserPath(folder) + '/@files' + projectRelativePath(path);
-                if (this.visible) this.onSelect(this.active, 'replace');
+                editor?.updateNodeId?.(path);
+                editor?.setTitle?.(buildRenamedFilename(filename, filename).title);
+                const next = folderBrowserPath(folder) + '/@files' + projectRelativePath(path);
+                const selected = this.tabs.current === tab;
+                this.tabs.rename(tab.id, next, filename); if (tab.value) tab.value.active = next;
+                if (selected) { this.active = next; if (this.visible) this.onSelect(next, 'replace'); }
                 this.scheduleRefresh('file-rename');
             }
-        });
+        };
+        const stops = [fs.on('node:renamed', remap), fs.on('node:moved', remap), fs.on('node:deleted', event => {
+            if (event.payload.requestedPaths.some(deleted => path === deleted || path.startsWith(deleted + '/')))
+                void this.tabs.close(tab.id, false).catch(error => this.report(error));
+        })];
+        this.fileRenameCleanup = () => stops.forEach(stop => stop());
     }
 
     async startSessionDraft(parent?: string): Promise<void> {
         const folder = await this.creationFolder(parent);
         this.cancelViewLoad(); const load = this.viewLoads.begin();
         const work = this.tail.then(async () => {
-            await this.closeEditor(); load.check();
+            await this.leaveEditor(); load.check();
             this.container.inert = false; this.container.classList.remove('project-workbench--offline');
             await this.projectNavigation?.sync(folderBrowserPath(folder), { draft: true }); load.check();
-            const mount = await this.editorMount(folder);
             const project = await this.projects?.forFolder(folder);
             if (!project || !this.projects || !folder) throw new Error('Project required for a draft');
+            const draftId = `draft:${project.project.id}`;
+            const retained = this.tabs.get(draftId);
+            await this.tabs.open(draftId, t('project.createSession'), false);
+            this.tabs.setIcon(draftId, FILE_BROWSER_ICONS.newSession);
+            if (retained?.value) { this.restoreEditor(retained.value); this.onSelect(draftId, 'replace'); return; }
+            const mount = await this.editorMount(folder);
             const composer = await this.projects.drafts.open(project.project.id, folder);
             const draftOptions = createProjectDraftControls(composer, {
                 check: async () => { load.check(); await this.creationFolder(folderBrowserPath(folder)); },
                 open: async id => {
                     await Promise.all([this.openResource(id), this.sidebarUI?.refresh()]);
+                    await this.tabs.close(draftId, false);
                     await this.selectPath(await this.sessionPath(id));
                     if (!this.editor) throw new Error('Session editor unavailable');
                     return this.editor;
@@ -996,8 +1114,9 @@ export class SessionWorkbench implements WorkspaceController {
             });
             const editor = await this.factory(mount, { signal: load.signal, hostContext: this.hostContext, sessionDraft: draftOptions });
             try { load.check(); } catch (error) { await editor.destroy(); mount.remove(); throw error; }
-            this.editor = editor; this.editor.focus?.();
-            this.onSelect(project ? `draft:${project.project.id}` : folderBrowserPath(folder), 'replace');
+            this.editor = editor; this.active = draftId; this.editor.focus?.();
+            this.retainEditor(this.viewLoads.detach(load));
+            this.onSelect(draftId, 'replace');
         });
         this.tail = work.catch(() => {}); await work;
     }
@@ -1035,6 +1154,44 @@ export class SessionWorkbench implements WorkspaceController {
         if (open) await this.sessionSkills?.unmountByGlob(open.sessionId, open.path).catch(error => this.report(error));
     }
 
+    private clearEditorFields(): void {
+        this.editor = undefined; this.context = undefined; this.assets = undefined; this.editorLease = undefined;
+        this.previewCleanup = undefined; this.fileRenameCleanup = undefined; this.active = null; this.activeBranch = undefined;
+    }
+    private retainEditor(cancel?: () => void): void {
+        const tab = this.tabs.current; if (!tab || tab.value) return;
+        tab.value = { editor: this.editor, context: this.context, assets: this.assets, previewCleanup: this.previewCleanup,
+            renameCleanup: this.fileRenameCleanup, active: this.active, branch: this.activeBranch, cancel, skills: this.openEditorTarget };
+        this.tabs.bind(tab, this.editor);
+    }
+    private restoreEditor(value: RetainedEditor): void {
+        this.editor = value.editor; this.context = value.context; this.assets = value.assets;
+        this.previewCleanup = value.previewCleanup; this.fileRenameCleanup = value.renameCleanup;
+        this.active = value.active; this.activeBranch = value.branch;
+        this.familyActions?.activate(this.tabs.current?.panel.querySelector('.session-family__toolbar') ?? null);
+        if (value.skills) this.mountEditorSkills(value.skills.sessionId, value.skills.path);
+    }
+    private async leaveEditor(): Promise<void> {
+        if (this.tabs.current?.value) {
+            await this.editor?.flushPendingSave?.();
+            if (this.editor?.isDirty?.() && !this.editor.flushPendingSave) throw new Error(t('workbench.pending'));
+            await this.unmountEditorSkills(); this.clearEditorFields();
+        } else await this.closeEditor();
+    }
+    private async disposeTab(tab: WorkbenchTab<RetainedEditor>): Promise<void> {
+        const value = tab.value; if (!value) return;
+        await value.editor?.flushPendingSave?.();
+        if (value.editor?.isDirty?.() && !value.editor.flushPendingSave) throw new Error(t('workbench.pending'));
+        value.lease ??= new EditorLease(value.editor, async () => {
+            value.previewCleanup?.(); value.renameCleanup?.(); value.cancel?.();
+            this.familyActions?.release(tab.panel.querySelector('.session-family__toolbar'));
+            if (this.openEditorTarget && value.skills?.sessionId === this.openEditorTarget.sessionId && value.skills.path === this.openEditorTarget.path) await this.unmountEditorSkills();
+            await Promise.all([value.assets?.dispose(), value.context?.release()]);
+        });
+        await value.lease.dispose();
+        if (this.tabs.current === tab) this.clearEditorFields();
+    }
+
     private async closeEditor(): Promise<void> {
         if (!this.editorLease) {
             const editor = this.editor, assets = this.assets, context = this.context;
@@ -1059,13 +1216,14 @@ export class SessionWorkbench implements WorkspaceController {
         this.closed = true; ++this.fileNavigationRevision; this.projectNavigation?.cancelPending();
         this.sidebarUI?.cancelPendingSelection?.(); this.dialogs.abort(); this.subscriptions.dispose();
         if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = undefined; }
-        await Promise.all([this.tail, this.refreshTail]); await this.fileNavigation; await Promise.all(this.readCleanup); await this.closeEditor(); this.sidebarUI?.destroy();
+        await Promise.all([this.tail, this.refreshTail]); await this.fileNavigation; await Promise.all(this.readCleanup);
+        this.sidebarLayout.save(this.tabs.snapshot()); await this.tabs.destroy(); await this.closeEditor(); this.sidebarUI?.destroy(); this.sidebarLayout.destroy();
         if (this.projects?.remoteMounts) {
             this.container.inert = false;
             this.container.classList.remove('project-workbench--offline');
             this.container.removeAttribute('aria-disabled');
         }
-        await this.navigationFiles?.dispose(); await this.browser?.dispose(); this.container.replaceChildren();
+        await this.navigationFiles?.dispose(); await this.browser?.dispose(); this.tabs.content.replaceChildren();
     }
 }
 

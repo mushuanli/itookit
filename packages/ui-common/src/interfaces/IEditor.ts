@@ -69,6 +69,8 @@ export interface EditorFileReference {
  * 任何接管编辑器的容器（如 MemoryManager）都应提供这些能力
  */
 export interface EditorHostContext {
+    /** Open a resolved path in the editor's file namespace, optionally at a document anchor. */
+    openFile?: (path: string, anchor?: string) => Promise<void>;
     /** Prepare a new chat draft; association is supplied by the file host, never inferred by MDX. */
     chatFromFile?: (reference: EditorFileReference, association?: {
         projectFolder?: string;

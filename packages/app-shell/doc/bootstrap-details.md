@@ -30,3 +30,11 @@ AppUI.installFlowLibrary 在工作区加载前安装 llm-ui 注册的缺失 Flow
 参数确认后创建 Session 并导航到 chat；会话 manifest.flow 保存固定 revision 和参数，LLMWorkspaceEditor 首次打开空会话后自动执行。定义与 UI 边界见 [作文评审实现](../../../doc/design/essay-review-flow.md)。
 
 内置模板安装通过 `flow.draft.install` 保存独立安装记录；删除 `.flow` 后记录仍在，重启不再恢复该模板。聊天侧栏将同一 FlowEngine 挂到 `/@flows`，支持展开、打开和右键运行/删除。新增作文文件统一名为 `essay-review-isolated.flow`。
+
+## 编辑标签与侧栏布局
+
+普通 Workbench、SessionWorkbench 与工具箱连接器共用 `src/workbench/tabs.ts` 的标签机制。项目和普通文件工作区由 `src/workbench/sidebar.ts` 提供一个可调侧栏，上区导航、下区已打开；主区域的目录详情在 `src/workbench/directory-list.ts`。工具箱保留其资源导航，避免宿主覆盖连接器拥有的标签 DOM；释放连接器后再释放其文件视图。
+
+bootstrap 为普通工作区和 Session 浏览器注入 VfsUIPersistence.workbenchPort，与浏览器的 uiPersistence 分开存储。恢复的标签先展示入口，活动资源由 URL/浏览树恢复；后台标签首次选择时才装配编辑器。
+
+项目选择器替换浏览器标题行，集合当前项目、所有项目及新建项目；目录和文件保留在同一侧栏树。目录行通过 rowCreation 提供悬停新建图标，主区域列表通过 directory-selection 管理全选和批量操作，复用 vfs-ui 菜单权限与命令。已打开区用关闭/Pin 图标并提供保留固定项的批量关闭。

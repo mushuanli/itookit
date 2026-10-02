@@ -30,6 +30,12 @@ export class LatestViewLoad {
         this.controller = new AbortController();
         return new ViewLoad(this.controller.signal);
     }
+    /** A completed editor owns its signal until its tab closes. */
+    detach(load: ViewLoad): () => void {
+        if (!this.isCurrent(load)) throw new ViewLoadCancelled();
+        const owner = this.controller; this.controller = new AbortController();
+        return () => owner.abort();
+    }
     cancel(): void { this.controller.abort(); }
     isCurrent(load: ViewLoad): boolean {
         return load.signal === this.controller.signal && !load.signal.aborted;

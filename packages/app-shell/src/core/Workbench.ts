@@ -1,4 +1,3 @@
-import { decorateFileNodes } from '../browser/presentation';
 import { connectEditorLifecycle } from '../browser/editor-connector';
 import { resolveFileEditor } from '../browser/types';
 import { createVFSMentionProviders } from '../browser/mention/createVFSMentionProviders';
@@ -14,8 +13,10 @@ import type { WorkbenchConfig } from '../types';
 import { t, NavigationRequest} from '@itookit/common';
 import { EditorOptions, IEditor, EditorHostContext } from '@itookit/ui-common';
 import type { IFileSystem } from '@itookit/vfs-core';
+import { showNameDialog } from '../files/project-dialog';
 
 export class Workbench {
+    private readonly dialogs = new AbortController();
     private vfsUI: VFSUIShell;
     private engine: IFileSystem;
     private lifecycleUnsubscribe: ReturnType<typeof connectEditorLifecycle>;
@@ -29,6 +30,8 @@ export class Workbench {
 
         const scopeId = config.scopeId || this.engine.viewId;
 
+        const root = document.createElement('button'); root.type = 'button'; root.className = 'workbench-root'; root.textContent = t('project.files');
+        root.onclick = () => { void this.openDirectory('/'); };
         this.vfsUI = createVFSUI(
             {
                 ...config.uiOptions,
@@ -42,8 +45,11 @@ export class Workbench {
                     startupContent:  config.uiOptions?.fileCreation?.startupContent  ?? config.defaultContentConfig?.content,
                 },
                 fileTypes: config.fileTypes,
-                listItems: items => decorateFileNodes(config.uiOptions?.listItems?.(items) ?? items),
-                showFileExtensions: config.showFileExtensions,
+                showFileExtensions: config.showFileExtensions ?? true,
+                activateDirectories: true, autoSelectFirst: false, listHeader: root,
+                listItems: config.uiOptions?.listItems,
+                toolbarOptions: { ...config.uiOptions?.toolbarOptions, hiddenActions: ['create-file', 'create-directory', ...(config.uiOptions?.toolbarOptions?.hiddenActions ?? [])] },
+                rowCreation: { visible: () => true, run: (node, type) => this.createInDirectory(node.id, type) },
             },
             this.engine
         ) as VFSUIShell;
@@ -73,7 +79,7 @@ export class Workbench {
             {
                 resolveEditor: resolveFileEditor(config.fileTypes, config.customEditorResolver),
                 hostContext: sharedHostContext,
-                files: config.files,
+                files: config.files, sidebarContainer: config.sidebarContainer, workbenchState: config.workbenchState,
                 ...config.editorConfig
             }
         );
@@ -149,6 +155,7 @@ export class Workbench {
         }
 
         this.hasStarted = true;
+        if (!this.getActiveFilePath() && !initialResourceId) await this.openDirectory('/');
     }
 
     public async openFile(nodeId: string): Promise<void> {
@@ -192,7 +199,18 @@ export class Workbench {
         return newNode.path;
     }
 
+    private async openDirectory(path: string): Promise<void> {
+        await this.lifecycleUnsubscribe.openDirectory(path); this.config.onSessionChange?.(path);
+    }
+    private async createInDirectory(path: string, type: 'file' | 'directory'): Promise<void> {
+        await showNameDialog(t(type === 'file' ? 'project.createFile' : 'project.createFolder'), t('project.newFileName'), this.dialogs.signal, async name => {
+            if (type === 'file') await this.vfsUI.sessionService.createFile({ title: name, parentPath: path });
+            else await this.vfsUI.sessionService.createDirectory({ title: name, parentPath: path });
+            await this.vfsUI.refresh(); await this.openDirectory(path);
+        });
+    }
     private async openFileInternal(nodeId: string): Promise<void> {
+        if (nodeId === '/') { await this.openDirectory(nodeId); return; }
         await this.vfsUI.selectPath(nodeId);
     }
 
@@ -214,6 +232,7 @@ export class Workbench {
     }
 
     public async destroy(): Promise<void> {
+        this.dialogs.abort();
         await this.lifecycleUnsubscribe();
         this.vfsUI.destroy();
     }

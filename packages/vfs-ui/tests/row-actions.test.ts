@@ -220,3 +220,43 @@ it('rebuilds controls when a row becomes a fixed entry without changing read-onl
         expect(row().querySelector('[data-action="delete-init"]')).not.toBeNull();
     } finally { await f.destroy(); }
 });
+
+it('offers inline creation only on writable directories and rechecks permission before clicking', async () => {
+    const run = vi.fn(async () => {});
+    const f = await fixture({ rowCreation: { visible: () => true, run }, favoriteAction: { state: () => false, toggle: async () => {} } });
+    try {
+        const file = f.container.querySelector<HTMLButtonElement>('[data-item-id="/session-a"] [data-row-create="file"]')!;
+        expect(file.querySelector('svg')).not.toBeNull();
+        const row = f.container.querySelector('[data-item-id="/session-a"] > .vfs-node-item__main-row')!;
+        const controls = row.querySelector('.vfs-node-item__creation')!;
+        expect(controls.nextElementSibling?.getAttribute('data-action')).toBe('favorite-toggle');
+        expect([...controls.querySelectorAll<HTMLElement>('[data-row-create]')].map(button => button.dataset.rowCreate)).toEqual(['file', 'directory']);
+        expect(f.container.querySelector('[data-item-id="/session-a"] [data-row-create="directory"] svg')).not.toBeNull();
+        expect(f.container.querySelector('[data-item-id="/notes.md"] [data-row-create]')).toBeNull();
+        file.click(); await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
+        expect(run).toHaveBeenCalledWith(expect.objectContaining({ id: '/session-a' }), 'file');
+        await f.fs.driver.updateMetadata('/session-a', { _readOnly: true }); await f.ui.refresh();
+        expect(f.container.querySelector('[data-item-id="/session-a"] [data-row-create]')).toBeNull();
+        expect(f.container.querySelector('[data-item-id="/session-b"] [data-row-create="file"]')).not.toBeNull();
+    } finally { await f.destroy(); }
+});
+
+it('retains selection context and import permissions when transfer controls mount in a host header', async () => {
+    const toolbarContainer = document.createElement('div'); document.body.append(toolbarContainer);
+    const importItems = vi.fn(async () => {}), exportItems = vi.fn(async () => {});
+    const f = await fixture({ toolbar: 'full', toolbarContainer, toolbarOptions: {
+        hiddenActions: ['create-file', 'create-directory'], actions: { import: importItems, export: exportItems },
+    } });
+    try {
+        f.ui.setSelection(['/session-a']);
+        const importButton = toolbarContainer.querySelector<HTMLButtonElement>('[data-action="import"]')!;
+        const exportButton = toolbarContainer.querySelector<HTMLButtonElement>('[data-action="export"]')!;
+        expect(f.container.querySelector('.vfs-node-list__header [data-action="import"]')).toBeNull();
+        importButton.click(); await vi.waitFor(() => expect(importItems).toHaveBeenCalledOnce());
+        expect(importItems).toHaveBeenCalledWith({ selectedIds: ['/session-a'], activeId: null, parentPath: '/session-a' });
+        exportButton.click(); await vi.waitFor(() => expect(exportItems).toHaveBeenCalledOnce());
+        expect(exportItems).toHaveBeenCalledWith({ selectedIds: ['/session-a'], activeId: null, parentPath: '/session-a' });
+        await f.fs.driver.updateMetadata('/session-a', { _readOnly: true }); await f.ui.refresh();
+        expect(importButton.disabled).toBe(true); expect(exportButton.disabled).toBe(false);
+    } finally { await f.destroy(); toolbarContainer.remove(); }
+});

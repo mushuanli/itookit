@@ -1,4 +1,5 @@
 import { DirectoryActions } from './DirectoryActions';
+import { renderInlineCreation } from './InlineCreation';
 import { createRowMutationPort } from './handlers/RowMutationPort';
 import { resolveRowPolicy, type RowPolicy } from '../../../utils/row-policy';
 import type { DirectoryAction, VFSRowActionOptions } from '../../../contracts/options';
@@ -30,6 +31,8 @@ import { TagEditorComponent } from '../TagEditor/TagEditorComponent';
 interface NodeListOptions extends BaseComponentDeps, VFSRowActionOptions {
   listItems?: (items: VFSNodeUI[]) => VFSNodeUI[];
   listHeader?: HTMLElement;
+  titleHeader?: HTMLElement;
+  toolbarContainer?: HTMLElement;
   rootPath?: () => string | null;
   cardDirectory?: (node: VFSNodeUI) => boolean;
   directoryPreview?: (node: VFSNodeUI) => number | undefined;
@@ -58,6 +61,7 @@ interface NodeListOptions extends BaseComponentDeps, VFSRowActionOptions {
 const CREATION_ACTIONS = new Set(['create-file', 'create-directory', 'import']);
 
 export class NodeList extends BaseComponent<NodeListState> {
+  private readonly rowCreation?: VFSRowActionOptions['rowCreation'];
   private readonly actions: ActionRunner;
   private readonly stateTransformer: NodeListStateTransformer;
   private readonly selectionHandler: SelectionHandler;
@@ -90,6 +94,7 @@ export class NodeList extends BaseComponent<NodeListState> {
   constructor(options: NodeListOptions) {
     super(options);
     this.actions = new ActionRunner(options.onError);
+    this.rowCreation = options.rowCreation;
     this.favoriteAction = options.favoriteAction;
     this.listItems = options.listItems;
     this.fileCreation = options.fileCreation; this.toolbarOptions = options.toolbarOptions ?? {}; this.cardDirectory = options.cardDirectory;
@@ -113,11 +118,13 @@ export class NodeList extends BaseComponent<NodeListState> {
     this.searchEl = this.container.querySelector('.vfs-node-list__search')!;
     this.mainContainerEl = this.container.querySelector('.vfs-node-list')!;
     this.titleEl = this.container.querySelector('[data-ref="title"]')!;
+    if (options.titleHeader) this.container.querySelector('.vfs-node-list__title-bar')!.replaceChildren(options.titleHeader);
     this.newControlsEl = this.container.querySelector('[data-ref="new-controls"]')!;
     this.footerEl = this.container.querySelector('.vfs-node-list__footer')!;
     if (options.toolbar === 'compact') this.installCompactToolbar();
     this.setToolbarOptions(this.toolbarOptions);
     if (options.listHeader) this.newControlsEl.after(options.listHeader);
+    options.toolbarContainer?.append(this.newControlsEl);
 
     this.selectionHandler = new SelectionHandler(this.commandBus);
 
@@ -479,6 +486,14 @@ export class NodeList extends BaseComponent<NodeListState> {
     }
   };
 
+  /** Hosts reuse row policy and menu dispatch from a directory details view. */
+  showItemMenu(event: MouseEvent, itemId: string): void {
+    const row = document.createElement('div'); row.dataset.itemId = itemId;
+    this.contextMenuHandler.show(event, row);
+  }
+  allowsBulkAction(action: 'delete' | 'move'): boolean { return this.contextMenuHandler.allows(`bulk-${action}`); }
+  runBulkAction(action: 'delete' | 'move'): Promise<void> { return this.contextMenuHandler.run(`bulk-${action}`); }
+
   private findItemById(itemId: string): VFSNodeUI | null {
     const find = (items: VFSNodeUI[], id: string): VFSNodeUI | null => {
       for (const item of items) {
@@ -490,7 +505,7 @@ export class NodeList extends BaseComponent<NodeListState> {
       }
       return null;
     };
-    return find(this.state.items, itemId);
+    return find(this.state.items, itemId) ?? find(this.store.getState().items, itemId);
   }
 
   private commitItemCreation(inputElement: HTMLInputElement): void {
@@ -568,6 +583,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     }
 
     this.directoryActions?.render();
+    if (this.rowCreation) renderInlineCreation(this.bodyEl, this.rowCreation, id => this.findItemById(id), () => this.state.readOnly, this.actions);
     const creatorInput = this.bodyEl.querySelector<HTMLInputElement>(
       '.vfs-node-list__item-creator-input'
     );

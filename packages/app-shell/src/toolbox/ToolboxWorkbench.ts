@@ -63,7 +63,7 @@ export class ToolboxWorkbench implements WorkspaceController {
     private readonly prefs: ToolboxPreferences;
     private readonly filters = document.createElement('div');
     private descriptions = new Map<string, { name: string; description?: string }>();
-    private cleanups: Array<() => void> = [];
+    private cleanups: Array<() => void | Promise<void>> = [];
     private readonly loadedDirectories = TOOLBOX_KINDS.map(kind => '/' + kind);
     private closed = false;
     private timer?: ReturnType<typeof setTimeout>;
@@ -90,7 +90,6 @@ export class ToolboxWorkbench implements WorkspaceController {
             contextMenu: { items: (item, defaults) => this.menu(item, defaults), bulkItems: (items, defaults) => this.bulkMenu(items, defaults) },
         }, this.view);
         this.connectSources();
-        this.options.editor.innerHTML = `<div class="mm-placeholder">${t('toolbox.empty')}</div>`;
         await this.ui.start(); this.setFilter(this.prefs.filter, false);
     }
     private connectSources(): void {
@@ -98,7 +97,7 @@ export class ToolboxWorkbench implements WorkspaceController {
         this.deletion = new ConfigurationDeletionDialog(this.options.configuration, () => this.refresh(), this.options.ocr?.deletionImpact);
         this.selectionDeletion = new ToolboxDeletion({ resources, inventory: this.options.inventory, view: this.view, deletion: this.deletion,
             completed: async () => { if (!this.closed) { this.ui.setSelection([]); await this.refresh(); } } });
-        this.cleanups.push(connectEditorLifecycle(this.ui, this.view, editor, undefined, { files: { fs: this.view, cwd: '/' }, resolveEditor: node => this.factory(toolboxKind(node.id)!),
+        this.cleanups.push(connectEditorLifecycle(this.ui, this.view, editor, undefined, { emptyMessage: t('toolbox.empty'), files: { fs: this.view, cwd: '/' }, resolveEditor: node => this.factory(toolboxKind(node.id)!),
             hostContext: { navigate: this.options.navigate } }));
         this.cleanups.push(this.ui.on('sessionSelected', ({ item }) => this.selected(item?.id ?? null)));
         this.cleanups.push(resources.subscribe(() => this.scheduleRefresh()));
@@ -335,7 +334,7 @@ export class ToolboxWorkbench implements WorkspaceController {
     async destroy(): Promise<void> {
         this.closed = true; clearTimeout(this.timer); this.abort.abort();
         this.prefs.queries[this.prefs.filter] = this.ui?.getSnapshot().query ?? ''; this.persist();
-        for (const close of this.cleanups.reverse()) close();
+        for (const close of this.cleanups.reverse()) await close();
         await this.refreshTail; this.ui?.destroy(); await this.view?.dispose();
         this.options.sidebar.classList.remove('toolbox-navigation');
     }
