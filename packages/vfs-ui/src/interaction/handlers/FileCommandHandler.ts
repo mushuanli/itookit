@@ -7,7 +7,7 @@ import { createMoveOperation } from '../movement';
 import type { FileCreationConfig } from '../../contracts/options';
 import type { CommandBus } from '../CommandBus';
 import type { IStatePort, IDataOperationPort } from '../../contracts/ports';
-import { buildRenamedFilename } from '@itookit/common';
+import { buildRenamedFilename } from '../../utils/local';
 import { findNodeById } from '../../utils/helpers';
 import { resolveWritableParent } from '../../utils/creation-guard';
 import { describeCauseChain } from '../../utils/error-detail';

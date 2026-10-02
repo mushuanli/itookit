@@ -1,11 +1,11 @@
-import { t } from '@itookit/common';
+import { defaultPresentation, type VFSPresentation } from '../../../contracts/presentation';
 import type { VFSNodeUI } from '../../../contracts/types';
 import type { NodeListState } from './NodeListState';
 
 /** A display limit never changes the source tree or selection/export scope. */
 export class DirectoryPreview {
     private readonly expanded = new Set<string>();
-    constructor(private readonly limit?: (directory: VFSNodeUI) => number | undefined) {}
+    constructor(private readonly limit?: (directory: VFSNodeUI) => number | undefined, private readonly ui: VFSPresentation = defaultPresentation) {}
     project(directory: VFSNodeUI, state: NodeListState) {
         const children = directory.children ?? [], limit = this.limit?.(directory);
         if (state.searchQuery || limit === undefined || !Number.isFinite(limit) || limit < 1 || children.length <= limit) return { children };
@@ -24,7 +24,7 @@ export class DirectoryPreview {
         const button = document.createElement('button'); button.type = 'button';
         button.className = 'vfs-directory-item__preview-toggle'; button.dataset.previewId = id;
         button.setAttribute('aria-expanded', String(expanded));
-        button.textContent = expanded ? t('vfs.preview.collapse') : t('vfs.preview.more', { count: hidden });
+        button.textContent = expanded ? this.ui.t('vfs.preview.collapse') : this.ui.t('vfs.preview.more', { count: hidden });
         button.onclick = event => { event.stopPropagation(); expanded ? this.expanded.delete(id) : this.expanded.add(id); render(); };
         return button;
     }

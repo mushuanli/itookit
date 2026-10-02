@@ -1,17 +1,19 @@
+import { defaultPresentation } from '../../../contracts/presentation';
+import { FILE_BROWSER_ICONS } from '../../../utils/icons';
 /**
  * @file vfs-ui/ui/components/NodeList/templates.ts
  * @desc HTML templates for popovers, inputs, footers, and settings.
  */
-import { escapeHTML } from '@itookit/common';
+import { escapeHTML } from '../../../utils/local';
 import type { UISettings, MenuItem } from '../../../contracts/types';
 
 export const createItemInputHTML = (creating: {
   type: 'file' | 'directory';
-}): string => {
+}, ui = defaultPresentation): string => {
   const isDir = creating.type === 'directory';
   return `
     <div class="vfs-node-list__item-creator" data-type="${creating.type}">
-      <span class="vfs-node-list__item-creator-icon">${isDir ? '📁' : '📄'}</span>
+      <span class="vfs-node-list__item-creator-icon">${ui.fileIcon('', isDir)}</span>
       <input type="text" class="vfs-node-list__item-creator-input" placeholder="${isDir ? '目录名 或 路径/目录名...' : '文件名 或 路径/文件名...'}" data-action="create-input" />
     </div>`;
 };
@@ -49,8 +51,8 @@ export const createFooterHTML = ({
         <button data-action="deselect-all" class="vfs-node-list__bulk-bar-btn--text" title="全部取消">取消</button>
       </div>
       <div class="vfs-node-list__bulk-bar-actions">
-        <button class="vfs-node-list__bulk-bar-btn" data-action="bulk-move" title="移动..."><i class="fas fa-share-square"></i></button>
-        <button class="vfs-node-list__bulk-bar-btn vfs-node-list__bulk-bar-btn--danger" data-action="bulk-delete" title="删除"><i class="fas fa-trash"></i></button>
+        <button class="vfs-node-list__bulk-bar-btn" data-action="bulk-move" title="移动...">${FILE_BROWSER_ICONS.move}</button>
+        <button class="vfs-node-list__bulk-bar-btn vfs-node-list__bulk-bar-btn--danger" data-action="bulk-delete" title="删除">${FILE_BROWSER_ICONS.delete}</button>
       </div>
     </div>`;
 };

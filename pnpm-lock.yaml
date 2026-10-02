@@ -1106,18 +1106,9 @@ importers:
 
   packages/vfs-ui:
     dependencies:
-      '@itookit/common':
-        specifier: workspace:*
-        version: link:../common
-      '@itookit/ui-common':
-        specifier: workspace:*
-        version: link:../ui-common
       '@itookit/vfs-core':
         specifier: workspace:*
         version: link:../vfs-core
-      immer:
-        specifier: ^10.2.0
-        version: 10.2.0
     devDependencies:
       '@types/node':
         specifier: ^20.19.25

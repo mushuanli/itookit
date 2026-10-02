@@ -1,4 +1,4 @@
-import { fileTypeIcon } from '@itookit/common';
+import { fileTypeIcon } from '../utils/local';
 /**
  * @file vfs-ui/services/FileTypeRegistry.ts
  * @desc Centralized file type registry implementing IFileTypePort.
@@ -20,6 +20,8 @@ export type IconResolver = (filename: string, isDirectory: boolean) => string;
 export type ContentParserResolver = (filename: string) => ContentParser | undefined;
 
 export class FileTypeRegistry implements IFileTypePort {
+  constructor(private readonly defaultIcon: IconResolver = fileTypeIcon) {}
+
   private extensionMap = new Map<string, FileTypeDefinition>();
 
   register(def: FileTypeDefinition): void {
@@ -29,7 +31,7 @@ export class FileTypeRegistry implements IFileTypePort {
   }
 
   getIcon(filename: string, isDirectory = false): string {
-    return (!isDirectory && this.extensionMap.get(getExtension(filename))?.icon) || fileTypeIcon(filename, isDirectory);
+    return (!isDirectory && this.extensionMap.get(getExtension(filename))?.icon) || this.defaultIcon(filename, isDirectory);
   }
 
   resolveContentParser(filename: string): ContentParser | undefined {

@@ -14,7 +14,7 @@ import { toolbarHTML, type VFSToolbarOptions, type VFSToolbarAction } from './to
 import { BaseComponent, BaseComponentDeps } from '../../core/BaseComponent';
 import type { FavoriteAction, VFSNodeUI, VFSUIState, SearchFilter } from '../../../contracts/types';
 import type { FileCreationConfig } from '../../../contracts/options';
-import { debounce, escapeHTML, t } from '@itookit/common';
+import { debounce, escapeHTML } from '../../../utils/local';
 
 import { NodeListStateTransformer, NodeListState } from './NodeListState';
 import { SelectionHandler } from './handlers/SelectionHandler';
@@ -174,7 +174,7 @@ export class NodeList extends BaseComponent<NodeListState> {
       this.fileCreation?.label ?? 'File',
       options.engine?.capabilities.tags !== false,
       this.actions,
-      options.favoriteAction,
+      options.favoriteAction, this.ui,
     );
 
     this.settingsPopover = new SettingsPopover(this.commandBus, this.mainContainerEl, !!options.sort);
@@ -192,7 +192,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         this.settingsPopover.toggle(this.state.uiSettings),
     });
 
-    this.renderer = new NodeListRenderer({ selectionHandler: this.selectionHandler, leafDirectory: options.leafDirectory,
+    this.renderer = new NodeListRenderer({ presentation: this.ui, selectionHandler: this.selectionHandler, leafDirectory: options.leafDirectory,
       cardDirectory: options.cardDirectory, directoryPreview: options.directoryPreview, favoriteAction: options.favoriteAction });
 
     if (options.title) this.setTitle(options.title);
@@ -222,7 +222,7 @@ export class NodeList extends BaseComponent<NodeListState> {
   private installCompactToolbar(): void {
     const menu = document.createElement('details'); menu.className = 'vfs-node-list__menu';
     const summary = document.createElement('summary'); summary.textContent = '⋯';
-    summary.setAttribute('aria-label', t('vfs.columns.more')); summary.title = t('vfs.columns.more');
+    summary.setAttribute('aria-label', this.ui.t('vfs.columns.more')); summary.title = this.ui.t('vfs.columns.more');
     menu.append(summary, this.newControlsEl);
     this.container.querySelector('.vfs-node-list__title-bar')!.append(menu);
     for (const button of this.newControlsEl.querySelectorAll<HTMLButtonElement>('button')) button.textContent = button.title;
@@ -234,7 +234,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     this.toolbarOptions = options;
     this.newControlsEl.classList.toggle('vfs-node-list__new-controls--single-create', !!options.hiddenActions?.includes('create-directory'));
     this.newControlsEl.classList.toggle('vfs-node-list__new-controls--transfer-only', !!options.hiddenActions?.includes('create-file') && !!options.hiddenActions?.includes('create-directory'));
-    this.newControlsEl.innerHTML = toolbarHTML(options, this.fileCreation?.label ?? t('vfs.toolbar.file'));
+    this.newControlsEl.innerHTML = toolbarHTML(options, this.fileCreation?.label ?? this.ui.t('vfs.toolbar.file'), this.ui);
     this.syncCreationControls();
     this.container.querySelector('.vfs-node-list__secondary-action')?.remove();
     if (options.secondary) {
@@ -327,7 +327,7 @@ export class NodeList extends BaseComponent<NodeListState> {
       if (selectedFileIds.length) {
         this.commandBus.execute('file:export', { itemIds: selectedFileIds });
       } else {
-        alert(t('vfs.toolbar.selectExport'));
+        alert(this.ui.t('vfs.toolbar.selectExport'));
       }
     } else if (action === 'create-file' || action === 'create-directory') {
       const type = action.split('-')[1] as 'file' | 'directory';
@@ -529,7 +529,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         <div class="vfs-node-list__header">
           <input type="search" class="vfs-node-list__search" placeholder="${escapeHTML(searchPlaceholder)}" />
           <div class="vfs-node-list__new-controls" data-ref="new-controls">
-            ${toolbarHTML(this.toolbarOptions, this.fileCreation?.label ?? t('vfs.toolbar.file'))}
+            ${toolbarHTML(this.toolbarOptions, this.fileCreation?.label ?? this.ui.t('vfs.toolbar.file'), this.ui)}
           </div>
         </div>
         <div class="vfs-node-list__body"></div>
@@ -583,7 +583,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     }
 
     this.directoryActions?.render();
-    if (this.rowCreation) renderInlineCreation(this.bodyEl, this.rowCreation, id => this.findItemById(id), () => this.state.readOnly, this.actions);
+    if (this.rowCreation) renderInlineCreation(this.bodyEl, this.rowCreation, id => this.findItemById(id), () => this.state.readOnly, this.actions, this.ui);
     const creatorInput = this.bodyEl.querySelector<HTMLInputElement>(
       '.vfs-node-list__item-creator-input'
     );

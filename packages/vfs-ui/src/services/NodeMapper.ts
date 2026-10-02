@@ -1,4 +1,4 @@
-import { fileTypeIcon } from '@itookit/common';
+import { fileTypeIcon } from '../utils/local';
 /**
  * @file vfs-ui/services/NodeMapper.ts
  * @desc Maps FSNode → VFSNodeUI. Pure functions, no side effects.

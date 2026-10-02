@@ -1,3 +1,4 @@
+import { t, traceBoot, fileTypeIcon, type LocaleKey } from '@itookit/common';
 import type { IFileSystem } from '@itookit/vfs-core';
 import type { EditorFactory, EditorOptions } from '@itookit/ui-common';
 /**
@@ -93,6 +94,7 @@ export class SystemFSExploreEditor extends BaseSettingsEditor<SettingsService> {
                 // A read-only inspection surface: remember nothing between visits.
                 persistence: false,
                 sessionListContainer: sidebarEl,
+                presentation: { translate: (key, params) => t(key as LocaleKey, params), trace: traceBoot, fileIcon: fileTypeIcon },
             },
             engine,
         ) as VFSUIShell;

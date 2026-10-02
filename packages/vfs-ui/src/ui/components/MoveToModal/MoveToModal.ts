@@ -1,3 +1,4 @@
+import { FILE_ICONS } from '../../../utils/icons';
 /**
  * @file vfs-ui/ui/components/MoveToModal/MoveToModal.ts
  * @desc Modal for moving items to a target folder.
@@ -110,7 +111,7 @@ export class MoveToModal extends BaseComponent<MoveToModalState> {
         <div class="vfs-move-modal__folder-wrapper">
           <div class="vfs-move-modal__folder" style="--level:${level};" data-folder-id="${f.id}">
             ${toggleIcon}
-            <span class="vfs-move-modal__folder-icon">📁</span>
+            <span class="vfs-move-modal__folder-icon">${FILE_ICONS.folder}</span>
             <span class="vfs-move-modal__folder-title ${f.id === this.selectedTargetId ? 'is-selected' : ''}">${f.metadata.title}</span>
           </div>
           ${childrenHTML}

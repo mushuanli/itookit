@@ -1,4 +1,5 @@
-import { escapeHTML, t, VFS_TOOLBAR_ICONS } from '@itookit/common';
+import { defaultPresentation, type VFSPresentation } from '../../../contracts/presentation';
+import { escapeHTML } from '../../../utils/local';
 
 export type VFSToolbarAction = string;
 export interface VFSToolbarContext { selectedIds: string[]; activeId: string | null; parentPath: string | null }
@@ -13,15 +14,15 @@ export interface VFSToolbarOptions {
     secondary?: { label: string; run(): void };
 }
 
-export function toolbarHTML(options: VFSToolbarOptions, fileLabel: string): string {
+export function toolbarHTML(options: VFSToolbarOptions, fileLabel: string, ui: VFSPresentation = defaultPresentation): string {
     if (options.items) return options.items.map(item => `<button type="button" class="vfs-node-list__new-btn" data-action="${escapeHTML(item.id)}" ${item.disabled ? 'disabled' : ''}>${escapeHTML(item.label)}</button>`).join('');
-    const labels: Record<string, string> = { 'create-file': options.fileLabel ?? fileLabel, 'create-directory': options.directoryLabel ?? t('vfs.toolbar.directory'),
-        import: t('vfs.toolbar.import'), export: t('vfs.toolbar.export') };
+    const labels: Record<string, string> = { 'create-file': options.fileLabel ?? fileLabel, 'create-directory': options.directoryLabel ?? ui.t('vfs.toolbar.directory'),
+        import: ui.t('vfs.toolbar.import'), export: ui.t('vfs.toolbar.export') };
     const order: VFSToolbarAction[] = options.directoryFirst
         ? ['create-directory', 'create-file', 'import', 'export'] : ['create-file', 'create-directory', 'import', 'export'];
     return order.filter(action => !options.hiddenActions?.includes(action)).map(action => {
         const create = action.startsWith('create-'), label = labels[action];
-        const title = create ? t('vfs.toolbar.create', { name: label }) : label;
-        return `<button type="button" class="vfs-node-list__new-btn ${create ? '' : 'vfs-node-list__new-btn--icon'}" data-action="${action}" title="${escapeHTML(title)}" aria-label="${escapeHTML(title)}">${create ? '<span aria-hidden="true">+</span>' : VFS_TOOLBAR_ICONS[action as 'import' | 'export']}<span class="vfs-node-list__button-label">${escapeHTML(label)}</span></button>`;
+        const title = create ? ui.t('vfs.toolbar.create', { name: label }) : label;
+        return `<button type="button" class="vfs-node-list__new-btn ${create ? '' : 'vfs-node-list__new-btn--icon'}" data-action="${action}" title="${escapeHTML(title)}" aria-label="${escapeHTML(title)}">${create ? '<span aria-hidden="true">+</span>' : ui.icon(action as 'import' | 'export')}<span class="vfs-node-list__button-label">${escapeHTML(label)}</span></button>`;
     }).join('');
 }

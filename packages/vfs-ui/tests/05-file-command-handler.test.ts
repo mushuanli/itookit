@@ -28,7 +28,7 @@ import {
     createdPayload,
     deletedPayload,
 } from './helpers/fixtures';
-import type { EngineEvent, EngineEventType } from '@itookit/common';
+import type { FSEvent as EngineEvent, FSEventType as EngineEventType } from '@itookit/vfs-core';
 
 // ── A. FileCommandHandler — command → service wiring ─────────────────────────
 

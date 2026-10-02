@@ -1,3 +1,4 @@
+import type { VFSPresentationOptions } from '../contracts/presentation';
 import type { BrowserNode, BrowserSource } from '../contracts/source';
 import type { VFSListSort, VFSNodeUI } from '../contracts/types';
 import { VFSUIShell } from '../shell/VFSUIShell';
@@ -7,6 +8,7 @@ export interface BrowserOptions {
   container: HTMLElement;
   source: BrowserSource;
   title?: string;
+  presentation?: VFSPresentationOptions;
   sort?: VFSListSort;
   actions?: readonly BrowserAction[];
   onActivate?(node: BrowserNode): void;
@@ -26,7 +28,7 @@ export class VFSBrowser {
   private readonly cleanups: Array<() => void> = [];
   constructor(private readonly options: BrowserOptions) {
     this.shell = new VFSUIShell({ sessionListContainer: options.container, source: options.source,
-      title: options.title, sort: options.sort, autoSelectFirst: false, persistence: false, onError: options.onError,
+      title: options.title, presentation: options.presentation, sort: options.sort, autoSelectFirst: false, persistence: false, onError: options.onError,
       cardDirectory: node => node.metadata.custom.browserPresentation === 'drawer',
       contextMenu: { items: item => this.menu('menu', item), bulkItems: () => this.menu('selection') },
     });

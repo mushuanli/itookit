@@ -1,3 +1,4 @@
+import { defaultPresentation, type VFSPresentation } from '../../../contracts/presentation';
 /**
  * @file vfs-ui/ui/components/NodeList/NodeListRenderer.ts
  * @desc Handles rendering of node items in the list.
@@ -20,6 +21,7 @@ export interface RenderContext {
 }
 
 export interface NodeListRendererOptions {
+  presentation?: VFSPresentation;
   selectionHandler: SelectionHandler;
   leafDirectory?: (node: VFSNodeUI) => boolean;
   cardDirectory?: (node: VFSNodeUI) => boolean;
@@ -29,6 +31,7 @@ export interface NodeListRendererOptions {
 }
 
 export class NodeListRenderer {
+  private readonly ui: VFSPresentation;
   private itemInstances: Map<string, BaseNodeItem> = new Map();
   private readonly preview: DirectoryPreview;
   private readonly selectionHandler: SelectionHandler;
@@ -38,11 +41,12 @@ export class NodeListRenderer {
   private rerender?: (focusId: string) => void;
 
   constructor(options: NodeListRendererOptions) {
+    this.ui = options.presentation ?? defaultPresentation;
     this.selectionHandler = options.selectionHandler;
     this.leafDirectory = options.leafDirectory;
     this.cardDirectory = options.cardDirectory;
     this.favoriteAction = options.favoriteAction;
-    this.preview = new DirectoryPreview(options.directoryPreview);
+    this.preview = new DirectoryPreview(options.directoryPreview, this.ui);
   }
 
   renderItems(
@@ -92,7 +96,7 @@ export class NodeListRenderer {
   ): void {
     if (!state.readOnly && state.creatingItem?.parentPath === currentParentId) {
       const creatorDiv = document.createElement('div');
-      creatorDiv.innerHTML = createItemInputHTML(state.creatingItem);
+      creatorDiv.innerHTML = createItemInputHTML(state.creatingItem, this.ui);
       parentEl.appendChild(creatorDiv.firstElementChild!);
     }
 
@@ -182,6 +186,7 @@ export class NodeListRenderer {
       isOutlineExpanded: state.expandedOutlineIds.has(item.id),
       searchQueries: state.textSearchQueries,
       uiSettings: state.uiSettings,
+      presentation: this.ui,
       isConfirmingDelete: confirmDeleteId === item.id,
       favorite: this.favoriteAction?.state(item),
     };
@@ -193,6 +198,7 @@ export class NodeListRenderer {
     confirmDeleteId: string | null
   ): DirectoryItemProps {
     return {
+      presentation: this.ui,
       isConfirmingDelete: confirmDeleteId === item.id,
       favorite: this.favoriteAction?.state(item),
       isLeaf: this.leafDirectory?.(item),

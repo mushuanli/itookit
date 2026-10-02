@@ -1,3 +1,4 @@
+import { createPresentation } from '../contracts/presentation';
 import { SourceAdapter } from '../browser/SourceAdapter';
 // shell/Assembler.ts
 /**
@@ -88,6 +89,7 @@ export function assemble(
     options: VFSUIShellOptions,
     engine?: IFileSystem
 ): AssembledParts {
+    const presentation = createPresentation(options.presentation);
     // --- Services ---
     const scopeId = options.scopeId || engine?.viewId || 'default';
     const persistence = resolvePersistence(options.persistence, scopeId);
@@ -114,16 +116,17 @@ export function assemble(
     });
     store.setIndependentExpansion(options.columns?.navigationCard);
 
-    const registry = new FileTypeRegistry();
+    const registry = new FileTypeRegistry(presentation.fileIcon);
     options.fileTypes?.forEach(def => registry.register(def));
 
     const service = engine && new VFSService({
         engine,
+        presentation,
         defaultExtension: options.defaultExtension,
         newFileContent: options.fileCreation?.content,
     });
 
-    const engineAdapter = options.source ? new SourceAdapter(options.source, store, options.onError) : new EngineAdapter(engine!, store, registry, options.showFileExtensions ?? false, options.alwaysLoadedDirectories, options.hideGitignored ?? true);
+    const engineAdapter = options.source ? new SourceAdapter(options.source, store, options.onError, presentation.fileIcon) : new EngineAdapter(engine!, store, registry, options.showFileExtensions ?? false, options.alwaysLoadedDirectories, options.hideGitignored ?? true);
 
     // Wire auto-expand: when a file is created inside an unexpanded directory,
     // trigger a full load so all siblings are visible (not just the new file).

@@ -1,3 +1,5 @@
+import { FILE_BROWSER_ICONS, FILE_ICONS } from '../../../../utils/icons';
+import { defaultPresentation, type VFSPresentation } from '../../../../contracts/presentation';
 import { ActionRunner } from '../../../../interaction/ActionRunner';
 /**
  * @file vfs-ui/ui/components/NodeList/handlers/ContextMenuHandler.ts
@@ -14,7 +16,7 @@ import type {
     MenuItem,
 } from '../../../../contracts/types';
 import { createContextMenuHTML } from '../templates';
-import { escapeHTML, ACTION_ICONS, t } from '@itookit/common';
+import { escapeHTML } from '../../../../utils/local';
 import { resolveRowPolicy, allowsRowAction } from '../../../../utils/row-policy';
 
 export interface ContextMenuCallbacks {
@@ -40,6 +42,7 @@ export class ContextMenuHandler {
     private readonly tagsEnabled: boolean = true,
     private readonly runner: ActionRunner = new ActionRunner(),
     private readonly favoriteAction?: FavoriteAction,
+    private readonly ui: VFSPresentation = defaultPresentation,
   ) {}
 
   show(event: MouseEvent, itemEl: HTMLElement): void {
@@ -272,12 +275,12 @@ export class ContextMenuHandler {
         {
           id: 'create-in-folder-session',
           label: `新建 ${escapeHTML(label)}`,
-          iconHTML: '<i class="fas fa-file-alt"></i>',
+          iconHTML: this.ui.icon('addFile'),
         },
         {
           id: 'create-in-folder-folder',
           label: '新建目录',
-          iconHTML: '<i class="fas fa-folder-plus"></i>',
+          iconHTML: this.ui.icon('addFolder'),
         },
         { type: 'separator' }
       );
@@ -287,12 +290,12 @@ export class ContextMenuHandler {
       items.push({
         id: 'duplicate',
         label: '复制',
-        iconHTML: '<i class="fas fa-copy"></i>',
+        iconHTML: FILE_ICONS.document,
       });
       items.push({
         id: 'export',
         label: '导出',
-        iconHTML: '<i class="fas fa-download"></i>',
+        iconHTML: this.ui.icon('export'),
       });
     }
 
@@ -300,23 +303,23 @@ export class ContextMenuHandler {
       {
         id: 'rename',
         label: '重命名',
-        iconHTML: '<i class="fas fa-pencil-alt"></i>',
+        iconHTML: FILE_ICONS.code,
       },
       {
         id: 'edit-tags',
         label: '编辑标签...',
-        iconHTML: '<i class="fas fa-tags"></i>',
+        iconHTML: FILE_ICONS.config,
       },
       {
         id: 'moveTo',
         label: '移动到...',
-        iconHTML: '<i class="fas fa-share-square"></i>',
+        iconHTML: FILE_BROWSER_ICONS.move,
       },
       { type: 'separator' },
       {
         id: 'delete',
         label: '删除',
-        iconHTML: '<i class="fas fa-trash-alt"></i>',
+        iconHTML: this.ui.icon('delete'),
       }
     );
 
@@ -332,8 +335,8 @@ export class ContextMenuHandler {
   private appendFavorite(items: MenuItem[], item: VFSNodeUI): void {
     const action = this.favoriteAction, active = action?.state(item);
     if (!action || active === undefined) return;
-    items.push({ id: 'favorite-toggle', label: t(active ? 'vfs.favorites.remove' : 'vfs.favorites.add'),
-      iconHTML: ACTION_ICONS.favorite, onClick: () => action.toggle(item) });
+    items.push({ id: 'favorite-toggle', label: this.ui.t(active ? 'vfs.favorites.remove' : 'vfs.favorites.add'),
+      iconHTML: this.ui.icon('favorite'), onClick: () => action.toggle(item) });
   }
 
   private getBulkContextMenuItems(count: number): MenuItem[] {
@@ -341,23 +344,23 @@ export class ContextMenuHandler {
       {
         id: 'bulk-export',
         label: `导出 ${count} 个项目`,
-        iconHTML: '<i class="fas fa-download"></i>',
+        iconHTML: this.ui.icon('export'),
       },
       {
         id: 'bulk-edit-tags',
         label: `编辑 ${count} 个项目的标签...`,
-        iconHTML: '<i class="fas fa-tags"></i>',
+        iconHTML: FILE_ICONS.config,
       },
       {
         id: 'bulk-move',
         label: `移动 ${count} 个项目...`,
-        iconHTML: '<i class="fas fa-share-square"></i>',
+        iconHTML: FILE_BROWSER_ICONS.move,
       },
       { type: 'separator' },
       {
         id: 'bulk-delete',
         label: `删除 ${count} 个项目`,
-        iconHTML: '<i class="fas fa-trash-alt"></i>',
+        iconHTML: this.ui.icon('delete'),
       },
     ];
   }

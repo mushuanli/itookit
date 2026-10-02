@@ -1,10 +1,10 @@
-import { ACTION_ICONS, FILE_ICONS, fileTypeIcon } from '@itookit/common';
+import { defaultPresentation, type VFSPresentation } from '../../../../contracts/presentation';
 import { formatFileSize } from '../../../../utils/file-size';
 /**
  * @file vfs-ui/ui/components/NodeList/items/itemTemplates.ts
  * @desc HTML templates for file and directory items.
  */
-import { Heading, escapeHTML, t } from '@itookit/common';
+import { Heading, escapeHTML } from '../../../../utils/local';
 import type { VFSNodeUI, UISettings } from '../../../../contracts/types';
 import type { RowPolicy } from '../../../../utils/row-policy';
 import { formatRelativeTime } from '../../../../utils/helpers';
@@ -43,19 +43,20 @@ const createOutlineHTML = (headings: Heading[]): string => {
 };
 
 /** Shared two-step deletion control for files and host-selected navigation entries. */
-const createQuickDeleteHTML = (confirming = false): string => {
-  const label = escapeHTML(t(confirming ? 'vfs.action.confirmQuickDelete' : 'action.delete'));
-  return `<button type="button" class="vfs-node-item__action-btn vfs-node-item__delete-btn ${confirming ? 'is-confirming' : ''}" data-action="${confirming ? 'delete-direct' : 'delete-init'}" title="${label}" aria-label="${label}"><span aria-hidden="true">${confirming ? ACTION_ICONS.delete : ACTION_ICONS.close}</span></button>`;
+const createQuickDeleteHTML = (confirming = false, ui = defaultPresentation): string => {
+  const label = escapeHTML(ui.t(confirming ? 'vfs.action.confirmQuickDelete' : 'action.delete'));
+  return `<button type="button" class="vfs-node-item__action-btn vfs-node-item__delete-btn ${confirming ? 'is-confirming' : ''}" data-action="${confirming ? 'delete-direct' : 'delete-init'}" title="${label}" aria-label="${label}"><span aria-hidden="true">${ui.icon(confirming ? 'delete' : 'close')}</span></button>`;
 };
 
 /** Host-owned favorite control; the row hides it when the host reports no state. */
-const createFavoriteHTML = (active?: boolean): string => {
+const createFavoriteHTML = (active?: boolean, ui = defaultPresentation): string => {
   if (active === undefined) return '';
-  const label = escapeHTML(t(active ? 'vfs.favorites.remove' : 'vfs.favorites.add'));
-  return `<button type="button" class="vfs-node-item__action-btn vfs-node-item__favorite-btn" data-action="favorite-toggle" aria-pressed="${active}" title="${label}" aria-label="${label}">${ACTION_ICONS.favorite}</button>`;
+  const label = escapeHTML(ui.t(active ? 'vfs.favorites.remove' : 'vfs.favorites.add'));
+  return `<button type="button" class="vfs-node-item__action-btn vfs-node-item__favorite-btn" data-action="favorite-toggle" aria-pressed="${active}" title="${label}" aria-label="${label}">${ui.icon('favorite')}</button>`;
 };
 
 export interface FileItemProps {
+  presentation?: VFSPresentation;
   favorite?: boolean;
   isActive: boolean;
   isSelected: boolean;
@@ -71,6 +72,7 @@ export const createFileItemHTML = (
   props: FileItemProps,
   policy: RowPolicy
 ): string => {
+  const ui = props.presentation ?? defaultPresentation;
   const { id, metadata, content, headings = [], icon } = file;
   const { title, lastModified, tags = [], custom = {} } = metadata;
   const {
@@ -88,7 +90,7 @@ export const createFileItemHTML = (
   const connLabel = file.presentation?.subtitle;
   const isReadOnly = policy.readOnly;
 
-  const deleteBtnHTML = policy.inlineDelete ? createQuickDeleteHTML(isConfirmingDelete) : '';
+  const deleteBtnHTML = policy.inlineDelete ? createQuickDeleteHTML(isConfirmingDelete, ui) : '';
 
   const hasOutline = headings?.length > 0;
   const outlineToggleHTML = hasOutline
@@ -121,10 +123,10 @@ export const createFileItemHTML = (
       ? `<div class="vfs-node-item__outline is-expanded">${createOutlineHTML(headings)}</div>`
       : '';
 
-  const displayIcon = icon || fileTypeIcon(title);
+  const displayIcon = icon || ui.fileIcon(title);
 
-  const menuHTML = custom.navigationMenu ? `<button type="button" class="vfs-node-item__action-btn" data-action="item-menu" aria-label="${escapeHTML(t('vfs.columns.more'))}">⋯</button>` : '';
-  const favoriteHTML = createFavoriteHTML(props.favorite);
+  const menuHTML = custom.navigationMenu ? `<button type="button" class="vfs-node-item__action-btn" data-action="item-menu" aria-label="${escapeHTML(ui.t('vfs.columns.more'))}">⋯</button>` : '';
+  const favoriteHTML = createFavoriteHTML(props.favorite, ui);
   const hasActions = deleteBtnHTML || outlineToggleHTML || menuHTML || favoriteHTML;
   const actionsHTML = hasActions
     ? `<div class="vfs-node-item__actions">
@@ -145,7 +147,7 @@ export const createFileItemHTML = (
           <div class="vfs-node-item__body">
             <div class="vfs-node-item__row-primary">
               <span class="vfs-node-item__title" title="${escapeHTML(title)}">${highlight(title, searchQueries)}</span>
-              ${isPinned ? `<span class="vfs-node-item__pin" aria-hidden="true">${FILE_ICONS.pin}</span>` : ''}
+              ${isPinned ? `<span class="vfs-node-item__pin" aria-hidden="true">${ui.icon('pin')}</span>` : ''}
               ${hasWaitingInput ? `<span class="vfs-node-item__indicator vfs-node-item__indicator--waiting" title="${escapeHTML(hasWaitingInput)}"></span>` : ''}
               ${hasUnreadUpdate && !hasWaitingInput ? '<span class="vfs-node-item__indicator"></span>' : ''}
             </div>
@@ -171,6 +173,7 @@ export const createFileItemHTML = (
 };
 
 export interface DirectoryItemProps {
+  presentation?: VFSPresentation;
   favorite?: boolean;
   isConfirmingDelete?: boolean;
   isLeaf?: boolean;
@@ -188,6 +191,7 @@ export const createDirectoryItemHTML = (
   props: DirectoryItemProps,
   policy: RowPolicy
 ): string => {
+  const ui = props.presentation ?? defaultPresentation;
   const { id, metadata, icon } = dir;
   const { title, tags = [] } = metadata;
   const {
@@ -214,16 +218,16 @@ export const createDirectoryItemHTML = (
         ${checkbox}
         <div class="vfs-directory-item__header ${props.isActive ? 'is-active' : ''} ${isSelected ? 'is-selected' : ''}" role="button" tabindex="0" ${props.isLeaf ? `aria-pressed="${!!props.isActive}"` : `aria-expanded="${isExpanded}"`} data-action="${props.isCard ? 'toggle-folder' : 'select-item'}">
           ${props.isLeaf ? '' : `<span class="vfs-directory-item__toggle ${isExpanded ? 'is-expanded' : ''}" data-action="toggle-folder"></span>`}
-          <span class="vfs-directory-item__icon">${icon || FILE_ICONS.folder}</span>
+          <span class="vfs-directory-item__icon">${icon || ui.icon('folder')}</span>
           <div class="vfs-directory-item__title-container">
             <span class="vfs-directory-item__title" title="${escapeHTML(title)}">${highlight(title, searchQueries)}</span>
             ${typeof metadata.custom.navigationDescription === 'string' ? `<span class="vfs-directory-item__description">${escapeHTML(metadata.custom.navigationDescription)}</span>` : ''}
             ${tagsHtml}
           </div>
         </div>
-        ${createFavoriteHTML(props.favorite)}
-        ${policy.inlineDelete ? createQuickDeleteHTML(props.isConfirmingDelete) : ''}
-        ${metadata.custom.navigationMenu ? `<button type="button" class="vfs-directory-item__menu" data-action="item-menu" aria-label="${escapeHTML(t('vfs.columns.more'))}">⋯</button>` : ''}
+        ${createFavoriteHTML(props.favorite, ui)}
+        ${policy.inlineDelete ? createQuickDeleteHTML(props.isConfirmingDelete, ui) : ''}
+        ${metadata.custom.navigationMenu ? `<button type="button" class="vfs-directory-item__menu" data-action="item-menu" aria-label="${escapeHTML(ui.t('vfs.columns.more'))}">⋯</button>` : ''}
       </div>
       <div class="vfs-directory-item__children" style="${isExpanded ? '' : 'display:none;'}"></div>
     </div>`;

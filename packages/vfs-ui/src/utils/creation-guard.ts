@@ -1,4 +1,4 @@
-import { t } from '@itookit/common';
+import { t } from './local';
 import type { FileCreationConfig } from '../contracts/options';
 import type { IDataOperationPort, IStatePort } from '../contracts/ports';
 

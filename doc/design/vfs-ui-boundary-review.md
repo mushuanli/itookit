@@ -1,10 +1,10 @@
 # VFS UI 机制与策略边界审查
 
-日期：2026-09-26。状态：已按“职责隔离、共享定义唯一”修正并实施本轮边界收敛。
+日期：2026-09-26；独立包调整：2026-10-02。状态：职责隔离完成，当前 vfs-ui 仅依赖 vfs-core。
 
 ## 实施决定
 
-不以依赖数量作为验收指标。vfs-ui 保留 vfs-core、common、ui-common 通用契约及 immer；公共工具、图标、翻译、Heading、TaskCounts、菜单和文件创建配置不复制。common 的业务聚合导出留待独立整理，本轮不扩张为全仓重写。
+2026-10-02 按独立发布要求进一步收敛：vfs-ui 仅依赖 vfs-core，移除 common、ui-common 和 immer。公开消费方契约归本包所有，与既有宿主接口结构兼容；基础展示有包内默认实现，宿主通过 presentation 注入翻译、图标和跟踪。MindOS 适配放在 app-shell；包内构建配置可脱离仓库脚本。状态更新显式复制受影响路径，保留历史快照和未变分支，动作通知顺序不变。
 
 已实施：编辑器装配移到 app-shell，设置文件浏览器通过注入接入；移除重复 Options、文件类型接口及旧 Coordinator；宿主用语义方法替代 store.dispatch；新增 BrowserSource/BrowserNode/BrowserAction 与简明入口；源 ID 和 ResourceRef 分离，抽屉显式标识 group；统一动作执行边界并堵住底栏、行内删除和拖拽绕过菜单策略的路径；保留异步 Promise；版本化持久化和快照去重；作用域内 CSS reset；业务状态转为通用 presentation。
 
@@ -14,7 +14,7 @@
 
 原有项目/工具箱的高级配置保留，使用同一底层列表和状态。简明 source 入口适合新资源浏览；没有另起一套渲染器，也没有移除既有文件操作。当前具体 API 见 [组件接口](../../packages/vfs-ui/doc/components.md)。
 
-以下保留原审查依据与后续演进取舍；其中“唯一直接依赖”“移除 immer”“所有高级调用改为 panes”不再属于本轮目标，也不是当前实现事实。
+以下保留原审查依据与后续演进取舍；“唯一直接依赖”和“移除 immer”现已实施，“所有高级调用改为 panes”仍非当前实现。
 
 ## 一、现状与问题
 

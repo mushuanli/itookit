@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it, vi } from 'vitest';
-import { FILE_ICONS } from '@itookit/common';
+import { FILE_ICONS } from '../src/utils/icons';
 import { mapFSNodeToUIItem } from '../src/services/NodeMapper';
 import { FileTypeRegistry } from '../src/services/FileTypeRegistry';
 import { fromVFS } from '../src/browser/from-vfs';
@@ -45,7 +45,7 @@ it('keeps synthetic resource titles and presentation when extensions are enabled
 });
 
 it('classifies common filenames without file reads and preserves explicit icons', async () => {
-  const { FILE_ICONS, fileTypeIcon } = await import('@itookit/common');
+  const { FILE_ICONS, fileTypeIcon } = await import('../src/utils/icons');
   const examples = { pdf: ['REPORT.PDF'], spreadsheet: ['budget.xlsx', 'data.csv'], slides: ['talk.pptx'],
     audio: ['voice.mp3'], media: ['clip.mp4'], config: ['.env.local', '.gitignore', 'tsconfig.app.json'],
     code: ['Dockerfile', 'main.rs', 'page.vue'], document: ['README', 'notes.docx'], archive: ['backup.tar.gz'] };

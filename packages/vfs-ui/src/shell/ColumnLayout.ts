@@ -1,5 +1,5 @@
+import { defaultPresentation, type VFSPresentation } from '../contracts/presentation';
 import type { DirectoryAction } from '../contracts/options';
-import { t } from '@itookit/common';
 import type { VFSNodeUI } from '../contracts/types';
 
 export interface VFSColumnsOptions {
@@ -32,13 +32,13 @@ export class ColumnLayout {
     readonly content = document.createElement('div');
     private readonly root = document.createElement('div');
     private readonly back = document.createElement('button');
-    constructor(container: HTMLElement, options: VFSColumnsOptions) {
+    constructor(container: HTMLElement, options: VFSColumnsOptions, ui: VFSPresentation = defaultPresentation) {
         this.root.className = 'vfs-columns'; this.root.dataset.column = 'navigation';
         this.navigation.className = 'vfs-columns__list'; this.content.className = 'vfs-columns__list';
         const navigation = this.pane('navigation', options.navigationTitle, this.navigation, options.navigationHeader);
-        const content = this.pane('content', t('vfs.columns.content'), this.content, options.contentHeader);
+        const content = this.pane('content', ui.t('vfs.columns.content'), this.content, options.contentHeader);
         this.back.type = 'button'; this.back.className = 'vfs-columns__back';
-        this.back.textContent = `← ${options.backLabel ?? t('vfs.columns.back')}`;
+        this.back.textContent = `← ${options.backLabel ?? ui.t('vfs.columns.back')}`;
         this.back.onclick = () => this.show('navigation');
         content.prepend(this.back); this.root.append(navigation, content); container.append(this.root);
     }

@@ -1,3 +1,4 @@
+import { createMindOSVFSUI as createVFSUI } from '../browser/vfs-presentation';
 import { ToolboxDeletion, toolboxSelectionPaths } from './ToolboxDeletion';
 import { defaultToolDrawers } from './tool-drawers';
 import { ConfigurationDeletionDialog } from '../configuration/delete-dialog';
@@ -9,7 +10,7 @@ import { drawerKind, ungroupedId, type Drawer } from '@itookit/app-core';
 import { resourceDrawers } from './resource-drawers';
 import { resourceIcon } from './resource-icons';
 import { modelDrawers, compareModelItems, modelDrawerId, modelDrawerProvider } from './model-drawers';
-import { createVFSUI, type VFSUIShell, type VFSNodeUI, type VFSToolbarContext, type UIPersistencePort } from '@itookit/vfs-ui';
+import { type VFSUIShell, type VFSNodeUI, type VFSToolbarContext, type UIPersistencePort } from '@itookit/vfs-ui';
 import { createFileSystemView, type FileSystemView } from '@itookit/vfs-core';
 import { t, type NavigationRequest } from '@itookit/common';
 import { editorResourceId, type EditorFactory, type MenuItem, type ContextMenuConfig } from '@itookit/ui-common';

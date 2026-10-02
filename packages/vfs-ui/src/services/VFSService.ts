@@ -1,14 +1,16 @@
+import { defaultPresentation, type VFSPresentation } from '../contracts/presentation';
 /**
  * @file vfs-ui/services/VFSService.ts
  * @desc Data mutation service implementing IDataOperationPort.
  */
 import type { IFileSystem, FSNode } from '@itookit/vfs-core';
-import { buildRenamedFilename, formatDefaultFileTitle, t } from '@itookit/common';
+import { buildRenamedFilename, formatDefaultFileTitle } from '../utils/local';
 import { FSError, normalizeVirtualPath } from '@itookit/vfs-core';
 import type { IDataOperationPort } from '../contracts/ports';
 
 export interface VFSServiceDependencies {
   engine: IFileSystem;
+  presentation?: VFSPresentation;
   newFileContent?: string;
   defaultExtension?: string;
 }
@@ -27,17 +29,20 @@ export interface CreateMultipleFilesOptions {
 const EXT_REGEX = /\.[a-zA-Z0-9]{1,10}$/;
 
 export class VFSService implements IDataOperationPort {
+  private readonly ui: VFSPresentation;
   private readonly engine: IFileSystem;
   private readonly newFileContent: string;
   private readonly defaultExtension: string;
 
   constructor({
     engine,
+    presentation = defaultPresentation,
     newFileContent = '',
     defaultExtension = '.md',
   }: VFSServiceDependencies) {
     if (!engine) throw new Error('VFSService requires an IFileSystem.');
     this.engine = engine;
+    this.ui = presentation;
     this.newFileContent = newFileContent;
     this.defaultExtension = defaultExtension.startsWith('.')
       ? defaultExtension
@@ -50,10 +55,10 @@ export class VFSService implements IDataOperationPort {
   async assertCanCreate(parentPath: string | null): Promise<void> {
     let path = normalizeVirtualPath(parentPath ?? '/');
     const caps = await this.engine.capabilitiesAt(path);
-    if (caps.readonly) throw new FSError('EROFS', t('vfs.creation.readOnly'));
+    if (caps.readonly) throw new FSError('EROFS', this.ui.t('vfs.creation.readOnly'));
     while (true) {
       const node = await this.engine.driver.getNode(path);
-      if (node?.metadata?._readOnly === true) throw new FSError('EROFS', t('vfs.creation.readOnly'));
+      if (node?.metadata?._readOnly === true) throw new FSError('EROFS', this.ui.t('vfs.creation.readOnly'));
       if (node || path === '/') return;
       path = path.slice(0, path.lastIndexOf('/')) || '/';
     }

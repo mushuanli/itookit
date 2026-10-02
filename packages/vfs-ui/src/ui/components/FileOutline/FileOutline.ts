@@ -2,7 +2,7 @@
  * @file vfs-ui/ui/components/FileOutline/FileOutline.ts
  * @desc Document outline panel. Now depends on ICommandPort instead of Coordinator.
  */
-import type { Heading } from '@itookit/common';
+import { Heading } from '../../../utils/local';
 import { BaseComponent, BaseComponentDeps } from '../../core/BaseComponent';
 import type { VFSUIState } from '../../../contracts/types';
 import { findNodeById } from '../../../utils/helpers';

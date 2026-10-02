@@ -1,17 +1,19 @@
 import { defineConfig } from 'vite';
-import { createLibConfig } from '../../scripts/vite-lib.config';
+import dts from 'vite-plugin-dts';
+import { resolve } from 'node:path';
 
-export default defineConfig(
-  createLibConfig({
-    name: 'VFSUI',
-    fileName: 'vfs-ui',
-    rootDir: __dirname,
-    external: ['@itookit/common', '@itookit/vfs-core', '@itookit/ui-common', 'immer'],
-    globals: {
-      '@itookit/common': 'ItookitCommon',
-      '@itookit/ui-common': 'ItookitUICommon',
-      immer: 'immer',
-      '@itookit/vfs-core': 'ItookitStdio',
-    }
-  })
-);
+export default defineConfig({
+    base: './',
+    build: {
+        lib: { entry: resolve(__dirname, 'src/index.ts'), name: 'VFSUI', formats: ['es', 'umd'],
+            fileName: format => format === 'es' ? 'vfs-ui.js' : 'vfs-ui.umd.cjs' },
+        cssCodeSplit: false,
+        sourcemap: true,
+        rollupOptions: {
+            external: ['@itookit/vfs-core'],
+            output: { globals: { '@itookit/vfs-core': 'ItookitVFSCore' },
+                assetFileNames: asset => asset.name?.endsWith('.css') ? 'style.css' : asset.name ?? 'asset' },
+        },
+    },
+    plugins: [dts({ entryRoot: 'src', outDir: 'dist', insertTypesEntry: true })],
+});

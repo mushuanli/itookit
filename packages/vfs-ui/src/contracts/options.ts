@@ -1,6 +1,6 @@
-import type { ResourceListOptions } from '@itookit/ui-common';
+import type { ResourceListOptions } from './components';
 import type { FavoriteAction, VFSNodeUI } from './types';
-export type { FileCreationConfig } from '@itookit/ui-common';
+export type { FileCreationConfig } from './components';
 export type BrowserBaseOptions = ResourceListOptions<VFSNodeUI>;
 
 /** A fixed navigation action; its active state is independent of mutable resource selection. */

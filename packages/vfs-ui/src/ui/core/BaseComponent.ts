@@ -1,3 +1,4 @@
+import { defaultPresentation, type VFSPresentation } from '../../contracts/presentation';
 /**
  * @file vfs-ui/ui/core/BaseComponent.ts
  * @desc Abstract base for UI components. Depends on ports, not concrete classes.
@@ -6,19 +7,22 @@ import type { IStatePort, ICommandPort } from '../../contracts/ports';
 import type { VFSUIState } from '../../contracts/types';
 
 export interface BaseComponentDeps {
+  presentation?: VFSPresentation;
   container: HTMLElement;
   store: IStatePort;
   commandBus: ICommandPort;
 }
 
 export abstract class BaseComponent<TState extends object> {
+  protected readonly ui: VFSPresentation;
   protected readonly container: HTMLElement;
   protected readonly store: IStatePort;
   protected readonly commandBus: ICommandPort;
   protected state: TState = {} as TState;
   private unsub: (() => void) | null = null;
 
-  constructor({ container, store, commandBus }: BaseComponentDeps) {
+  constructor({ container, store, commandBus, presentation }: BaseComponentDeps) {
+    this.ui = presentation ?? defaultPresentation;
     this.container = container;
     container.classList.add('vfs-ui');
     this.store = store;

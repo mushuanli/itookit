@@ -2,12 +2,10 @@
  * @file vfs-ui/services/VFSStore.ts
  * @desc State container implementing IStatePort. Single source of truth.
  */
-import { produce, enableMapSet } from 'immer';
+import { prepareState, finishState } from './state-update';
 import type { IStatePort } from '../contracts/ports';
 import type { VFSUIState, VFSNodeUI, TagInfo, UISettings } from '../contracts/types';
 import { findNodeById, traverseNodes, ensureSet, ensureMap, replacePathPrefix } from '../utils/helpers';
-
-enableMapSet();
 
 export type Action = { type: string; payload?: any };
 
@@ -111,7 +109,8 @@ export class VFSStore implements IStatePort {
     return () => this.actionListeners.delete(listener);
   }
 
-  private reduce = produce((draft: VFSUIState, { type, payload }: Action) => {
+  private reduce = (state: VFSUIState, { type, payload }: Action): VFSUIState => {
+    const draft = prepareState(state, type, payload);
     const handlers: Record<string, () => void> = {
       'STATE_LOAD_SUCCESS': () => {
         Object.assign(draft, {
@@ -224,8 +223,10 @@ export class VFSStore implements IStatePort {
         if (item) item.presentation = { ...item.presentation, ...payload.presentation };
       },
     };
-    handlers[type]?.();
-  });
+    if (!handlers[type]) return state;
+    handlers[type]();
+    return finishState(state, draft);
+  };
 
   private toggleSet(set: Set<string>, id: string): void {
     set.has(id) ? set.delete(id) : set.add(id);
@@ -291,10 +292,11 @@ export class VFSStore implements IStatePort {
 
   private handleDelete(draft: VFSUIState, ids: Set<string>): void {
     const filter = (items: VFSNodeUI[]): VFSNodeUI[] =>
-      items.filter(item => {
-        if (ids.has(item.id)) return false;
-        if (item.children) item.children = filter(item.children);
-        return true;
+      items.filter(item => !ids.has(item.id)).map(item => {
+        if (!item.children) return item;
+        const children = filter(item.children);
+        return children.length === item.children.length && children.every((child, index) => child === item.children![index])
+          ? item : { ...item, children };
       });
     draft.items = filter(draft.items);
     ids.forEach(id => {

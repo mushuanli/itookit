@@ -26,3 +26,9 @@ export { formatFileSize } from './utils/file-size';
 export { describeCauseChain, describeErrorReason } from './utils/error-detail';
 
 export { allowsRowAction } from './utils/row-policy';
+
+export { createPresentation } from './contracts/presentation';
+export type { VFSPresentationOptions, VFSPresentation, VFSIconName } from './contracts/presentation';
+export type { Translate } from './utils/i18n';
+export type { Suggestion, IAutocompleteSource, TagEditorInstance, ResourceListOptions } from './contracts/components';
+export { EngineTagSource } from './mention/EngineTagSource';

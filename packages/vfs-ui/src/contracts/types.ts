@@ -1,9 +1,10 @@
 /**
  * @file vfs-ui/contracts/types.ts
- * @desc Core domain types. Zero external dependencies except @itookit/common shared types.
+ * @desc Core domain types. Public display data independent of host packages.
  *       ALL other layers depend on this file. This file depends on NOTHING internal.
  */
-import type { Heading, TaskCounts } from '@itookit/common';
+export interface Heading { level: number; text: string; id: string; children: Heading[]; }
+export interface TaskCounts { total: number; completed: number; }
 // --- Parsed Metadata ---
 
 export interface FileMetadata {
@@ -111,10 +112,10 @@ export type SearchFilter = (item: VFSNodeUI, queryTokens: string[]) => boolean;
 
 // --- Component Configuration ---
 
-export type { TagEditorOptions, TagEditorFactory } from '@itookit/ui-common';
-export type MenuItem = import('@itookit/ui-common').MenuItem<VFSNodeUI>;
-export type ContextMenuBuilder = import('@itookit/ui-common').ContextMenuBuilder<VFSNodeUI>;
-export type ContextMenuConfig = import('@itookit/ui-common').ContextMenuConfig<VFSNodeUI>;
+export type { TagEditorOptions, TagEditorFactory } from './components';
+export type MenuItem = import('./components').MenuItem<VFSNodeUI>;
+export type ContextMenuBuilder = import('./components').ContextMenuBuilder<VFSNodeUI>;
+export type ContextMenuConfig = import('./components').ContextMenuConfig<VFSNodeUI>;
 
 /**
  * Host-owned favorites. The browser only renders the state and dispatches the

@@ -1,12 +1,12 @@
-import { fileTypeIcon } from '@itookit/common';
+import { fileTypeIcon } from '../utils/local';
 import { RefreshScheduler } from '../services/RefreshScheduler';
 import type { BrowserNode, BrowserSource, SourceChange } from '../contracts/source';
 import type { IStatePort } from '../contracts/ports';
 import type { VFSNodeUI } from '../contracts/types';
 import { getExtension, findNodeById } from '../utils/helpers';
 
-export function displayNode(node: BrowserNode): VFSNodeUI {
-  return { id: node.id, type: node.kind === 'file' ? 'file' : 'directory', version: '1', icon: node.icon || fileTypeIcon(node.resource?.path ?? node.label, node.kind !== 'file'),
+export function displayNode(node: BrowserNode, icon = fileTypeIcon): VFSNodeUI {
+  return { id: node.id, type: node.kind === 'file' ? 'file' : 'directory', version: '1', icon: node.icon || icon(node.resource?.path ?? node.label, node.kind !== 'file'),
     presentation: { fileDetails: node.fileDetails },
     resource: node.resource, kind: node.kind, parentId: node.parentId,
     metadata: { title: node.label, size: node.size, path: node.resource?.path ?? '', parentPath: node.parentId,
@@ -31,7 +31,7 @@ export class SourceAdapter {
     if (!visible) this.invalidate({});
   }
   private readonly refreshes: RefreshScheduler;
-  constructor(readonly source: BrowserSource, private readonly store: IStatePort, private readonly report?: (error: unknown) => void) {
+  constructor(readonly source: BrowserSource, private readonly store: IStatePort, private readonly report?: (error: unknown) => void, private readonly icon = fileTypeIcon) {
     this.refreshes = new RefreshScheduler(() => this.refreshChanges(), error => {
       if (!this.abort.signal.aborted) {
         this.store.dispatch({ type: 'ITEMS_LOAD_ERROR', payload: { error } }); this.report?.(error);
@@ -57,7 +57,7 @@ export class SourceAdapter {
       const node = parent === null ? undefined : findNodeById(this.store.getState().items, parent);
       if (parent !== null && node?.children === undefined) continue;
       const previous = parent === null ? this.store.getState().items : node!.children!;
-      const children = (await this.source.children(parent, this.abort.signal)).map(displayNode);
+      const children = (await this.source.children(parent, this.abort.signal)).map(node => displayNode(node, this.icon));
       if (!this.visible || revision !== this.revision || this.abort.signal.aborted) return;
       const old = new Map(previous.map(item => [item.id, item]));
       for (const child of children) if (child.type === 'directory') child.children = old.get(child.id)?.children;
@@ -68,7 +68,7 @@ export class SourceAdapter {
   async loadData(_options: { silent?: boolean } = {}): Promise<void> {
     if (!this.visible) return;
     const revision = ++this.revision;
-    const items = (await this.source.children(null, this.abort.signal)).map(displayNode);
+    const items = (await this.source.children(null, this.abort.signal)).map(node => displayNode(node, this.icon));
     if (this.abort.signal.aborted || revision !== this.revision) return;
     this.store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items, tags: new Map() } });
     await this.restoreExpansion(this.store.getState().expandedFolderIds);
@@ -76,7 +76,7 @@ export class SourceAdapter {
   async expandDirectory(id: string, options: { expand?: boolean; restoreDescendants?: boolean } = {}): Promise<void> {
     if (!this.visible) return;
     const revision = this.revision;
-    const children = (await this.source.children(id, this.abort.signal)).filter(node => node.id !== id).map(displayNode);
+    const children = (await this.source.children(id, this.abort.signal)).filter(node => node.id !== id).map(node => displayNode(node, this.icon));
     if (this.abort.signal.aborted || revision !== this.revision) return;
     this.store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentPath: id, children, expand: options.expand } });
   }

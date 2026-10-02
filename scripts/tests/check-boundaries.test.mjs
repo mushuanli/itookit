@@ -48,3 +48,10 @@ test('standalone mdxeditor has no internal package dependencies', () => {
     assert.equal(dependencyError('@itookit/mdxeditor', 'codemirror'), undefined);
     assert.equal(dependencyError('@itookit/mdx-adapter', '@itookit/mdxeditor'), undefined);
 });
+
+test('standalone vfs-ui only depends on vfs-core internally', () => {
+    for (const name of ['common', 'ui-common', 'llm-common', 'mdxeditor'])
+        assert.match(dependencyError(vfs.name, '@itookit/' + name), /public ports/);
+    assert.equal(dependencyError(vfs.name, '@itookit/vfs-core'), undefined);
+    assert.match(dependencyError(vfs.name, 'immer'), /public ports/);
+});

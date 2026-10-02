@@ -1,3 +1,4 @@
+import { createMindOSVFSUI as createVFSUI } from '../browser/vfs-presentation';
 import { connectEditorLifecycle } from '../browser/editor-connector';
 import { resolveFileEditor } from '../browser/types';
 import { createVFSMentionProviders } from '../browser/mention/createVFSMentionProviders';
@@ -7,7 +8,7 @@ import { createVFSMentionProviders } from '../browser/mention/createVFSMentionPr
  * 工作区装配器 — 粘合 VFS-UI (侧边栏) + Editor (编辑器)。
  * 不创建 DOM，不拥有布局。消费方负责创建 sidebar/editor 容器并传入。
  */
-import { createVFSUI, VFSUIShell } from '@itookit/vfs-ui';
+import { VFSUIShell } from '@itookit/vfs-ui';
 import { lazyMdxEditorFactory as defaultEditorFactory } from '../browser/lazy-mdx';
 import type { WorkbenchConfig } from '../types';
 import { t, NavigationRequest} from '@itookit/common';

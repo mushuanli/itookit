@@ -1,6 +1,6 @@
 {
   "name": "@itookit/vfs-ui",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "A modular UI library for managing Virtual File System interfaces with components for file/folder navigation, tagging, and content outline",
   "type": "module",
   "main": "./src/index.ts",
@@ -70,10 +70,7 @@
     "node": ">=16.0.0"
   },
   "dependencies": {
-    "@itookit/common": "workspace:*",
-    "@itookit/vfs-core": "workspace:*",
-    "immer": "^10.2.0",
-    "@itookit/ui-common": "workspace:*"
+    "@itookit/vfs-core": "workspace:*"
   },
   "peerDependencies": {},
   "devDependencies": {

@@ -1,3 +1,4 @@
+import { createPresentation, type VFSPresentationOptions, type VFSPresentation } from '../contracts/presentation';
 import type { DirectoryAction } from '../contracts/options';
 import { SourceAdapter } from '../browser/SourceAdapter';
 import type { VFSListSort } from '../contracts/types';
@@ -10,8 +11,7 @@ import type { VFSListSort } from '../contracts/types';
 import {
     formatDefaultFileTitle,
     generateShortUUID,
-    traceBoot,
-} from '@itookit/common';
+} from '../utils/local';
 import type { BrowserBaseOptions, VFSRowActionOptions } from '../contracts/options';
 import type { IFileSystem, FSNode } from '@itookit/vfs-core';
 
@@ -46,6 +46,8 @@ import { MoveToModal } from '../ui/components/MoveToModal/MoveToModal';
 import { findNodeById } from '../utils/helpers';
 
 export interface VFSUIShellOptions extends BrowserBaseOptions, VFSRowActionOptions {
+  /** Instance-local translations, icons and optional startup tracing. */
+  presentation?: VFSPresentationOptions;
   /** Replaces the title row, for example with a project selector and compact actions. */
   titleHeader?: HTMLElement;
   /** Mount the existing toolbar controls in a host header. */
@@ -99,6 +101,7 @@ export interface VFSUIShellOptions extends BrowserBaseOptions, VFSRowActionOptio
 }
 
 export class VFSUIShell {
+  private readonly presentation: VFSPresentation;
   public readonly instanceId: string;
 
   // ===== 全部通过接口持有 =====
@@ -145,6 +148,7 @@ export class VFSUIShell {
     }
 
     options.sessionListContainer.classList.add('vfs-ui');
+    this.presentation = createPresentation(options.presentation);
     this.instanceId = generateShortUUID();
 
     // ===== Assemble all layers (Composition Root) =====
@@ -214,10 +218,10 @@ export class VFSUIShell {
     }
 
     // 1. Load root-level data from engine
-    await traceBoot('vfsUi.loadData', () => this.engineAdapter.loadData());
+    await this.presentation.trace('vfsUi.loadData', () => this.engineAdapter.loadData());
 
     this.engineAdapter.connectEngineEvents();
-    await traceBoot('vfsUi.restoreExpansion', () => this.engineAdapter.restoreExpansion(this.statePort.getState().expandedFolderIds));
+    await this.presentation.trace('vfsUi.restoreExpansion', () => this.engineAdapter.restoreExpansion(this.statePort.getState().expandedFolderIds));
 
     // 4. Create default file if the tree is empty
     await this.ensureDefaultFile();
@@ -491,6 +495,7 @@ export class VFSUIShell {
 
   private initializeComponents(): void {
     const listOptions = {
+      presentation: this.presentation,
       container: this.options.sessionListContainer,
       store: this.statePort,
       commandBus: this.commandPort,
@@ -517,7 +522,7 @@ export class VFSUIShell {
     };
     const columns = this.options.columns;
     if (columns) {
-      this.columnLayout = new ColumnLayout(this.options.sessionListContainer, columns);
+      this.columnLayout = new ColumnLayout(this.options.sessionListContainer, columns, this.presentation);
       const navigation = new ColumnState({ source: this.statePort, items: (state, query) => columns.navigationItems(state.items, query),
         root: () => null, onSearch: columns.navigationSearch, resolveActive: columns.navigationActiveId });
       this.contentState = new ColumnState({ source: this.statePort, items: state => {

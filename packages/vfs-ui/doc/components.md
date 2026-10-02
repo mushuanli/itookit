@@ -2,7 +2,7 @@
 
 ## 模块边界
 
-浏览器维护展示和交互，不拥有编辑器。公共工具、图标、Heading 和 TaskCounts 使用 common 的唯一实现；菜单、标签编辑器和文件创建契约复用 ui-common；状态仍使用 immer。没有为削减依赖复制公共代码。
+浏览器维护展示和交互，不拥有编辑器。本包仅依赖 vfs-core；Heading、TaskCounts、菜单、标签编辑器和文件创建等消费方契约由本包公开。宿主实现相同结构即可接入，无需 common/ui-common。默认 SVG、基础工具和中英文主要控件文案包含在包内；presentation 可按实例覆盖翻译、图标与启动跟踪。状态通过路径复制保持不可变，不依赖 immer。
 
 编辑器连接、媒体预览、Markdown 元数据解析、mention 来源与编辑器选择位于 app-shell 的 `src/browser/`。设置页通过 `FileBrowserConnector` 注入连接器，不向上依赖 app-shell。vfs-ui 的 FileTypeRegistry 仅处理图标、解析器配置与复制转换，不持有 EditorFactory。
 
