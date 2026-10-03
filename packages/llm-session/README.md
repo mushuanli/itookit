@@ -29,7 +29,7 @@ await conversation.dispose();
 
 Session manifest 只接受规范 `schemaVersion: 3` 数据。作文预设和播种属于 app-core 的产品装配，不再由本包导出。
 
-迁移：删除 `configureSessionHostPorts`，改为 `initializeConversationSystem({ hostPorts, ... })`。该工厂不再设置全局 SessionManager 或 PromptHistory；使用返回的实例。旧 `createSessionManager/getSessionManager` 与提示词历史单例仍是兼容入口，不用于独立运行时装配。UI 使用 `createLLMFactory(agentService, { sessionManager, sessionRepository, ... })`。
+迁移：删除 `configureSessionHostPorts`，改为 `initializeConversationSystem({ hostPorts, ... })`。该工厂不再设置全局 SessionManager 或 PromptHistory；使用返回的实例。已删除 `createSessionManager/getSessionManager/resetSessionManager` 和提示词历史单例 API。低层装配使用 `new SessionManager(...)`，历史使用 `new PromptHistoryService(files)` 并显式初始化和销毁。UI 使用 `createLLMFactory(agentService, { sessionManager, sessionRepository, ... })`。
 
 `directAgentPolicy` 只作用于显式 Agent 模式：提示词在 Context 装配阶段加入并参与 token 预算，maxExchanges 固定到持久 Task。实例构造时复制并冻结策略；maxExchanges 必须为正的安全整数。未传提示词时不追加产品执行指令；未传预算时沿用 llm-tasks 的通用默认值。普通 Chat、Flow 和无显式模式的旧调用不追加这些提示词。
 

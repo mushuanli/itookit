@@ -18,12 +18,7 @@ export { createSessionPlugin, SessionCommand } from './plugins/session-plugin';
 export { createVcsPlugin } from './plugins/vcs-plugin';
 export { createHistoryPlugin } from './plugins/history-plugin';
 
-export {
-    SessionManager,
-    createSessionManager,
-    getSessionManager,
-    resetSessionManager,
-} from './session/session-manager';
+export { SessionManager } from './session/session-manager';
 export type { SessionQuery } from './session/session-query';
 export { SessionRegistry, type BoundContext } from './session/session-registry';
 export { RoundOperations } from './session/round-operations';
@@ -60,7 +55,6 @@ export type {
 } from './persistence/types';
 
 export {
-    getPromptHistory,
     PromptHistoryService,
     type PromptHistoryEntry,
     type HistoryQueryOptions,

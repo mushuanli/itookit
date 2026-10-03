@@ -38,7 +38,6 @@ import { AttachmentProcessor } from './attachment-processor';
 import {
     PromptHistoryEntry,
     HistoryQueryOptions,
-    getPromptHistory,
 } from '../services/prompt-history-service';
 import { createSessionHost, type SessionHost } from '../utils/host-ports';
 import { SessionRegistry } from './session-registry';
@@ -625,41 +624,4 @@ export class SessionManager implements ISession, SessionQuery {
 
         console.groupEnd();
     }
-}
-
-// ============================================
-// 工厂函数
-// ============================================
-
-let sessionManagerInstance: SessionManager | null = null;
-
-export function createSessionManager(
-    engine: ISessionRepository,
-    agentService: IAgentConfigService,
-    options: ConstructorParameters<typeof SessionManager>[2]
-): SessionManager {
-    if (sessionManagerInstance) {
-        sessionManagerInstance.host.logger.warn('SessionManager already exists, returning existing instance');
-        return sessionManagerInstance;
-    }
-
-    sessionManagerInstance = new SessionManager(engine, agentService, { ...options, promptHistory: options.promptHistory ?? getPromptHistory() });
-    return sessionManagerInstance;
-}
-
-export function getSessionManager(): SessionManager {
-    if (!sessionManagerInstance) {
-        throw new ConversationError(
-            ConversationErrorCode.SESSION_INVALID,
-            'SessionManager not created. Call createSessionManager() first.'
-        );
-    }
-    return sessionManagerInstance;
-}
-
-export function resetSessionManager(): void {
-    if (sessionManagerInstance) {
-        sessionManagerInstance.destroy();
-    }
-    sessionManagerInstance = null;
 }

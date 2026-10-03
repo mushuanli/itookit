@@ -3,11 +3,10 @@ import { Kernel } from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { SessionDirectoryStorageResolver } from '../src/persistence/session-directory-storage';
 import { SessionRepository } from '../src/persistence/session-repository';
-import { createSessionManager, resetSessionManager } from '../src/session/session-manager';
+import { SessionManager } from '../src/session/session-manager';
 
 let cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
-    resetSessionManager();
     for (const close of cleanup.reverse()) await close();
     cleanup = [];
 });
@@ -24,11 +23,12 @@ async function fixture(canWriteSession: (sessionId: string) => Promise<boolean>)
     await engine.init();
     cleanup.push(() => engine.dispose());
     const sessionId = await engine.createSession('Session');
-    const managerInstance = createSessionManager(engine, { getAgentConfig: async (id: string) => id === 'memory-agent' ? {
+    const managerInstance = new SessionManager(engine, { getAgentConfig: async (id: string) => id === 'memory-agent' ? {
         id, memoryPolicy: { namespaceId: 'agent', readScopes: ['project'], writeScopes: ['project'] },
     } : undefined } as never, {
         kernel, dagPlugins: {} as never, flowStore: {} as never, canWriteSession,
     });
+    cleanup.push(async () => managerInstance.destroy());
     await managerInstance.bindSession(sessionId);
     return { engine, sessionId, sessionManager: managerInstance };
 }

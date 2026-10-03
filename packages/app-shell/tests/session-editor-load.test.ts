@@ -7,7 +7,7 @@ import { createVFS, MemoryBackend, type IStorageBackend } from '@itookit/vfs-cor
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { NodeFsOps } from '../../vfsdriver-localfs/src/fs/node-fs-ops';
 import { Kernel } from '@itookit/durable-kernel';
-import { SessionRepository, createSessionManager, resetSessionManager, SessionCommand } from '@itookit/llm-session';
+import { SessionRepository, SessionManager, SessionCommand } from '@itookit/llm-session';
 import { SessionDirectoryStorageResolver } from '../../llm-session/src/persistence/session-directory-storage';
 import { LLMWorkspaceEditor } from '../../llm-ui/src/shell/LLMWorkspaceEditor';
 import type { ICommandBus } from '@itookit/llm-session/contracts';
@@ -18,7 +18,7 @@ afterEach(async () => {
     vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.replaceChildren();
 });
 
-it('requires an injected view even when a legacy session singleton exists', async () => {
+it('requires an injected view even when another session instance exists', async () => {
     const f = await fixture();
     expect(() => new LLMWorkspaceEditor(document.createElement('div'), {
         sessionId: f.id, sessionRepository: f.repository, agentService: f.agents as never,
@@ -37,8 +37,8 @@ async function fixture(backend: IStorageBackend = new MemoryBackend()) {
     kernel.registerStorageResolver(new SessionDirectoryStorageResolver(fs)); await kernel.initialize();
     cleanup.push(async () => { kernel.dispose(); await kernel.waitIdle(); });
     const agents = { listAgents: () => [], getDefaultConnection: async () => null, getConnections: vi.fn(async () => []), findAgent: () => undefined, onChange: () => () => {} };
-    const sessions = createSessionManager(repository, agents as never, { kernel, dagPlugins: {} as never, flowStore: {} as never });
-    cleanup.push(() => resetSessionManager());
+    const sessions = new SessionManager(repository, agents as never, { kernel, dagPlugins: {} as never, flowStore: {} as never });
+    cleanup.push(() => sessions.destroy());
     const execute = vi.fn(async (command: string, args?: any) => {
         switch (command) {
             case SessionCommand.Bind: return sessions.bindSession(args.sessionId);

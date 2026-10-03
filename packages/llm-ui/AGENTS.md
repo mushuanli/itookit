@@ -73,9 +73,9 @@ ChatInput 设置按对话、OCR、高级分组；高级项默认折叠。Skills 
 
 项目新会话 UI 位于 `src/shell/drafts/`：编辑器只消费 ui-common 的 `SessionDraftControls`，输入序列化与保存队列独立。materialize 返回明确的编辑器/提交标识/恢复行为，不能修改宿主 options 传递状态；项目转正策略、持久化和接受判定不进入 UI。
 
-- `/chat` 是聊天/Flow 展示入口，`/settings` 承载可选设置编辑器；共享展示源码不得加载 llm-settings-ui。根入口等同 `/chat`，兼容聚合只在 `/legacy`。
+- `/chat` 是聊天/Flow 展示入口，`/settings` 承载可选设置编辑器；共享展示源码不得加载 llm-settings-ui。根入口等同 `/chat`；已删除 `/legacy` 聚合入口。
 - UI 经结构化 `SessionViewPort` 接收会话实例，默认工具列表由宿主注入，不从适配器读取产品默认值。Web/Tauri 不使用全局 SessionManager 装配聊天。
 
-`/chat` 的正式会话编辑器必须注入 SessionViewPort，提示词历史仅由实例提供。Session/Flow 命令常量来自各自 `/contracts`，共享 UI 禁止导入 Session 实现根入口；旧单例回退仅存在于显式 `/legacy` 入口。
+`/chat` 的正式会话编辑器必须注入 SessionViewPort，提示词历史仅由实例提供。Session/Flow 命令常量来自各自 `/contracts`，共享 UI 禁止导入 Session 实现根入口；禁止全局单例回退。
 
 声明由 tsup.types.config.ts 打包，中性契约内联，Kernel 和 UI 公共类保持外部身份。build 自动执行 check-llm-ui-entrypoints.mjs，检查默认入口无设置/单例，以及四个开发契约包不泄漏到 JS 或公开声明。禁止只移动 package.json 依赖而不验证产物。

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../packages/llm-ui/', import.meta.url));
 const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
+assert.ok(!manifest.exports['./legacy'] && !manifest.publishConfig.exports['./legacy'], 'UI must not publish singleton compatibility');
 const removed = ['driver-llm', 'tools', 'kernel-adapters', 'llm-tasks'].map(name => '@itookit/' + name);
 
 function graph(entry, declarations = false) {
@@ -24,10 +25,10 @@ function graph(entry, declarations = false) {
 for (const name of removed) assert.ok(!manifest.dependencies[name], `${name} must remain a development contract dependency`);
 for (const entry of ['llm-ui.js', 'chat.js', 'startup.js']) {
     const source = graph(entry);
-    assert.doesNotMatch(source, /getSessionManager|legacySessionView|@itookit\/llm-settings-ui|AgentConfigEditor/, `${entry}: default UI must not load compatibility or settings`);
+    assert.doesNotMatch(source, /getSessionManager|getPromptHistory|legacySessionView|@itookit\/llm-settings-ui|AgentConfigEditor/, `${entry}: default UI must not load compatibility or settings`);
     for (const name of removed) assert.ok(!source.includes(name), `${entry}: removed dependency ${name} leaked into JavaScript`);
 }
-for (const entry of ['index.d.ts', 'chat.d.ts', 'startup.d.ts', 'settings.d.ts', 'legacy.d.ts']) {
+for (const entry of ['index.d.ts', 'chat.d.ts', 'startup.d.ts', 'settings.d.ts']) {
     const source = graph(entry, true);
     for (const name of removed) assert.ok(!source.includes(name), `${entry}: removed dependency ${name} leaked into declarations`);
 }

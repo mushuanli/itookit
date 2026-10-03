@@ -27,11 +27,6 @@
       "types": "./src/settings.ts",
       "import": "./src/settings.ts",
       "default": "./src/settings.ts"
-    },
-    "./legacy": {
-      "types": "./src/legacy.ts",
-      "import": "./src/legacy.ts",
-      "default": "./src/legacy.ts"
     }
   },
   "publishConfig": {
@@ -57,10 +52,6 @@
       "./settings": {
         "types": "./dist/settings.d.ts",
         "import": "./dist/settings.js"
-      },
-      "./legacy": {
-        "types": "./dist/legacy.d.ts",
-        "import": "./dist/legacy.js"
       }
     }
   },

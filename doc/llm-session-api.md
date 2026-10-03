@@ -2,7 +2,7 @@
 
 `FlowInvocationService` 提供 `session.flow.invoke` / `session.flow.invocations`：以 `sessionId + requestId` 幂等启动固定 revision 的独立 Flow Run，同一 Session 可并行调用，调用意图和根 Task 引用持久化，结果不会推进普通对话的 branch head。`SessionCommand.CreateFromFlow` 的 `invocation: true` 直接创建调用；未指定时保留旧 Flow Session 路径。恢复与 UI 交互边界见 [Flow 调用与组合](design/flow-invocation-composition.md)。启动恢复先用上述标记筛出候选 Session：标记存在且不含该 Session 时完全不做 `listShared` 探测；先按标记写入、后写调用记录的顺序保证标记故障只会多扫一次，不会漏恢复。
 
-> 用户可见的会话语义 + 持久化：Session 生命周期、Round/Branch、SessionRepository（会话目录持久化）、RoundLog、SessionEventBus、UI projections、Durable Conversation。同时是上层装配入口：`initializeConversationSystem()` 统一注册 `llm.chat/agent/plan` 与 `flow.*` Programs 并装配 CommandBus/DAG。公共 API 从 `@itookit/llm-session` 根导出；少数内部工具（`RUNTIME_KEY`、`ulid`/`extractTimestamp`、`log`、`ContextProfileStore`、`VFSEntityStore`、`initializePromptHistory`/`resetPromptHistory`、`SessionFolder` 类型）仅按源码路径可用。
+> 用户可见的会话语义 + 持久化：Session 生命周期、Round/Branch、SessionRepository（会话目录持久化）、RoundLog、SessionEventBus、UI projections、Durable Conversation。同时是上层装配入口：`initializeConversationSystem()` 统一注册 `llm.chat/agent/plan` 与 `flow.*` Programs 并装配 CommandBus/DAG。公共 API 从 `@itookit/llm-session` 根导出；少数内部工具（`RUNTIME_KEY`、`ulid`/`extractTimestamp`、`log`、`ContextProfileStore`、`VFSEntityStore`、`SessionFolder` 类型）仅按源码路径可用。
 
 **依赖方向**：`llm-session → llm-flow → llm-tasks → durable-kernel`（本包 re-export `@itookit/llm-flow` 全部 API）。
 
@@ -49,7 +49,7 @@ interface ConversationSystem {
 async function initializeConversationSystem(options: ConversationSystemOptions): Promise<ConversationSystem>;
 ```
 
-装配流程：初始化 services（`agentService.init()` / `sessionEngine.init()` / `initializePromptHistory(promptHistoryFiles)`）→ `registerDurablePrograms(kernel)` 注册 Programs（`llm.chat/agent/plan` + `flow.value/human/aggregate`）→ 创建 SessionManager → 用 `new FlowDefinitionStore(flowStore, dagPlugins)` 装配 CommandBus + DagCommandService → 激活插件（session/vcs/history）。
+装配流程：初始化 services（`agentService.init()` / `sessionEngine.init()` / 实例 `PromptHistoryService.init()`）→ `registerDurablePrograms(kernel)` 注册 Programs（`llm.chat/agent/plan` + `flow.value/human/aggregate`）→ 创建 SessionManager → 用 `new FlowDefinitionStore(flowStore, dagPlugins)` 装配 CommandBus + DagCommandService → 激活插件（session/vcs/history）。
 
 ---
 
@@ -94,7 +94,7 @@ class SessionManager implements ISession, SessionQuery {
 }
 ```
 
-**工厂**：`createSessionManager(engine, agentService, { kernel, dagPlugins, flowStore, resolveSessionContext?, resolveTools?, retrieveMemory? })`、`getSessionManager()`（单例读取）、`resetSessionManager()`。
+**装配**：使用 `initializeConversationSystem(options)` 返回的实例和异步 `dispose()`；低层使用 `new SessionManager(engine, agentService, options)`，由持有者调用 `destroy()`。单例工厂与 getter 已删除。
 
 **项目草稿来源**：首次提交可携带 `SendIntent.submission = { id, source: { kind: 'project-draft', ownerId: projectId, id: draftId } }`。Session 层将 `submissionId` 用作该 Round 的身份，并将来源保存到 `Round.submission`；历史提交完成后的 `execution_task_projected` 同时携带该来源。应用层验证持久 Round、执行引用和历史索引后，事务性地记录草稿转正并补建下一份草稿。普通 `createSession` 不触发此流程，内存队列返回成功也不作为转正依据。生命周期、恢复及通知详见 [项目内的新会话草稿](design/vfs-session-browser.md#项目内的新会话草稿)。
 
@@ -283,7 +283,7 @@ Flow Invocation 记录请求的 `connectionId` 与接收时的 `resolvedConnecti
 | 类 | 职责 | 关键 API |
 |---|---|---|
 | `VFSAgentService extends FileBackedService implements IAgentManagementService` | Agent 配置的 VFS 持久化 | CRUD（实现 `IAgentManagementService` / `IAgentConfigService` / `IConnectionService`） |
-| `PromptHistoryService extends FileBackedService` | prompt 历史（注入的文件系统） | `getPromptHistory()` 单例、`initializePromptHistory(fs)`、`resetPromptHistory()` |
+| `PromptHistoryService extends FileBackedService` | prompt 历史（注入的文件系统） | `new PromptHistoryService(fs)`、`init()`、`dispose()`；经 SessionManager 实例注入 |
 | `AgentResolver` | 独立解析 Agent 身份，再按会话/全局连接解析执行模型 | `AgentInfo` / `ModelInfo` 类型 |
 | `AttachmentProcessor` | 附件处理（文件 → 内联） | — |
 | `ContextProfileStore`（`persistence/context-profile-store.ts`） | 上下文画像（VFS） | — |
@@ -374,7 +374,7 @@ packages/llm-session/src/
 │   ├── constants.ts              CONVERSATION_DEFAULTS
 │   └── errors.ts                 ConversationError + ConversationErrorCode
 ├── session/                      会话运行时（内存态 + 编排）
-│   ├── session-manager.ts        SessionManager + createSessionManager/getSessionManager/resetSessionManager
+│   ├── session-manager.ts        SessionManager（实例生命周期）
 │   ├── session-registry.ts       SessionRegistry + BoundContext（运行时状态）
 │   ├── session-state.ts          SessionState + HistoryMessage（UI 投影）
 │   ├── session-event-bus.ts      SessionEventBus
@@ -411,7 +411,7 @@ packages/llm-session/src/
 │   ├── agent-service.ts          IAgentConfigService/IAgentManagementService/IConnectionService 接口
 │   ├── vfs-agent-service.ts      VFSAgentService（Agent 配置 CRUD）
 │   ├── privileged-command.ts     IPrivilegedCommandService/PlanCommandRequest/ExecCommandRequest
-│   └── prompt-history-service.ts PromptHistoryService + getPromptHistory/initializePromptHistory
+│   └── prompt-history-service.ts PromptHistoryService（实例生命周期）
 └── utils/                        error-formatter / file-backed-service / logger / vfs-entity-store
 ```
 
@@ -477,4 +477,4 @@ TTY 首次结束信息保持不变，后续结束通知与输出不覆盖；已�
 
 `prepareSessionDeletion(id)` 记录可恢复意图并提升直接子会话；`pendingSessionDeletions()` 提供待清理 ID。宿主仍应通过 `SessionLifecycleService` 先停止执行再删除。删除意图在物理清理完成后移除，重启可以继续处理。此字段属于 `session.seq` 元信息，不写入 `history.seq` 的 Round 索引，也不编码成物理子目录。详见 [项目抽屉与子会话导航](design/project-session-navigation.md)。
 
-会话工厂接受实例级 `hostPorts` 与 `agentResolution`，返回独立 SessionManager 和幂等异步 dispose。UI 必须接入返回实例；旧单例入口仅用于兼容。业务预设移到 `packages/app-core/src/presets/default-flows.ts` 与 `packages/app-core/src/presets/essay-review.json`。
+会话工厂接受实例级 `hostPorts` 与 `agentResolution`，返回独立 SessionManager 和幂等异步 dispose。UI 必须接入返回实例；不再提供全局单例入口。业务预设移到 `packages/app-core/src/presets/default-flows.ts` 与 `packages/app-core/src/presets/essay-review.json`。

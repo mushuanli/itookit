@@ -303,7 +303,7 @@ LLM UI 分为 `/chat` 与 `/settings` 子入口；设置包是可选 peer，聊�
 
 本轮验证：全仓类型检查、库/Web 构建、Driver tarball 独立 ESM/CJS 消费及无依赖安装通过；app-core 231 项、CLI 185 项通过，Context/Session/UI 包回归通过。app-shell 全量中 471 项通过，4 项原生恢复用例在正常权限下重跑通过；其余 4 项失败在提交前基线 `70f9947c` 的独立源码快照复现（提示词复制清理、外部草稿刷新两项、已删除 saveCurrent 的旧用例），不将其记为通过。
 
-模型管理由 app-core 显式组合 `kernel-adapters/llm/core` 与可选 `kernel-adapters/llm/presets`。机制默认空目录，Provider/连接/Agent/定价通过实例预设快照注入，自动连接由宿主策略决定。聊天 `/chat` 只消费 Session/Flow 契约与实例端口；缺少正式会话视图时拒绝创建，旧单例回退留在 UI 的显式 /legacy 入口。
+模型管理由 app-core 显式组合 `kernel-adapters/llm/core` 与可选 `kernel-adapters/llm/presets`。机制默认空目录，Provider/连接/Agent/定价通过实例预设快照注入，自动连接由宿主策略决定。聊天 `/chat` 只消费 Session/Flow 契约与实例端口；缺少正式会话视图时拒绝创建，已删除 UI 单例回退和 /legacy 入口。
 
 本轮边界补全验收：全仓 typecheck、架构守卫与 docs:check 通过；Kernel adapters 199、Session 208、LLM UI 64、app-core 231 项测试通过。Session/UI/Flow/Adapters 与 Web 构建通过，构建后的 `/llm/core` 导入图不含产品目录，`/chat` 导入图不含 Session 单例或设置实现。宿主定向回归 25 项中 23 项通过，2 项仍为此前确认的外部草稿刷新问题；这不代表完整 app-shell 矩阵通过。
 
@@ -317,6 +317,291 @@ DirectAgentPolicy 从 ApplicationRuntimeOptions 经 ConversationSystemOptions、
 
 执行策略收尾：DirectAgentPolicy.llmRetry/toolTimeoutMs 冻结到显式 Agent Task；Flow 从节点或 Flow defaults 接入相同参数。Tasks 取消重试次数的固定 3 次上限，工具超时可覆盖且跨持久恢复保持一致。MCP 日志和客户端身份由实例选项注入，机制默认空日志及 mcp-client 身份，app-core 提供 MindOS 身份与日志。driver-llm 的连接测试要求调用方模型或注入目录；Codex 缺省不覆盖宿主模型。
 
-宿主入口收尾：CLI 显式注入 MindOS 预设与自动连接策略；app-core 的模型导航从实例管理接口读取 Provider 默认值，app-shell 的模板仅加载可选预设。生产宿主禁止使用 /llm 兼容聚合。llm-ui 根入口现在等同 /chat，不加载设置或 Session 单例；旧 API 在 /legacy，设置工厂在 /settings。
+宿主入口收尾：CLI 显式注入 MindOS 预设与自动连接策略；app-core 的模型导航从实例管理接口读取 Provider 默认值，app-shell 的模板仅加载可选预设。生产宿主禁止使用 /llm 兼容聚合。llm-ui 根入口现在等同 /chat，不加载设置或 Session 单例；已移除旧聚合 API，设置工厂在 /settings。
 
-UI 发布收尾：driver-llm、tools、kernel-adapters、llm-tasks 改为开发契约依赖，JS 常量与声明内联，直接运行依赖从 12 个降到 8 个；Session/Flow 等传递依赖仍存在。Kernel 公开类保持外部类型身份。UI 默认根入口、/chat、/startup 不加载设置或 Session 单例，/legacy 保留旧行为。ui-common 与 durable-kernel 的 publishConfig.exports 已补齐实际产物路径。
+UI 发布收尾：driver-llm、tools、kernel-adapters、llm-tasks 改为开发契约依赖，JS 常量与声明内联，直接运行依赖从 12 个降到 8 个；Session/Flow 等传递依赖仍存在。Kernel 公开类保持外部类型身份。UI 默认根入口、/chat、/startup 不加载设置或 Session 单例；Session 单例 API 与 UI /legacy 入口已删除。ui-common 与 durable-kernel 的 publishConfig.exports 已补齐实际产物路径。
+
+## LLM 模块 C4 与代码审查（2026-10-03）
+
+本节以当前工作树为准，包含尚未提交的 Session 单例及 UI `/legacy` 删除。审查关注源代码依赖、实际装配、公开接口、事件流和清理候选；不把此前测试通过等同于所有架构目标均已完成。C4 Component 中的组件代表逻辑 npm 模块，不代表独立部署进程。
+
+### C4 系统边界
+
+```mermaid
+C4Context
+    title LLM framework in its host
+    Person(user, "用户", "聊天、Agent、Flow 与审批")
+    System(host, "MindOS / 第三方宿主", "注入配置、策略、UI 与平台能力")
+    System(framework, "公共 LLM 框架", "通信、上下文、持久执行、编排与会话")
+    System_Ext(provider, "模型服务 / Codex", "Provider 协议与流式结果")
+    System_Ext(capabilities, "工具 / MCP / 原生进程", "授权后的外部能力")
+    System_Ext(storage, "持久存储", "VFS 后端与上下文内容")
+    Rel(user, host, "发送、查看、确认、取消")
+    Rel(host, framework, "实例装配与策略注入")
+    Rel(framework, provider, "模型请求", "HTTP / SSE / RPC")
+    Rel(framework, capabilities, "Effect 执行与取消确认")
+    Rel(framework, storage, "状态、事件、内容与资产")
+```
+
+### C4 模块与运行时协作
+
+```mermaid
+C4Component
+    title Logical npm modules and runtime collaboration
+    Container_Boundary(hostBoundary, "宿主产品层") {
+        Component(app, "app-core / app-shell / apps", "TypeScript", "产品预设、授权、路由、平台装配与生命周期")
+    }
+    Container_Boundary(publicBoundary, "公共机制与可选展示层") {
+        Component(ui, "llm-ui", "DOM / ports", "输入、历史、Flow 展示、审批与任务控制")
+        Component(settings, "llm-settings-ui", "DOM / management ports", "可选配置编辑界面")
+        Component(session, "llm-session", "Session / Round / Branch", "会话历史、配置解析、运行投影与命令")
+        Component(flow, "llm-flow", "DAG / FlowStore", "编译、依赖调度、循环、委派与恢复")
+        Component(tasks, "llm-tasks", "DurableTaskProgram", "Chat / Agent / Plan 状态机与 Context bridge")
+        Component(kernel, "durable-kernel", "Task / Effect / events", "事务、租约、恢复、预算、交互与资源")
+        Component(context, "llm-context", "IContextService / ports", "历史选择、窗口、不可变请求、Notes 与 GC")
+        Component(adapters, "kernel-adapters", "EffectAdapter / management", "模型、工具、Skill、MCP、VFS 与平台能力适配")
+        Component(driver, "driver-llm", "Provider protocols", "发送、接收、流式解析、取消与独立通信")
+        Component(tools, "tools", "Tool / host ports", "工具定义、输入校验、执行与进度")
+        Component(vfs, "vfs-core", "IFileSystem / backends", "通用存储与文件访问")
+    }
+    Rel(app, session, "装配实例与宿主策略")
+    Rel(app, adapters, "装配能力与显式预设")
+    Rel(app, ui, "注入会话视图、命令与控制端口")
+    Rel(ui, session, "通过契约与实例端口消费")
+    Rel(settings, adapters, "通过管理服务编辑配置")
+    Rel(session, flow, "submitRun / Flow 编排")
+    Rel(session, context, "历史与上下文装配")
+    Rel(flow, tasks, "构造和提交任务")
+    Rel(tasks, kernel, "返回 Decision 与 Effect 请求")
+    Rel(kernel, adapters, "执行已注册 EffectAdapter")
+    Rel(adapters, context, "context.prepare / 内容适配")
+    Rel(adapters, driver, "ILLMService / Provider 通信")
+    Rel(adapters, tools, "工具调用与能力注册")
+    Rel(session, vfs, "会话资产与投影持久化")
+    Rel(kernel, vfs, "SeqFile 持久状态与事件")
+```
+
+上图的 Kernel → Adapters 是运行时调用：Kernel 调用宿主注册的 EffectAdapter，并不 import kernel-adapters。静态依赖方向是 Adapters → Kernel。这是依赖倒置，不能把调用箭头误判为包循环。
+
+### 模块职责和接口所有权
+
+| 模块 | 功能与公开边界 | 应由宿主决定的策略 |
+|---|---|---|
+| driver-llm | LLMDriver、Provider、ChatCompletionParams/Response/Chunk、ILLMService；发布零运行依赖 | 网络、日志、连接和模型、重试决策 |
+| llm-context | IContextService.prepare/request、IContextEngine、内容/记录/GC 端口；零运行依赖 | 预算、摘要、检索、计量及保留策略 |
+| durable-kernel | DurableTaskProgram.init/reduce → Decision；EffectAdapter.execute/cancel/reconcile；SessionHandle/TaskHandle/EventEnvelope | 注册哪些 Program/Effect、并发、重试与资源配置 |
+| llm-tasks | Chat/Agent/Plan Program、buildLlmTaskInput、执行事件契约、ContextTaskProgram | 已解析提示、工具授权、maxExchanges、llmRetry、toolTimeoutMs |
+| llm-flow | submitRun、CompiledRunDefinition、RunExecution、DurableFlowExecutor、FlowStore、插件契约 | 图定义、节点配置、路由条件、预算、隔离工作区 |
+| llm-session | initializeConversationSystem、SessionManager、SessionRepository、Round/Branch、ICommandBus | Agent 解析、默认授权、DirectAgentPolicy、写租约、宿主日志/翻译 |
+| kernel-adapters | Effect 与平台适配；模型配置、MCP、Skill 和费用管理；显式 core/config/presets 入口 | 模型目录、自动连接、MCP 传输、外部能力、平台策略 |
+| tools | Tool、ToolInvokeRequest、ToolInvokeResult、ToolVFSContext、INativeShell | 授权、工作目录、进程、外部服务与工具启用范围 |
+| llm-ui | SessionViewPort、PromptHistoryPort、TaskControlPlane、ICommandBus、会话仓储端口 | 导航、默认工具、宿主创建协议、国际化及产品动作 |
+| llm-settings-ui | 管理服务接口、配置编码及可选设置入口 | 实例能力与可编辑配置范围 |
+| app-core/app-shell/apps | createApplicationRuntime/createKernelRuntime 与 UI 装配 | MindOS 预设、产品提示词、菜单、路由、环境与生命周期 |
+
+Session、Flow 和 Tasks 分别拥有历史语义、图语义和单任务状态机，不能因为都处理 LLM 就合并。driver-llm 和 llm-context 可分别使用；Kernel 可以执行非 LLM Program。kernel-adapters 当前同时覆盖执行适配和模型管理，应先按子入口及内部组件治理，暂不增加新的 npm 包。
+
+### 静态依赖与发布依赖
+
+```mermaid
+flowchart TD
+    Session[llm-session] --> Flow[llm-flow]
+    Session --> Tasks[llm-tasks]
+    Session --> Context[llm-context]
+    Session --> Driver[driver-llm contracts]
+    Session --> Tools[tools contracts]
+    Session --> VFS[vfs-core]
+    Flow --> Tasks
+    Flow --> Kernel[durable-kernel]
+    Flow --> Context
+    Tasks --> Kernel
+    Tasks --> Context
+    Tasks --> Driver
+    Tasks --> Tools
+    Kernel --> VFS
+    Adapters[kernel-adapters] --> Kernel
+    Adapters --> Driver
+    Adapters --> Tools
+    Adapters --> Context
+    Adapters --> VFS
+    Adapters --> Common[common]
+    Tools --> VFS
+    Tools --> Context
+    Tools --> Driver
+```
+
+箭头表示源代码/包声明依赖，不等于全部都是 JavaScript 运行时导入。Session 对 kernel-adapters/contracts 的开发引用在发布时内联；UI 对 driver-llm、tools、kernel-adapters、llm-tasks 的开发契约引用也内联。UI 当前直接运行依赖为 common、ui-common、vfs-core、durable-kernel、llm-session、llm-flow、js-yaml、marked，共 8 个；这不代表传递依赖只有 8 个。
+
+选定模块的源码 import/export 扫描未发现跨包循环。kernel-adapters 对自身公共子入口的引用不属于跨包循环；此扫描也不能证明所有文件级循环、动态加载或发布产物均不存在循环。
+
+### 事件流：直接 Chat / Agent 与 Context v2
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant UI as llm-ui
+    participant S as Session 命令与运行协调
+    participant C as llm-context 装配
+    participant F as llm-flow submitRun
+    participant K as durable-kernel
+    participant P as llm-tasks Program
+    participant A as kernel-adapters
+    participant D as driver-llm
+    User->>UI: 发送文本、附件与执行模式
+    UI->>S: ICommandBus 命令 / SendIntent
+    S->>S: 验证模式、写租约、Agent 与授权；固定策略
+    S->>C: 按 Round/Branch、Profile 与宿主材料装配
+    C-->>S: ContextSnapshot
+    S->>F: submitRun(kind=task, TaskSpec, capabilities)
+    F->>K: session.submit(deferStart) / bindCapabilities
+    K->>P: init / reduce
+    opt 注册并选用 Context v2 Program
+        P-->>K: Decision: context.prepare Effect
+        K->>A: 执行 ContextPrepareEffect
+        A->>C: IContextService.prepare
+        C-->>A: 不可变内容引用与待提交 writes
+        A-->>K: effect-completed
+        K->>P: reduce(prepared result)
+        P-->>K: set-shared writes + 下一 LLM Effect
+        K->>K: 同事务提交状态、writes 与 Effect 请求
+    end
+    P-->>K: llm.chat Effect，内部通信仅一次尝试
+    K->>A: execute(request, EffectExecutionContext)
+    A->>D: ILLMService.chat / chatStream
+    loop 模型流式内容
+        D-->>A: ChatCompletionChunk
+        A->>K: context.emit(agent.event)
+        K->>K: 持久化 EventEnvelope(sequence)
+    end
+    D-->>A: 终态响应与 usage
+    A->>K: 幂等预算结算 / Effect 完成
+    K->>P: effect-completed
+    P-->>K: 下一工具或 LLM Effect / complete
+    K-->>S: Task 事件消费
+    S->>S: RoundLog / 历史投影
+    S-->>UI: SessionEventBus 会话事件
+    UI-->>User: 正文、工具卡片、引用与状态
+```
+
+普通直接 Chat 使用 kind=task，不需要单节点 DAG。Flow 路径先编译图并调用 kind=graph，由 DurableFlowExecutor 管理多个任务和动态成员；任务状态机、Effect 和事件机制仍复用同一 Kernel。Context v2 的内容发布与 head 提交是不同阶段，不能由上下文服务提前修改共享 head。
+
+### 事件流：工具审批与恢复
+
+```mermaid
+sequenceDiagram
+    participant P as Agent Program
+    participant K as Kernel 与持久事件
+    participant UI as UI / CLI
+    actor User as 用户
+    participant A as ToolCallEffectAdapter
+    participant T as tools / 外部能力
+    P-->>K: request-interaction(approval / human)
+    K->>K: 保存 pending interaction 和请求事件
+    K-->>UI: task.interaction.requested
+    UI-->>User: 显示确认或输入面板
+    User->>UI: 审批 / 输入
+    UI->>K: TaskHandle.respond(interactionId, value)
+    K->>K: 校验交互身份、状态与控制边界
+    K-->>P: interaction-resolved
+    alt 拒绝或输入不通过
+        P-->>K: 记录拒绝 / 等待 / 结束
+    else 准入通过
+        P-->>K: tool.call Effect
+        K->>A: execute，携带 grants 和取消信号
+        A->>T: invoke，校验 schema、权限及启用状态
+        T-->>A: 进度 / 最终结果
+        A->>K: agent.event(tool:progress) / Effect result
+        K-->>P: effect-completed / effect-failed
+    end
+    Note over K,UI: 重启后恢复 pending interaction；重新挂接事件流，不把审批等同于直接调用工具
+```
+
+### 事件流：取消和确认停止
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant UI as RunAttachmentController
+    participant K as Kernel
+    participant A as EffectAdapter
+    participant E as 网络 / 工具 / 进程
+    User->>UI: 取消
+    UI->>K: TaskHandle.cancel(requestId, expectedEpoch)
+    K->>K: control.requested = cancel
+    K->>A: AbortSignal + cancel
+    A->>E: 中止外部操作
+    E-->>A: 执行退出 / 清理结束
+    A-->>K: confirmStopped
+    K->>K: activeOperations 和 cleanupPending 清零后确认
+    K-->>UI: 持久终态 / 控制状态
+    UI-->>User: 已停止或仍在停止
+```
+
+事件协议分三层：Kernel EventEnvelope 是持久事实；agent.event 是其中的业务 payload；SessionEventBus 是会话投影通知。UI 的 Session 历史与直接任务挂接分别消费不同视图，不能让两条链重复推进同一正文。轮询/订阅通知只是唤醒方式，正确性依赖持久记录和 sequence，而非通知恰好到达。
+
+### 策略与机制审查
+
+| 边界 | 当前判定 | 代码证据与后续动作 |
+|---|---|---|
+| 核心通信、Context、Kernel | 基本成立 | driver/context 无运行依赖；Kernel 不 import 产品层；I/O、Program 和 Effect 可替换 |
+| 提示词、授权、超时、重试、目录 | 主执行链已分离 | DirectAgentPolicy、buildLlmTaskInput、显式 presets 与 MCP 选项注入，并持久化任务策略 |
+| 重试所有权 | 正确，保持回归 | program-helpers 的 LLM 请求明确 `_maxAttempts: 1`，Effect 使用 retries+1；避免 Driver 与 Kernel 重试乘积 |
+| Session 单例 | 已清理 | 当前工作树删除 Session/PromptHistory 单例与 UI legacy；调用者持有实例和 dispose |
+| UI 宿主创建协议 | 尚有产品耦合 | SlashCommandRouter 写 app_create_params；StateManager 读取，app-shell 也写同键；应使用已有 initialInputState/导航参数或新增最小创建端口 |
+| Effect 日志与翻译 | 尚有全局耦合 | llm-chat-effect 直接使用 common 的模块日志；create-kernel-adapters-runtime 用 common.t 生成不可用提示；改为实例日志/诊断及宿主翻译 |
+| Provider 扩展注册 | 尚有共享可变状态 | providers/registry 的全局 Map 可经 registerProvider 改写，LLMDriver 固定调用 createProvider；应注入实例 ProviderFactory/Registry |
+| MCP 兼容宿主 | 可继续清理 | 全局 hostFactory 仅供 legacy-device-driver 快照；生产 host 已走 core；全仓未发现生产 registerMCPStdioHost 调用 |
+| 厂商默认行为 | 需显式界定 | driver defaults 给 DeepSeek 默认 thinking；这是厂商行为默认，建议可选配置或宿主 presets，不强制所有用户接受 |
+| UI 完全通用化 | 尚未完成 | 仍依赖通用包翻译/图标和具体仓储能力；作为框架 UI 合理，但不等于任意系统都能只传一个流使用 |
+
+因此“主链解耦已完成”应限定为模块依赖方向与主要策略注入已成立；“所有产品策略、全局状态均已消除”不成立。无需为可替换性无限增加接口或包；只抽取确实存在多宿主差异的端口。
+
+### 代码质量：量化与结构风险
+
+使用 TypeScript AST 扫描选定 10 个 LLM/执行/工具模块的 src，排除 `.test.ts`，函数长度包括注释、模板字符串和嵌套回调。发现 367 个带函数体节点超过 30 行；这只是定位线索，不是圈复杂度或缺陷数。本轮没有测量圈复杂度，也没有用 LOC 推断性能问题。
+
+| 热点 | 实测 | 建议的包内拆分 |
+|---|---:|---|
+| llm-flow/src/flow/executor.ts 的 execute | 约 770 行 | 编译与校验、运行状态/恢复、调度推进、工作区终结；显式 RunState，保留事务和 checkpoint 顺序 |
+| llm-ui/src/components/input/plugins/SlashCommandPlugin.ts 的 buildDefaultCommands | 约 439 行 | 命令描述目录与执行处理分开；按已有命令领域组织 |
+| llm-ui/src/shell/SlashCommandRouter.ts 的 buildSlashCallbacks | 约 366 行 | 会话、模型、工具、导航处理器；宿主动作从公共 UI 退出 |
+| kernel-adapters/src/llm-management/device/llm-device-driver.ts 的 ioctl | 约 205 行 | 类型化命令分派，按配置、会话、模型调用分组 |
+| llm-session/src/session/conversation-run-coordinator.ts | 文件约 818 行 | 准入、任务构造、Context 装配、历史投影与恢复分别测试 |
+| llm-ui/src/shell/LLMWorkspaceEditor.ts | 文件约 1245 行 | 视图装配、会话绑定、任务挂接、保存生命周期；避免编辑器持有全部业务分支 |
+
+Provider wire 层与管理适配层存在 any 和双重断言，但数量不能证明错误。优先在外部 JSON、VFS ioctl 和持久化解码边界使用 unknown + 校验；已经校验后的稳定内部类型再逐步收紧。不要只替换关键字或为了函数≤30行而拆成没有语义的跳转。
+
+API 仍有改进空间：UI 工厂参数中的 sessionManager 与 resolveSessionView 均可省略，正式会话编辑器到运行时才报错；可用区分 Draft/Session 的依赖类型提前约束。UI 内部已有 TaskControlPlane，可以逐步用它替换暴露到 UI 工厂的具体 Kernel 类，但先确认所有消费所需方法；不应通过内联 Kernel 的私有字段类型破坏类身份。
+
+### 冗余与清理候选
+
+| 候选 | 确认程度 | 清理方式 |
+|---|---|---|
+| llm-tasks 的 core/context-assembler、core/provider-message-adapter、durable/context-compaction | 已确认是 llm-context 的薄转发；有测试、根导出和活文档引用 | 消费者直接引用 llm-context，迁移测试到权威实现，再删除转发与旧导出 |
+| kernel-adapters 的 legacy-device-driver、MCP 全局注册与 /llm 兼容聚合 | 生产 host 无调用；仍有公开 API 和兼容测试 | 按公开 API 迁移清单清理；保留 core/config/presets/contracts 和实例 MCP 工厂 |
+| llm-ui/chat 的 LLMFactoryOptions | 仓库中只有定义，无其他消费者；未由根显式转发 | 删除或与实际工厂依赖类型统一，不保留两个不一致的选项定义 |
+| llm-ui/chat 的 isNewSession=false | 工厂固定为 false，但编辑器和 StateManager 仍读取该字段 | 先核对其他编辑器创建方式与草稿行为，再删除分支；不能据此直接删除全部新建会话逻辑 |
+| LLMServiceAdapter.runMode 类型 | 确认是 `'kernel' | 'kernel'` 重复联合 | 直接简化；另行审查该参数是否还需要与设备协议绑定 |
+| 附件展开 | Effect、ServiceAdapter、Driver 均有相关逻辑 | 核实不同数据阶段和独立 Driver 入口；整合转换边界，保留独立运行功能，不能简单删一处 |
+| context 的旧装配和 v2 服务 | 仍有实际装配与历史读取消费者 | 不作为死代码删除；先规定历史选择、窗口与 wire 编码的各自责任 |
+| 文档索引 | 部分指向兼容转发而非权威实现，事件流文档仍说活动描述未接线 | 更新 file-index 和事件流表述，避免继续引导新代码消费旧接口 |
+
+上述“无消费者”只指本仓库静态检索，没有外部 npm 使用统计。删除公开导出应在发布说明中明确迁移和版本兼容性。本轮审查不自动删除这些候选，也不把缺少检索结果作为删除工具、恢复分支或协议兼容行为的充分证据。
+
+### 建议实施顺序与验证
+
+1. 清理剩余兼容转发、MCP legacy 和明确重复定义；同步消费者、测试、README 和产物守卫。
+2. 移除 UI 的 app_create_params 协议，以及适配器日志/翻译和 Provider Registry 的全局状态；增加多实例隔离回归。
+3. 按上述责任拆分 Flow execute 与 UI 命令装配；每次保留恢复、幂等结算、取消确认和审批的现有证据。
+4. 最后统一类型化命令分派、外部解码、附件转换与公共声明，验证 npm 外部消费者。
+
+当前工作树此前通过 Session 215 项、UI 66 项、会话编辑器定向 3 项、全仓类型检查、相关构建、架构守卫和发布外部消费者验证。这些是已有改动的验证，并非本轮静态审查发现的所有候选都已修复；本轮只新增审查文档。完整 app-shell 矩阵仍有已知基线问题，不能宣称全量通过。
+
+主要源码入口：
+
+- [宿主装配](../packages/app-core/src/runtime/create-application-runtime.ts)、[内核装配](../packages/app-core/src/runtime/create-kernel-runtime.ts)。
+- [Session 实例装配](../packages/llm-session/src/index.ts)、[会话运行协调](../packages/llm-session/src/session/conversation-run-coordinator.ts)。
+- [统一提交](../packages/llm-flow/src/run-submission.ts)、[Flow 执行器](../packages/llm-flow/src/flow/executor.ts)。
+- [Program/Effect 契约](../packages/durable-kernel/src/domain/types.ts)、[Context v2 bridge](../packages/llm-tasks/src/durable/context-program.ts)、[LLM Effect 构造与重试](../packages/llm-tasks/src/durable/program-helpers.ts)。
+- [Context 端口](../packages/llm-context/src/domain/durable.ts)、[通信驱动](../packages/driver-llm/src/core/driver.ts)、[Provider 注册表](../packages/driver-llm/src/providers/registry.ts)。
+- [UI 实例端口](../packages/llm-ui/src/domain/ports/SessionViewPort.ts)、[任务挂接](../packages/llm-ui/src/shell/RunAttachmentController.ts)。

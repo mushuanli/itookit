@@ -46,7 +46,7 @@ LLM 对话工作区编辑器 — 支持多分支对话、流式输出、会话�
 | View 交互 | 直接引用 / 接口 | **接口(ports)** | 允许替换实现,Command 可独立测试 |
 | 状态持久化 | 即时保存 / 防抖 | **防抖(2s/1s)** | 避免高频写入,生成中跳过 |
 | 会话控制 | 直接调 SessionManager / CommandBus | **ICommandBus(`session.*`)** | 会话事实源收敛到 `llm-session`,UI 不直接操作引擎 |
-| 会话管理器 | 每实例 / 全局单例 | **全局单例 `getSessionManager()`** | 跨实例共享会话注册表;`getCurrentSessionId()` 过滤事件 |
+| 会话管理器 | 每实例 / 全局单例 | **宿主注入 SessionViewPort** | 每个运行时持有自己的会话管理器和提示词历史 |
 
 ---
 
