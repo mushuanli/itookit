@@ -115,3 +115,30 @@ interface SchedulerGraph {
     nodes?: DagNodeDefinition[];
     edges?: DagEdgeDefinition[];
 }
+
+/** CAS retries may re-read the queue, but must not repeat live graph mutations. */
+export async function consumeGraphRetryIntents(
+    session: Pick<SessionHandle, 'getShared' | 'setShared'>,
+    rootId: string,
+    apply: (intent: FlowGraphRetryIntent) => Promise<void>,
+): Promise<number> {
+    const key = graphRetryKey(rootId);
+    const reconciled = new Set<string>();
+    for (let attempt = 0; attempt < 5; attempt++) {
+        const saved = await session.getShared(key);
+        const intents = Array.isArray(saved?.value) ? saved.value as unknown as FlowGraphRetryIntent[] : [];
+        const pending = intents.filter(intent => !intent.applied);
+        if (!pending.length) return reconciled.size;
+        for (const intent of pending) {
+            if (reconciled.has(intent.requestId)) continue;
+            await apply(intent);
+            reconciled.add(intent.requestId);
+        }
+        try {
+            await session.setShared(key, intents.map(intent => intent.applied ? intent : { ...intent, applied: true }) as unknown as JsonValue,
+                { expectedVersion: saved?.version ?? null });
+            return reconciled.size;
+        } catch (error) { if (attempt === 4) throw error; }
+    }
+    return reconciled.size;
+}

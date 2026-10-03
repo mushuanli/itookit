@@ -1,10 +1,15 @@
+import { FlowRunAggregation, runMembers } from './run-aggregation';
+import { FlowRunLifecycle, workspaceLeaseKey, cancelPendingFlowTasks } from './run-lifecycle';
+import type { FlowWorkspaceLease, FlowWorkspaceManager } from './run-lifecycle';
+import { createSchedulerCollections, snapshotSchedulerCollections, attachSchedulerInstances } from './scheduler-state';
+import { GraphRetryController } from './graph-retry-controller';
 import { FlowTaskFactory } from './task-factory';
 import { prepareNodeTask } from './node-task-preparation';
 import { DelegationController } from './delegation-controller';
 import { instanceKey, parseInstanceKey } from './node-instance';
 import { GraphMutationRuntime } from './graph-mutations';
 import { readyFlowNodes } from './scheduler-readiness';
-import { FlowVariableStore, validateVariableGraph, variableCurrent } from './variables';
+import { validateVariableGraph } from './variables';
 import { rememberSchedulerLease } from './control-session';
 import { fenceSchedulerSession } from './fenced-session';
 import type { SchedulerCheckpoint } from './scheduler-checkpoint';
@@ -13,11 +18,10 @@ import { compileDispatchGraph } from './structured/graph';
 import { compileControlGraph } from './control/graph';
 import { memberGroup, startReservedWorkers } from './control/scheduling';
 import { reconcileDispatchChildren } from './structured/reconcile';
-import { validateDispatchCapacity, withDispatchWorkspace } from './structured/limits';
+import { validateDispatchCapacity } from './structured/limits';
 import { restoreFlowHandle } from './restore-handle';
 import { acquireSchedulerLease, isSchedulerOwnershipLost, type SchedulerLease } from './scheduler-lease';
-import { graphRetryKey, type FlowGraphRetryIntent } from './graph-retry';
-import { beginWorkspaceFinalization, workspaceFinalizationKey, type WorkspaceFinalization } from './workspace-finalization';
+import type { WorkspaceFinalization } from './workspace-finalization';
 import { createRunCatalog } from './run-catalog';
 import type { DagEdgeDefinition, DagNodeDefinition, DagPluginCatalog, DagRunSpec, JsonValue as CommonJsonValue } from '../contracts';
 import type { ToolDefinition } from '@itookit/llm-context';
@@ -27,42 +31,15 @@ import {
     type SessionHandle,
     type TaskHandle,
 } from '@itookit/durable-kernel';
-import type { FlowWorkspacePolicy, HarnessHookEvent, HarnessHookRunner } from '../contracts';
+import type { HarnessHookEvent, HarnessHookRunner } from '../contracts';
 import type { SkillContext } from '@itookit/llm-tasks';
 
-export interface FlowWorkspaceLease {
-    directory: string;
-    /**
-     * JSON-serializable description of the lease. The executor persists it so a new
-     * host can restore the same workspace after a crash instead of creating a second one.
-     */
-    record?: JsonValue;
-    /** Host barrier: all file/process capabilities must be closed before filesystem cleanup. */
-    releaseCapabilities?(rootTaskId: string): Promise<void>;
-    finish(status: 'succeeded' | 'failed' | 'cancelled'): Promise<void | { message: string }>;
-}
-
-export interface FlowWorkspaceManager {
-    prepare(sessionId: string, policy: FlowWorkspacePolicy): Promise<FlowWorkspaceLease>;
-    /** Re-attach to a workspace whose lease was persisted by `record` before a crash. */
-    restore?(sessionId: string, policy: FlowWorkspacePolicy, record: JsonValue, options?: FlowWorkspaceRestoreOptions): Promise<FlowWorkspaceLease>;
-}
-
-export interface FlowWorkspaceRestoreOptions {
-    /** A terminal Run is only completing cleanup; no node may execute in the restored workspace. */
-    forFinalization?: boolean;
-}
-
-/** Session shared key holding the durable workspace lease record of a Run. */
-export const workspaceLeaseKey = (rootTaskId: string): string => `flow.run.${rootTaskId}.workspace-lease`;
+export { workspaceLeaseKey } from './run-lifecycle';
+export type { FlowWorkspaceLease, FlowWorkspaceManager, FlowWorkspaceRestoreOptions } from './run-lifecycle';
 import { findCycles } from './graph';
 import { assertNodeOutputs, dataEdgeSchemaIssue } from './port-contract';
 import { bindFlowTaskCapabilities } from './task-capabilities';
 import { resolveFlowParameters, prepareFlowParameters } from './parameters';
-import {
-    type DelegationGroup,
-    type EdgeState,
-} from './delegation-runtime';
 
 export interface FlowExecutionHandle {
     /** Reattached records only; no scheduler continuation was restored. */
@@ -151,7 +128,11 @@ export class DurableFlowExecutor {
         return work;
     }
 
-    constructor(private readonly options: DurableFlowExecutorOptions) {}
+    private readonly lifecycle: FlowRunLifecycle;
+
+    constructor(private readonly options: DurableFlowExecutorOptions) {
+        this.lifecycle = new FlowRunLifecycle({ manager: options.workspaceManager, isDisposed: () => this.options.kernel.isDisposed });
+    }
 
     submit(sessionId: string, spec: DagRunSpec, parameters?: Record<string, CommonJsonValue>): Promise<FlowExecutionHandle> {
         return new Promise((resolve, reject) => {
@@ -168,8 +149,8 @@ export class DurableFlowExecutor {
             const lease = await this.acquireLease(session, rootTaskId);
             try {
                 const fenced = fenceSchedulerSession(session, lease.condition);
-                await this.resumeWorkspaceFinalization(fenced, handle.root, rootTaskId);
-                await this.drainDetached(fenced, rootTaskId, lease);
+                await this.lifecycle.resumeWorkspaceFinalization(fenced, handle.root, rootTaskId);
+                await this.lifecycle.drainDetached(fenced, rootTaskId, lease);
             }
             finally { await lease.release(); }
             return handle;
@@ -185,40 +166,6 @@ export class DurableFlowExecutor {
             void this.track(this.execute(sessionId, checkpoint.spec, checkpoint.parameters, resolve,
                 { checkpoint, handle })).then(resolve, reject);
         });
-    }
-
-    /** Finish a workspace finalization that a previous host started but did not complete. */
-    private async resumeWorkspaceFinalization(
-        session: SessionHandle,
-        root: TaskHandle<JsonValue>,
-        rootTaskId: string,
-    ): Promise<void> {
-        const state = (await session.getShared(workspaceFinalizationKey(rootTaskId)))?.value as
-            WorkspaceFinalization | undefined;
-        if (state?.status === 'succeeded') return;
-        const initial = record((await root.status()).task.input).initialScheduler;
-        const checkpoint = ((await session.getShared(`flow.run.${rootTaskId}.scheduler`))?.value ?? initial) as unknown as
-            SchedulerCheckpoint | undefined;
-        const policy = checkpoint?.spec.runPolicy?.workspace;
-        if (!policy || policy.mode === 'shared') return;
-        const workspace = await this.restoreWorkspace(session, rootTaskId, policy, { forFinalization: true });
-        await (await beginWorkspaceFinalization(session, root, workspace)).completion;
-    }
-
-    private async restoreWorkspace(
-        session: SessionHandle,
-        rootTaskId: string,
-        policy: FlowWorkspacePolicy,
-        options?: FlowWorkspaceRestoreOptions,
-    ): Promise<FlowWorkspaceLease> {
-        if (!this.options.workspaceManager?.restore) {
-            throw new Error(`Resuming an isolated Flow workspace requires a workspace manager that restores leases`);
-        }
-        const saved = await session.getShared(workspaceLeaseKey(rootTaskId));
-        const value = saved?.value ?? record((await (await session.attachTask(rootTaskId)).status()).task.input).initialWorkspace;
-        if (value === undefined) throw new Error('Flow workspace lease record is missing');
-        if (!saved) await session.setShared(workspaceLeaseKey(rootTaskId), jsonValue(value));
-        return this.options.workspaceManager.restore(session.id, policy, jsonValue(value), options);
     }
 
     private async execute(
@@ -266,32 +213,20 @@ export class DurableFlowExecutor {
         try {
             workspace = workspacePolicy && workspacePolicy.mode !== 'shared'
                 ? restored
-                    ? await this.restoreWorkspace(session, restored.handle.root.id, workspacePolicy)
-                    : await this.prepareWorkspace(sessionId, workspacePolicy)
+                    ? await this.lifecycle.restoreWorkspace(session, restored.handle.root.id, workspacePolicy)
+                    : await this.lifecycle.prepareWorkspace(sessionId, workspacePolicy)
                 : undefined;
-            if (saved) for (const [id, taskIds] of saved.instances) {
-                instances.set(id, await Promise.all(taskIds.map(taskId => session.attachTask(taskId))));
-            }
+            await attachSchedulerInstances(session, saved, instances);
             const maxConcurrency = positiveInteger(spec.maxConcurrency ?? spec.runPolicy?.maxConcurrency) ?? Number.MAX_SAFE_INTEGER;
             const timeoutMs = positiveInteger(spec.timeoutMs ?? spec.runPolicy?.timeoutMs);
             const maxTokens = positiveInteger(spec.maxTokens ?? spec.runPolicy?.maxTokens);
             const startedAt = saved?.startedAt ?? Date.now();
             const routeEdgeIds = collectRouteEdgeIds(spec);
             const { backEdges, loopNodes } = findCycles(spec.nodes, spec.edges);
-            const nodes = saved?.nodes ?? spec.nodes.map(node => withDispatchWorkspace(node, workspace?.directory));
-            const edges = saved?.edges ?? [...spec.edges];
-            const delegationDepth = new Map(saved?.delegationDepth ?? nodes.map(node => [String(node.id), 0] as [string, number]));
-            const delegationGroups = new Map<string, DelegationGroup>(saved?.delegationGroups.map(([id, group]) =>
-                [id, { ...group, children: new Set(group.children), completed: new Set(group.completed), succeeded: new Set(group.succeeded) }]));
-            const delegationGroupByChild = new Map<string, string>(saved?.delegationGroupByChild);
-            const skipped = new Set<string>(saved?.skipped);
-            const detachedNodes = new Set<string>(saved?.detachedNodes);
-            const appliedPatches = new Map<string, string>(saved?.appliedPatches);
+            const collections = createSchedulerCollections(spec, saved, routeEdgeIds, workspace?.directory);
+            const { nodes, edges, delegationDepth, delegationGroups, delegationGroupByChild, skipped,
+                detachedNodes, appliedPatches, completionOrder, dispatchOrder, variableStore, nodeGenerations, edgeState } = collections;
             let consumedTokens = saved?.consumedTokens ?? 0;
-            const completionOrder: string[] = saved?.completionOrder ?? [];
-            // 已派发的节点（按派发顺序），用于 supervisor 的「每轮只等本轮派发的 worker」。
-            const dispatchOrder: string[] = saved?.dispatchOrder ?? [];
-            const variableStore = new FlowVariableStore(spec, saved?.variables);
             const callInputs: Record<string, unknown> = {};
             const refreshCallInputs = async () => {
                 for (const scope of Object.values(spec.parameterScopes ?? {})) {
@@ -302,26 +237,13 @@ export class DurableFlowExecutor {
                     else delete callInputs[scope.source];
                 }
             };
-            const nodeGenerations = new Map<string, number>(saved?.nodeGenerations ?? []);
-            const edgeState = new Map<string, EdgeState>(
-                saved?.edgeState ?? edges.map(edge => [edge.id, routeEdgeIds.has(edge.id) ? 'pending' : 'active']),
-            );
-
             if (saved) {
                 for (const [id, value] of saved.nodeDefaults) nodeDefaults.set(id, value);
                 for (const [id, value] of saved.nodeConnections) nodeConnections.set(id, value);
             }
-            const checkpointSnapshot = (): SchedulerCheckpoint => ({
-                    version: 1, contextProgramVersion, spec, parameters, sessionContext, variables: variableStore.state, catalog: plugins.snapshot(),
-                    instances: [...instances].map(([id, handles]) => [id, handles.map(handle => handle.id)]),
-                    completed: [...completed], nodes, edges, edgeState: [...edgeState],
-                    delegationDepth: [...delegationDepth], delegationGroupByChild: [...delegationGroupByChild],
-                    delegationGroups: [...delegationGroups].map(([id, group]) => [id, { ...group,
-                        children: [...group.children], completed: [...group.completed], succeeded: [...group.succeeded] }]),
-                    skipped: [...skipped], detachedNodes: [...detachedNodes], appliedPatches: [...appliedPatches],
-                    nodeDefaults: [...nodeDefaults], nodeConnections: [...nodeConnections],
-                    consumedTokens, startedAt, completionOrder, dispatchOrder,
-                    nodeGenerations: [...nodeGenerations],
+            const checkpointSnapshot = () => snapshotSchedulerCollections(collections, instances, completed, {
+                contextProgramVersion, spec, parameters, sessionContext, catalog: plugins.snapshot(),
+                consumedTokens, startedAt, nodeDefaults: [...nodeDefaults], nodeConnections: [...nodeConnections],
             });
             const saveCheckpoint = async (): Promise<void> => {
                 variableStore.prune(new Set([...instances.values()].flat().map(handle => handle.id)));
@@ -408,7 +330,7 @@ export class DurableFlowExecutor {
             });
             const enforceDeadlines = async (): Promise<void> => {
                 if (timeoutMs && Date.now() - startedAt >= timeoutMs) {
-                    await cancelPending(instances, completed, 'Flow timeout exceeded');
+                    await cancelPendingFlowTasks(instances, completed, 'Flow timeout exceeded');
                     throw new Error(`Flow timeout exceeded after ${timeoutMs}ms`);
                 }
                 await delegation.enforceDeadlines();
@@ -445,128 +367,20 @@ export class DurableFlowExecutor {
                 return tolerated;
             };
 
-            /**
-             * Consume pending graph-retry intents: the retry becomes the node's newest
-             * instance and every downstream node drops its committed work so the loop
-             * recomputes it from the retry's output. Returns the number applied.
-             */
-            const applyGraphRetries = async (): Promise<number> => {
-                if (!published) return 0;
-                const key = graphRetryKey(published.root.id);
-                let applied = 0;
-                for (let attempt = 0; attempt < 5; attempt++) {
-                    const saved = await session.getShared(key);
-                    const intents = Array.isArray(saved?.value) ? saved!.value as unknown as FlowGraphRetryIntent[] : [];
-                    const pending = intents.filter(intent => !intent.applied);
-                    if (!pending.length) return applied;
-                    for (const intent of pending) await applyGraphRetry(intent);
-                    const next = intents.map(intent => intent.applied ? intent : { ...intent, applied: true });
-                    try {
-                        await session.setShared(key, next as unknown as JsonValue,
-                            { expectedVersion: saved?.version ?? null });
-                        applied += pending.length;
-                        break;
-                    } catch (error) { if (attempt === 4) throw error; }
-                }
-                if (applied) {
-                    await session.setShared(`flow.run.${published.root.id}.members`,
-                        jsonValue(runMembers(instances, nodes, detachedNodes)));
-                    await saveCheckpoint();
-                }
-                return applied;
-            };
-
-            // Discard a delegation's materialized children so recomputing the parent
-            // re-delegates from scratch instead of reusing stale children and edges.
-            const discardDelegationGroups = async (parentNodeId: string, reason: string): Promise<void> => {
-                for (const [groupId, group] of [...delegationGroups]) {
-                    if (!groupId.startsWith(`${parentNodeId}#`)) continue;
-                    for (const childId of group.children) {
-                        await discardDelegationGroups(childId, reason);
-                        for (const [index, handle] of (instances.get(childId) ?? []).entries()) {
-                            const key = instanceKey(childId, index + 1);
-                            if (completed.has(key)) {
-                                const snapshot = await handle.status().catch(() => undefined);
-                                if (snapshot) consumedTokens = Math.max(0, consumedTokens - outputTokens(snapshot.task.output));
-                            } else {
-                                await handle.cancel(reason).catch(() => undefined);
-                            }
-                            published?.taskIds.delete(handle.id);
-                            completed.delete(key);
-                        }
-                        instances.delete(childId);
-                        published?.nodes.delete(childId);
-                        published?.iterations.delete(childId);
-                        skipped.delete(childId);
-                        detachedNodes.delete(childId);
-                        delegationDepth.delete(childId);
-                        delegationGroupByChild.delete(childId);
-                        // Bump the generation so re-materialized children submit with a fresh
-                        // requestId instead of replaying the discarded Task.
-                        nodeGenerations.set(childId, (nodeGenerations.get(childId) ?? 0) + 1);
-                        nodeDefaults.delete(childId);
-                        nodeConnections.delete(childId);
-                        const childIndex = nodes.findIndex(node => String(node.id) === childId);
-                        if (childIndex >= 0) nodes.splice(childIndex, 1);
-                    }
-                    const removed = edges.filter(edge => group.children.has(String(edge.from)) || group.children.has(String(edge.to)));
-                    for (const edge of removed) edgeState.delete(edge.id);
-                    edges.splice(0, edges.length, ...edges.filter(edge => !removed.includes(edge)));
-                    delegationGroups.delete(groupId);
-                }
-            };
-
-            const applyGraphRetry = async (intent: FlowGraphRetryIntent): Promise<void> => {
-                if (!published) return;
-                const source = String(intent.sourceNodeId);
-                variableStore.retry(intent.sourceTaskId, intent.retryTaskId);
-                // Retrying a delegation parent drops its group; its children are gone, so a
-                // synthetic child can only be retried through its parent.
-                await discardDelegationGroups(source, `Graph retry of ${source}`);
-                const handles = instances.get(source) ?? [];
-                if (!handles.some(handle => handle.id === intent.retryTaskId)) {
-                    const retry = await session.attachTask(intent.retryTaskId);
-                    handles.push(retry as TaskHandle);
-                    instances.set(source, handles);
-                    published.nodes.set(source, retry as TaskHandle);
-                    published.iterations.set(source, handles.length);
-                    published.taskIds.add(intent.retryTaskId);
-                }
-                for (const nodeId of intent.downstream) {
-                    nodeGenerations.set(nodeId, (nodeGenerations.get(nodeId) ?? 0) + 1);
-                    await discardDelegationGroups(nodeId, `Graph retry of ${source}`);
-                    for (const [index, handle] of (instances.get(nodeId) ?? []).entries()) {
-                        const key = instanceKey(nodeId, index + 1);
-                        if (completed.has(key)) {
-                            // A committed instance is discarded and will be recomputed: refund its
-                            // measured token cost so the Run budget is not charged twice for it.
-                            const snapshot = await handle.status().catch(() => undefined);
-                            if (snapshot) consumedTokens = Math.max(0, consumedTokens - outputTokens(snapshot.task.output));
-                        } else {
-                            await handle.cancel(`Graph retry of ${source}`).catch(() => undefined);
-                        }
-                        completed.delete(key);
-                    }
-                    instances.delete(nodeId);
-                    published.nodes.delete(nodeId);
-                    published.iterations.delete(nodeId);
-                    skipped.delete(nodeId);
-                    // Route decisions are re-taken; ordinary data edges simply become active.
-                    for (const edge of edges.filter(item => String(item.to) === nodeId)) {
-                        edgeState.set(edge.id, routeEdgeIds.has(edge.id) ? 'pending' : 'active');
-                    }
-                }
-            };
-
+            // Resolve the active fenced session lazily: root creation precedes lease acquisition.
+            const aggregateState = { instances, nodes, detachedNodes, groups: delegationGroups, completionOrder };
+            const aggregate = (request: Parameters<FlowRunAggregation['finish']>[0]) =>
+                new FlowRunAggregation(session, aggregateState).finish(request);
             // Persist the aggregate root before the first node is scheduled: it is the
             // Run's durable anchor, and the scheduler checkpoint is keyed by its id, so
             // creating it up front lets a crash at any later point resume from committed
             // state instead of restarting the whole graph.
             if (!published) {
-                published = await this.finish(session, instances, nodes, detachedNodes, spec.goal, {
-                    tokens: consumedTokens, startedAt, elapsedMs: Date.now() - startedAt,
-                }, delegationGroups, completionOrder, undefined, true, toleratedFailureNodes(),
-                    { initialScheduler: jsonValue(checkpointSnapshot()), ...(workspace?.record !== undefined ? { initialWorkspace: workspace.record } : {}) });
+                published = await aggregate({ goal: spec.goal,
+                    usage: { tokens: consumedTokens, startedAt, elapsedMs: Date.now() - startedAt },
+                    awaitingSchedule: true, toleratedFailures: toleratedFailureNodes(),
+                    initial: { initialScheduler: jsonValue(checkpointSnapshot()), ...(workspace?.record !== undefined ? { initialWorkspace: workspace.record } : {}) },
+                });
                 lease = await this.acquireLease(session, published.root.id);
                 session = fenceSchedulerSession(session, lease.condition);
                 await saveCheckpoint();
@@ -584,7 +398,17 @@ export class DurableFlowExecutor {
             publish(published);
             // Graph retries accepted while no scheduler owned the Run are applied before the
             // next scheduling turn: attach the retry instance and drop stale downstream work.
-            await applyGraphRetries();
+            const graphRetries = new GraphRetryController({
+                session, run: published, nodes, edges, instances, completed, skipped, detachedNodes,
+                groups: delegationGroups, depths: delegationDepth, groupByChild: delegationGroupByChild,
+                nodeGenerations, nodeDefaults, nodeConnections, edgeState, routeEdgeIds, variables: variableStore,
+                refund: output => { consumedTokens = Math.max(0, consumedTokens - outputTokens(output)); },
+                persist: async () => {
+                    await session.setShared(`flow.run.${published!.root.id}.members`, jsonValue(runMembers(instances, nodes, detachedNodes)));
+                    await saveCheckpoint();
+                },
+            });
+            await graphRetries.consume();
             while (true) {
                 // Fencing: a host that lost the Run's scheduler lease must stop before its
                 // next step, even if its own event stream is still delivering. Stopping is
@@ -660,7 +484,7 @@ export class DurableFlowExecutor {
                 }
                 consumedTokens += outputTokens(settled.exit.output);
                 if (maxTokens && consumedTokens > maxTokens) {
-                    await cancelPending(instances, completed, 'Flow token budget exceeded');
+                    await cancelPendingFlowTasks(instances, completed, 'Flow token budget exceeded');
                     throw new Error(`Flow token budget exceeded: ${consumedTokens}/${maxTokens}`);
                 }
                 await delegation.settle(settled.key, settled.exit.status === 'succeeded');
@@ -684,21 +508,15 @@ export class DurableFlowExecutor {
                 await saveCheckpoint();
             }
 
-            const result = await this.finish(session, instances, nodes, detachedNodes, spec.goal, {
-                tokens: consumedTokens, startedAt, elapsedMs: Date.now() - startedAt,
-            }, delegationGroups, completionOrder, published, false, toleratedFailureNodes());
-            if (workspace) {
-                const finalization = await beginWorkspaceFinalization(session, result.root, workspace);
-                result.workspaceCompletion = finalization.completion;
-                result.workspaceFinalization = finalization.state;
-                // Retain ownership until the final cleanup record commits. Cleanup failures
-                // remain observable on workspaceCompletion without changing the Run result.
-                await result.workspaceCompletion?.catch(() => undefined);
-            }
+            const result = await aggregate({ goal: spec.goal,
+                usage: { tokens: consumedTokens, startedAt, elapsedMs: Date.now() - startedAt },
+                existing: published, toleratedFailures: toleratedFailureNodes(),
+            });
+            if (workspace) await this.lifecycle.finalizeWorkspace(session, result, workspace);
             void result.root.wait().then(exit => this.emitHook('run.completed', sessionId, {
                 taskId: result.root.id, status: exit.status,
             })).catch(() => undefined);
-            await this.drainDetached(session, result.root.id, lease!);
+            await this.lifecycle.drainDetached(session, result.root.id, lease!);
             return result;
         } catch (error) {
             if (published && isSchedulerOwnershipLost(error)) return published;
@@ -712,13 +530,7 @@ export class DurableFlowExecutor {
             // A host may already hold the published handle (submit resolved), so a scheduler
             // failure must be observable on the Run itself, not only as a rejected promise.
             // Cancel and clean up first, then report the combined message on the root.
-            let failure: unknown = error;
-            try {
-                await cancelPending(instances, completed, 'Flow submission failed');
-                if (published) await workspace?.releaseCapabilities?.(published.root.id);
-                await workspace?.finish('failed');
-            }
-            catch (cleanupError) { failure = new AggregateError([error, cleanupError], 'Flow failed and workspace cleanup failed'); }
+            const failure = await this.lifecycle.cleanupFailedSubmission(instances, completed, workspace, error, published?.root.id);
             if (published && !this.options.kernel.isDisposed) {
                 const message = failure instanceof AggregateError
                     ? failure.errors.map(item => item instanceof Error ? item.message : String(item)).join('; ')
@@ -733,26 +545,6 @@ export class DurableFlowExecutor {
         }
     }
 
-    /** Keep local ownership until bounded detached work stops or the host shuts down. */
-    private async drainDetached(session: SessionHandle, rootTaskId: string, lease: SchedulerLease): Promise<void> {
-        const saved = await session.getShared(`flow.run.${rootTaskId}.scheduler`);
-        const checkpoint = saved?.value as unknown as SchedulerCheckpoint | undefined;
-        const instances = new Map(checkpoint?.instances);
-        const pending = await Promise.all((checkpoint?.delegationGroups ?? [])
-            .filter(([, group]) => group.detached)
-            .flatMap(([id, group]) => [...group.children].flatMap(child => (instances.get(child) ?? [])
-                .map(async taskId => ({ id, deadline: group.deadline, task: await session.attachTask(taskId) })))));
-        while (pending.length && !this.options.kernel.isDisposed) {
-            await lease.assertOwned();
-            for (let index = pending.length - 1; index >= 0; index--) {
-                const item = pending[index];
-                if (item.deadline && Date.now() >= item.deadline) await item.task.cancel(`Detached delegation timeout: ${item.id}`);
-                if (await item.task.poll()) pending.splice(index, 1);
-            }
-            if (pending.length) await new Promise(resolve => setTimeout(resolve, 25));
-        }
-    }
-
     private async acquireLease(session: SessionHandle, rootTaskId: string): Promise<SchedulerLease> {
         const lease = await acquireSchedulerLease(session, rootTaskId, {
             ...(this.options.schedulerLeaseTtlMs ? { ttlMs: this.options.schedulerLeaseTtlMs } : {}),
@@ -760,41 +552,6 @@ export class DurableFlowExecutor {
             ...(this.options.schedulerOwnerId ? { ownerId: this.options.schedulerOwnerId } : {}),
         });
         return rememberSchedulerLease(this.options.kernel, rootTaskId, lease);
-    }
-
-    private async finish(
-        session: SessionHandle,
-        instances: Map<string, TaskHandle[]>,
-        nodes: DagNodeDefinition[],
-        detachedNodes: Set<string> = new Set(),
-        goal?: import('../contracts').FlowRunGoal,
-        usage: FlowExecutionHandle['usage'] = { tokens: 0, startedAt: Date.now(), elapsedMs: 0 },
-        delegationGroups: Map<string, DelegationGroup> = new Map(),
-        completionOrder: string[] = [],
-        existing?: FlowExecutionHandle,
-        awaitingSchedule = false,
-        toleratedFailures: Set<string> = new Set(),
-        initial?: Record<string, JsonValue>,
-    ): Promise<FlowExecutionHandle> {
-        const root = await this.aggregate(session, instances, nodes, detachedNodes, delegationGroups, completionOrder, { goal, usage }, existing?.root, awaitingSchedule, toleratedFailures, initial);
-        if (existing) {
-            // The handle is published before the graph finishes, so refresh the fields
-            // that only become final here instead of leaving a stale snapshot.
-            existing.usage = usage;
-            existing.goal = goal;
-            existing.detachedNodes = detachedNodes;
-            return existing;
-        }
-        return {
-            sessionId: session.id,
-            root,
-            nodes: new Map([...instances.entries()].map(([id, handles]) => [id, handles[handles.length - 1]])),
-            iterations: new Map([...instances.entries()].map(([id, handles]) => [id, handles.length])),
-            goal,
-            detachedNodes,
-            taskIds: new Set([...instances.values()].flatMap(handles => handles.map(handle => handle.id)).concat(root.id)),
-            usage,
-        };
     }
 
     private async emitHook(
@@ -818,61 +575,7 @@ export class DurableFlowExecutor {
         if (result?.action === 'deny') throw new Error(result.message ?? `Harness hook denied ${event}`);
     }
 
-    private async prepareWorkspace(sessionId: string, policy: FlowWorkspacePolicy): Promise<FlowWorkspaceLease> {
-        if (!this.options.workspaceManager) {
-            throw new Error(`Flow workspace mode ${policy.mode} requires a configured workspace manager`);
-        }
-        return this.options.workspaceManager.prepare(sessionId, policy);
-    }
 
-    private async aggregate(
-        session: SessionHandle,
-        instances: Map<string, TaskHandle[]>,
-        nodes: DagNodeDefinition[],
-        detachedNodes: Set<string>,
-        delegationGroups: Map<string, DelegationGroup>,
-        completionOrder: string[],
-        run: { goal?: import('../contracts').FlowRunGoal; usage: FlowExecutionHandle['usage'] },
-        existing?: TaskHandle<JsonValue>,
-        awaitingSchedule = false,
-        toleratedFailures: Set<string> = new Set(),
-        initial?: Record<string, JsonValue>,
-    ): Promise<TaskHandle<JsonValue>> {
-        // Nodes with persistOutput === false keep feeding downstream nodes via
-        // dependencies but are excluded from the flow-root output map. They must
-        // still participate in run success/failure judgment.
-        const suppressed = new Set(nodes
-            .filter(node => node.outputPolicy?.includeInRunOutput === false
-                || (node.outputPolicy?.includeInRunOutput === undefined && isRecord(node.config) && node.config.persistOutput === false))
-            .map(node => String(node.id)));
-        const dependencies = orderDelegationResults([...instances.entries()]
-            .filter(([nodeId]) => !detachedNodes.has(nodeId))
-            .map(([nodeId, handles]) => ({
-                taskId: handles[handles.length - 1].id,
-                nodeId,
-                tolerated: toleratedFailures.has(nodeId),
-                collectOutput: !suppressed.has(nodeId),
-            })), delegationGroups, completionOrder);
-        const checkpoint = existing && !awaitingSchedule
-            ? (await session.getShared(`flow.run.${existing.id}.scheduler`))?.value as unknown as SchedulerCheckpoint : undefined;
-        const input = { ...initial, ...(checkpoint?.variables && Object.keys(checkpoint.variables.initial).length ? { variables: jsonValue({ initial: checkpoint.variables.initial, changes: checkpoint.variables.commits, current: variableCurrent(checkpoint.variables) }) } : {}), dependencies, awaitingSchedule, run: jsonValue({ version: 1, goal: run.goal ?? null, usage: run.usage }),
-            runTasks: runMembers(instances, nodes, detachedNodes) };
-        if (existing) {
-            await session.setShared(`flow.run.${existing.id}.members`, jsonValue(input.runTasks));
-            await session.setShared(`flow.run.${existing.id}.metadata`, input.run);
-            await session.signal(existing.id, { type: 'flow.schedule.completed', payload: jsonValue(input) });
-            return existing;
-        }
-        return session.submit({
-            program: { kind: 'flow.aggregate', version: '1' }, input,
-            ...((initial?.initialScheduler as unknown as SchedulerCheckpoint | undefined)?.spec.invocation
-                ? { requestId: `flow-invocation:${(initial!.initialScheduler as unknown as SchedulerCheckpoint).spec.invocation!.requestId}` } : {}),
-            // 汇聚节点在任一依赖终态后聚合；非容忍 failed 依赖由 FlowAggregateProgram
-            // 使根失败，显式 on_failure: continue 或委派策略容忍的失败继续完成并记录。
-            dependsOn: awaitingSchedule ? [] : dependencies.map(item => ({ task: item.taskId, condition: 'terminal' })),
-            labels: { kind: 'flow-root' },
-        });
-    }
 }
 
 
@@ -934,23 +637,6 @@ function outputTokens(output: unknown): number {
     return typeof total === 'number' && Number.isFinite(total) && total > 0 ? total : 0;
 }
 
-async function cancelPending(
-    instances: Map<string, TaskHandle[]>,
-    completed: Set<string>,
-    reason: string,
-): Promise<void> {
-    const cancellations: Promise<void>[] = [];
-    for (const [nodeId, handles] of instances) {
-        for (const [index, handle] of handles.entries()) {
-            if (!completed.has(instanceKey(nodeId, index + 1))) cancellations.push(handle.cancel(reason));
-        }
-    }
-    const results = await Promise.allSettled(cancellations);
-    const failures = results.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
-    if (failures.length) throw new AggregateError(failures,
-        `Flow task cancellation failed: ${failures.map(String).join('; ')}`);
-}
-
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -961,28 +647,4 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
     } finally {
         if (timer !== undefined) clearTimeout(timer);
     }
-}
-
-function orderDelegationResults<T extends { nodeId: string }>(
-    values: T[],
-    groups: Map<string, DelegationGroup>,
-    completionOrder: string[],
-): T[] {
-    const result = [...values];
-    const rank = new Map(completionOrder.map((nodeId, index) => [nodeId, index]));
-    for (const group of groups.values()) {
-        if (group.resultOrder !== 'completion') continue;
-        const positions = result.map((value, index) => group.children.has(value.nodeId) ? index : -1).filter(index => index >= 0);
-        const ordered = positions.map(index => result[index])
-            .sort((left, right) => (rank.get(left.nodeId) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right.nodeId) ?? Number.MAX_SAFE_INTEGER));
-        positions.forEach((position, index) => { result[position] = ordered[index]; });
-    }
-    return result;
-}
-
-function runMembers(instances: Map<string, TaskHandle[]>, nodes: DagNodeDefinition[], detached: Set<string>) {
-    return [...instances.entries()].flatMap(([nodeId, handles]) => handles.map((handle, index) => ({
-        nodeId, taskId: handle.id, iteration: index + 1, detached: detached.has(nodeId),
-        budget: jsonValue(nodes.find(node => node.id === nodeId)?.budget ?? {}),
-    })));
 }

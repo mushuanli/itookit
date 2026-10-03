@@ -1,5 +1,5 @@
 import type { JsonValue, SessionHandle, TaskHandle } from '@itookit/durable-kernel';
-import type { FlowWorkspaceLease } from './executor';
+import type { FlowWorkspaceLease } from './run-lifecycle';
 
 export interface WorkspaceFinalization { status: 'pending' | 'succeeded' | 'failed'; message?: string; persistenceError?: string; }
 export const workspaceFinalizationKey = (taskId: string): string => `flow.run.${taskId}.workspace`;

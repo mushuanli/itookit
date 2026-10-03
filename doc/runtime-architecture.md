@@ -561,7 +561,7 @@ sequenceDiagram
 
 | 热点 | 审查基线 → 实施后 | 结构与剩余工作 |
 |---|---:|---|
-| llm-flow/src/flow/executor.ts 的 execute | 约 770 → 511 行 | 已提取就绪判定、图修改、委派管理、节点输入准备和任务请求构造，显式持有单次运行状态与宿主绑定端口；运行状态、恢复与终结仍需拆分 |
+| llm-flow/src/flow/executor.ts 的 execute | 约 770 → 376 行 | 已提取就绪判定、图修改、委派管理、节点输入准备和任务请求构造，显式持有单次运行状态与宿主绑定端口；本轮继续集中恢复集合、重试消费、工作区生命周期和根聚合；主调度与装配仍需治理 |
 | llm-ui/src/components/input/plugins/SlashCommandPlugin.ts 的 buildDefaultCommands | 约 439 → 3 行 | 命令描述移至 slash-command-catalog，参数解析移至 slash-tool-args；弹窗仅消费描述目录 |
 | llm-ui/src/shell/SlashCommandRouter.ts 的 buildSlashCallbacks | 约 366 → 12 行 | 按会话、模型、工具、导航领域组织处理器；创建状态通过宿主导航参数传递 |
 | kernel-adapters/src/llm-management/device/llm-device-driver.ts 的 ioctl | 约 205 → 11 行 | 管理命令使用类型化分派表；MCP、Skill、Chat 单独处理；输入 payload 校验仍可加强 |
@@ -586,7 +586,7 @@ API 仍有改进空间：UI 工厂参数中的 sessionManager 与 resolveSession
 
 公开 API 删除以仓库消费者迁移和外部产物验证为依据，不能推断外部 npm 用户均已迁移。后续发布须明确兼容变更：全局 Provider 注册改用实例 Registry/Factory，旧 /llm 聚合改用明确子入口，Tasks 的 Context 转发改为直接导入 llm-context。本轮未发布。
 
-本轮完成兼容清理、实例策略/诊断注入、显式 UI 创建参数、命令目录和 ioctl 分派拆分，以及 Flow 就绪判定、动态图 patch 与图事件处理提取。Flow execute 仍约 511 行，Session 协调与编辑器生命周期仍有大函数；UI 工厂的具体 Kernel 类型和外部 JSON/ioctl 解码仍需进一步治理。不能把顶层函数缩短视为所有复杂度已消除。
+本轮完成兼容清理、实例策略/诊断注入、显式 UI 创建参数、命令目录和 ioctl 分派拆分，以及 Flow 就绪判定、动态图 patch 与图事件处理提取。Flow execute 仍约 376 行，Session 协调与编辑器生命周期仍有大函数；UI 工厂的具体 Kernel 类型和外部 JSON/ioctl 解码仍需进一步治理。不能把顶层函数缩短视为所有复杂度已消除。
 
 ### 验证证据
 
@@ -608,3 +608,13 @@ Session 回归补迁了 pending-user 测试中遗漏的 ContextAssembler 导入�
 委派组等待、失败、超时、成员绑定继承与取消进一步提取到 DelegationController；它依赖显式单次运行状态和 spawned 回调，不取得租约、不提交 Task 或写 checkpoint。detached drain 与恢复仍归执行器，保留原有取消失败处理和等待语义。本次 Flow 346 项和 Session 215 项回归通过；构建、架构守卫与文档检查通过。
 
 任务提交边界继续拆为 prepareNodeTask（轮次、依赖、模板、变量与连接）和 FlowTaskFactory（Kernel 请求与工具/Skill/Context 装配）。实际 submit、成员更新、能力绑定与 checkpoint 仍由 executor 协调；nested dispatch 复用固定 Program 版本及宿主端口。组件仅为包内实现，不增加 npm 模块数。本次 Flow 346 项与 Session 215 项回归、全仓类型检查、Flow 构建、架构守卫及文档检查通过。
+
+### Flow 批量治理结果
+
+本批提取 GraphRetryController、scheduler-state、FlowRunLifecycle 和 FlowRunAggregation，覆盖重试/下游失效/委派清理、checkpoint 恢复与序列化、工作区与 detached 生命周期、根任务及结果投影。公共 workspace 类型和 lease key 保持原入口，未新增 npm 包或根 API。执行器保留运行装配、租约切换和主调度，execute 约 376 行；函数长度下降不等同于消除全部圈复杂度。
+
+同时修复同次重试消费发生 CAS 冲突后重复应用意图的问题：相同 requestId 的图修改执行一次，重读合并并发新增意图。新增回归覆盖并发追加、确认写入失败和图协调失败不确认；本修复不改变意图确认与 checkpoint 分开写入的既有协议，其跨崩溃事务窗口仍需单独设计。
+
+剩余重点为 Session/UI 的准入、上下文与生命周期职责，外部 JSON/ioctl 的运行时解码，以及 Flow 主调度和重试持久协议的进一步治理。公共模块主要静态依赖方向与宿主策略注入已经成立，但不能将本次内部拆分宣称为全部质量目标完成。
+
+本批最终验证：Flow 349 项、Session 215 项、app-core 232 项回归通过；全仓类型检查、Flow ESM/CJS/声明构建、架构入口守卫和文档检查通过。打包产物在工作区外验证原公共入口、workspace 类型兼容以及 UI ESM/CJS 与严格 NodeNext 类型消费。未运行全仓测试矩阵或发布。

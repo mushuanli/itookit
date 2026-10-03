@@ -15,7 +15,11 @@ src/
 ├── index.ts                  统一导出
 ├── flow-definition-store.ts  FlowDefinitionStore（最小 FlowStore 接口 + 版本冲突）
 └── flow/
-    ├── executor.ts           DurableFlowExecutor（调度 / checkpoint / 工作区生命周期）
+    ├── executor.ts           DurableFlowExecutor（运行装配 / 主调度 / 所有权边界）
+    ├── scheduler-state.ts    checkpoint 集合恢复、序列化与 Task 重挂
+    ├── graph-retry-controller.ts 图重试消费、下游失效与委派清理
+    ├── run-lifecycle.ts      工作区恢复、失败清理与 detached drain
+    ├── run-aggregation.ts    根 Task 聚合、运行成员及结果投影
     ├── scheduler-readiness.ts 循环、路由、join 与 return 就绪判定
     ├── graph-mutations.ts    动态图 patch、边状态及 join 取消约束
     ├── node-task-preparation.ts 上游轮次、模板、变量与连接解析
@@ -68,3 +72,7 @@ GraphMutationRuntime 只持有单次运行的显式图状态；宿主通过 bind
 DelegationController 消费单次运行的显式状态，执行已声明的 wait/failure 策略；agent.spawned 通过宿主回调发出。它不提交任务、不写 checkpoint、不取得租约。detached 工作的持久恢复、所有权保持与工作区收尾继续由 executor 协调。
 
 prepareNodeTask 只准备节点输入与变量快照；FlowTaskFactory 只构造 Kernel TaskSpec，保留嵌套 dispatch 的宿主绑定与 Context Program 版本。executor 按原顺序执行 task.started、submit、运行成员更新、能力绑定与 checkpoint。上述组件保持包内，不增加 npm 包或根导出。
+
+GraphRetryController 在同次消费中对每个 requestId 只执行一次内存图修改，CAS 冲突重读队列时合并新意图；持久意图确认与 checkpoint 保持已有协议，不宣称跨两个写入的原子性。Scheduler collections 保持 version-1 存储格式。FlowRunAggregation 使用当前 fenced Session；根创建发生在调度租约建立前，最终投影写入发生在租约建立后，不能缓存初始未 fencing 的 Session。
+
+FlowRunLifecycle 接收宿主工作区 manager、已 fencing 的 Session 和租约；清理先确认任务停止及能力释放，detached drain 保持调度所有权。公共 workspace 类型与 workspaceLeaseKey 定义移入 run-lifecycle，其中 workspace 类型继续从原 executor/root 入口导出，lease key 继续仅从源码 executor 入口转发，内部组件不新增根 API。

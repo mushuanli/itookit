@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { SessionHandle } from '@itookit/durable-kernel';
 import type { DagEdgeDefinition, DagNodeDefinition } from '../src/contracts';
-import { downstreamNodes } from '../src/flow/graph-retry';
+import { downstreamNodes, consumeGraphRetryIntents, type FlowGraphRetryIntent } from '../src/flow/graph-retry';
 
 function node(id: string): DagNodeDefinition {
     return { id, name: id, plugin: 'builtin.transform', pluginVersion: '1.0.0', config: {}, inputs: {}, capabilities: [] };
@@ -29,5 +30,57 @@ describe('downstreamNodes', () => {
 
     it('rejects an unknown node', () => {
         expect(() => downstreamNodes('missing', [node('a')], [])).toThrow('Unknown node: missing');
+    });
+});
+
+function retryIntent(requestId: string): FlowGraphRetryIntent {
+    return { version: 1, requestId, sourceTaskId: 'source', retryTaskId: `retry-${requestId}`, sourceNodeId: 'a', downstream: ['b'] };
+}
+
+describe('graph retry queue reconciliation', () => {
+    it('applies each intent once while preserving a concurrent append after CAS conflict', async () => {
+        let queue = [retryIntent('first')];
+        let version = 1;
+        const getShared = vi.fn(async () => ({ value: structuredClone(queue), version }));
+        const setShared = vi.fn(async (_key, value, options) => {
+            if (version === 1) {
+                queue.push(retryIntent('concurrent'));
+                version = 2;
+                throw new Error('CAS conflict');
+            }
+            expect(options.expectedVersion).toBe(2);
+            queue = value;
+            return { value, version: ++version };
+        });
+        const session = { getShared, setShared } as unknown as Pick<SessionHandle, 'getShared' | 'setShared'>;
+        const generations = new Map<string, number>();
+        const apply = vi.fn(async (intent: FlowGraphRetryIntent) => {
+            generations.set(intent.requestId, (generations.get(intent.requestId) ?? 0) + 1);
+        });
+        expect(await consumeGraphRetryIntents(session, 'root', apply)).toBe(2);
+        expect([...generations.values()]).toEqual([1, 1]);
+        expect(queue.map(intent => [intent.requestId, intent.applied])).toEqual([['first', true], ['concurrent', true]]);
+    });
+
+    it('bounds failed acknowledgement retries without repeating graph mutations', async () => {
+        const failure = new Error('storage unavailable');
+        const session = {
+            getShared: vi.fn(async () => ({ value: [retryIntent('first')], version: 1 })),
+            setShared: vi.fn(async () => { throw failure; }),
+        } as unknown as Pick<SessionHandle, 'getShared' | 'setShared'>;
+        const apply = vi.fn(async () => undefined);
+        await expect(consumeGraphRetryIntents(session, 'root', apply)).rejects.toBe(failure);
+        expect(apply).toHaveBeenCalledTimes(1);
+        expect(session.setShared).toHaveBeenCalledTimes(5);
+    });
+
+    it('does not acknowledge an intent whose graph reconciliation failed', async () => {
+        const session = {
+            getShared: vi.fn(async () => ({ value: [retryIntent('first')], version: 1 })),
+            setShared: vi.fn(),
+        } as unknown as Pick<SessionHandle, 'getShared' | 'setShared'>;
+        await expect(consumeGraphRetryIntents(session, 'root', async () => { throw new Error('attach failed'); }))
+            .rejects.toThrow('attach failed');
+        expect(session.setShared).not.toHaveBeenCalled();
     });
 });

@@ -233,7 +233,16 @@ flowchart LR
     Scheduler -->|submit 后绑定能力| Tasks[Kernel Tasks]
     Scheduler --> Readiness[readyFlowNodes]
     Readiness --> State
-    Scheduler -->|保存 checkpoint / 租约条件| Store[Kernel Session shared]
+    Scheduler --> Retry[GraphRetryController]
+    Retry -->|失效下游 / 清理委派| State
+    Retry -->|CAS 确认意图| Store[Kernel Session shared]
+    Scheduler --> Checkpoint[Scheduler collections]
+    Checkpoint -->|恢复 / 序列化| State
+    Scheduler -->|保存 checkpoint / 租约条件| Store
+    Scheduler --> Lifecycle[FlowRunLifecycle]
+    Lifecycle --> Workspace[宿主工作区 manager]
+    Scheduler --> Aggregation[FlowRunAggregation]
+    Aggregation -->|根任务与投影| Store
 ```
 
 `delegation-runtime.ts` 保留委派声明解析和成员图构造；`DelegationController` 管理绑定继承、all/any/first-success/quorum 等待、剩余成员取消、失败与超时。它只执行已固定的运行声明，通过 spawned 回调通知调度器，不选择产品策略或安装全局回调。节点轮次身份统一在 `node-instance.ts`，恢复仍使用原有编码。
@@ -242,7 +251,11 @@ flowchart LR
 
 执行器仍按 task.started → submit → 记住变量快照与运行成员 → 绑定能力 → checkpoint 的顺序协调提交。LLM 任务及控制组保持 deferStart，图重试 generation 与恢复 requestId 保持原格式；输入装配拆分不改变启动或幂等边界。
 
-checkpoint、恢复、任务提交和工作区清理由执行器协调；图修改组件不自行写存储或取得租约。循环 back-edge 的派发顺序约束，以及 join 只能取消已观察依赖的约束保持原行为。
+`scheduler-state.ts` 统一集合恢复、Task 重挂和 checkpoint 序列化，继续使用 version-1 存储格式。`GraphRetryController` 消费已受理意图，处理下游失效、提交代数、token 退款和递归委派清理；同次消费内，CAS 重读不重复应用同一 requestId，并保留并发追加的新意图。意图确认与 checkpoint 仍是两个写入，本次修复限于同次消费的 CAS 重试，不新增跨写入原子协议。
+
+`FlowRunLifecycle` 处理工作区创建/恢复、收尾、失败清理与 detached drain；宿主只提供 manager 和 dispose 状态，调用方传入 fenced Session/租约。`FlowRunAggregation` 处理根 Task、运行成员、变量和结果投影，保持输出抑制、失败容忍、结果顺序与嵌套 invocation 幂等请求。根创建使用当前 Session，取得租约后最终投影使用 fenced Session。
+
+运行装配、所有权边界和主调度仍由执行器协调；图修改组件不自行写存储或取得租约。循环 back-edge 的派发顺序约束，以及 join 只能取消已观察依赖的约束保持原行为。
 
 ## 插件
 
@@ -266,6 +279,10 @@ packages/llm-flow/src/
 └── flow/
     ├── index.ts               flow 层 barrel
     ├── executor.ts            DurableFlowExecutor + DurableFlowExecutorOptions/FlowExecutionHandle + upstreamOf（未根导出）
+    ├── scheduler-state.ts     checkpoint 集合恢复、序列化与 Task 重挂
+    ├── graph-retry-controller.ts GraphRetryController（包内重试协调）
+    ├── run-lifecycle.ts       FlowRunLifecycle + 公共 workspace 类型/lease key（原入口继续转发）
+    ├── run-aggregation.ts     FlowRunAggregation（包内根 Task 与投影）
     ├── scheduler-readiness.ts readyFlowNodes（包内就绪判定）
     ├── graph-mutations.ts     GraphMutationRuntime（包内图状态修改与节点身份绑定端口）
     ├── delegation-controller.ts DelegationController（包内委派组生命周期）
