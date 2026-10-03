@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import type { ContextPlan } from '@itookit/llm-context';
-import { ContextAssembler } from '@itookit/llm-tasks';
+import { ContextAssembler } from '@itookit/llm-context';
 import { ConversationRunCoordinator } from '../src/session/conversation-run-coordinator';
 
 function coordinator(): ConversationRunCoordinator {

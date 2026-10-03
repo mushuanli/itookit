@@ -1,3 +1,4 @@
+import { GraphMutationRuntime } from './graph-mutations';
 import { readyFlowNodes } from './scheduler-readiness';
 import { FlowVariableStore, validateVariableGraph, variableDefinitions, variableCurrent } from './variables';
 import { rememberSchedulerLease } from './control-session';
@@ -16,7 +17,7 @@ import { acquireSchedulerLease, isSchedulerOwnershipLost, type SchedulerLease } 
 import { graphRetryKey, type FlowGraphRetryIntent } from './graph-retry';
 import { beginWorkspaceFinalization, workspaceFinalizationKey, type WorkspaceFinalization } from './workspace-finalization';
 import { createRunCatalog } from './run-catalog';
-import type { DagEdgeDefinition, DagNodeDefinition, DagPluginCatalog, DagRunSpec, GraphEffect, JsonValue as CommonJsonValue } from '../contracts';
+import type { DagEdgeDefinition, DagNodeDefinition, DagPluginCatalog, DagRunSpec, JsonValue as CommonJsonValue } from '../contracts';
 import type { ToolDefinition } from '@itookit/llm-context';
 import {
     type Kernel,
@@ -55,11 +56,8 @@ export interface FlowWorkspaceRestoreOptions {
 export const workspaceLeaseKey = (rootTaskId: string): string => `flow.run.${rootTaskId}.workspace-lease`;
 import { findCycles } from './graph';
 import { assertNodeOutputs, dataEdgeSchemaIssue, validateDataEdgeValue } from './port-contract';
-import { patchIdentityConfig } from './patch-identity';
-import { mergeAgentConfig } from './to-dag';
 import { resolveNodeConnection } from './connections';
 import { bindFlowTaskCapabilities } from './task-capabilities';
-import { graphPatchFingerprint, validateGraphPatch } from './graph-patch';
 import { resolveFlowParameters, prepareFlowParameters } from './parameters';
 import {
     delegationPlan,
@@ -455,73 +453,13 @@ export class DurableFlowExecutor {
                 if (published) await saveCheckpoint();
             };
 
-            const applyPatch = async (patch: import('../contracts').GraphPatch, parentId: string): Promise<void> => {
-                const fingerprint = graphPatchFingerprint(patch);
-                const previous = appliedPatches.get(patch.idempotencyKey);
-                if (previous !== undefined) {
-                    if (previous !== fingerprint) throw new Error(`Graph patch ${patch.idempotencyKey}: idempotency conflict`);
-                    return;
-                }
-                plugins.addNodes(patch.nodes);
-                const additions = validateGraphPatch(patch, nodes, edges, parentId, plugins);
-                if (nodes.length + patch.nodes.length > maxNodes) {
-                    throw new Error(`Flow node limit exceeded by patch ${patch.idempotencyKey}: ${nodes.length + patch.nodes.length}/${maxNodes}`);
-                }
-                const boundNodes: DagNodeDefinition[] = [];
-                for (const node of patch.nodes) {
-                    const defaults = node.plugin === 'builtin.agent' ? nodeDefaults.get(parentId) : undefined;
-                    const bound = this.options.bindPatchNode
-                        ? await this.options.bindPatchNode(sessionId, structuredClone(node), structuredClone(defaults))
-                        : defaults ? { config: mergeAgentConfig(defaults, record(node.config) as never) } : undefined;
-                    const config = bound?.config === undefined ? node.config
-                        : patchIdentityConfig(node.config, bound.config, node.capabilities ?? []);
-                    const connection = nodeConnections.get(parentId);
-                    const resolvedConfig = structuredClone(config);
-                    if (connection) resolveNodeConnection(resolvedConfig as CommonJsonValue,
-                        connection.connections, connection.defaultConnection, connection.fallbackConnectionId, connection.runConnectionId);
-                    boundNodes.push(withDispatchWorkspace({ ...node, config: resolvedConfig, inputs: bound?.inputs ?? node.inputs }, workspace?.directory));
-                }
-                plugins.addNodes(boundNodes);
-                validateGraphPatch({ ...patch, nodes: boundNodes }, nodes, edges, parentId, plugins);
-                validateDispatchCapacity({ ...spec, nodes: [...nodes, ...boundNodes], edges: [...edges, ...additions] }, parameters);
-                validateVariableGraph({ ...spec, nodes: [...nodes, ...boundNodes], edges: [...edges, ...additions] });
-                nodes.push(...boundNodes);
-                const defaults = nodeDefaults.get(parentId);
-                if (defaults) for (const node of boundNodes) nodeDefaults.set(node.id, defaults);
-                const connection = nodeConnections.get(parentId);
-                if (connection) for (const node of boundNodes) nodeConnections.set(node.id, connection);
-                edges.push(...additions);
-                for (const edge of additions) edgeState.set(edge.id, 'active');
-                appliedPatches.set(patch.idempotencyKey, fingerprint);
-            };
-
-            const applyEffects = async (output: unknown, parentId: string): Promise<void> => {
-                for (const effect of graphEffects(output)) {
-                    if (effect.type === 'activate-edge') {
-                        edgeState.set(String(effect.edgeId), 'active');
-                        const activated = edges.find(edge => edge.id === String(effect.edgeId));
-                        if (activated) skipped.delete(activated.to);
-                        // Only record dispatch order for back-edge sources (supervisor
-                        // workers); an ordinary loop's exit branch must not re-arm the
-                        // loop head through dispatchOrder.
-                        if (activated && isBackEdgeSource(activated.to, backEdges, edges)) {
-                            dispatchOrder.push(activated.to);
-                        }
-                    } else if (effect.type === 'disable-edge') {
-                        edgeState.set(String(effect.edgeId), 'inactive');
-                    } else if (effect.type === 'patch-graph') {
-                        await applyPatch(effect.patch, parentId);
-                    } else if (effect.type === 'cancel-tasks') {
-                        const owner = nodes.find(node => node.id === parentId);
-                        if (owner?.plugin !== 'builtin.join') throw new Error('Only join nodes may cancel observed tasks');
-                        for (const target of effect.tasks) {
-                            if (!edges.some(edge => edge.from === target.nodeId && edge.to === parentId)) throw new Error('Join cancellation target is not a dependency');
-                            const handle = instances.get(target.nodeId)?.find(item => item.id === target.taskId);
-                            if (handle) await handle.cancel(effect.reason);
-                        }
-                    }
-                }
-            };
+            const graphMutations = new GraphMutationRuntime({
+                spec, parameters, nodes, edges, plugins, maxNodes, appliedPatches, nodeDefaults, nodeConnections,
+                edgeState, backEdges, skipped, dispatchOrder, instances, workspaceDirectory: workspace?.directory,
+                bindNode: this.options.bindPatchNode
+                    ? (node, defaults) => this.options.bindPatchNode!(sessionId, node, defaults) : undefined,
+            });
+            const applyEffects = (output: unknown, parentId: string) => graphMutations.applyEffects(output, parentId);
 
             // Dynamic delegation: parse the declaration once, then materialize a
             // bounded child group with explicit runtime metadata and control edges.
@@ -1175,18 +1113,6 @@ function parseInstanceKey(key: string): { nodeId: string; iteration: number } {
 }
 
 
-/** True when `nodeId` is the source of a back edge (a loop re-entry worker). */
-function isBackEdgeSource(
-    nodeId: string,
-    backEdges: Set<string>,
-    edges: DagEdgeDefinition[],
-): boolean {
-    for (const edgeId of backEdges) {
-        if (edges.find(edge => edge.id === edgeId)?.from === nodeId) return true;
-    }
-    return false;
-}
-
 /** 收集 route 节点声明的出边 id（含默认边；这些边默认 pending，等 route 决定激活/禁用）。 */
 function collectRouteEdgeIds(spec: DagRunSpec): Set<string> {
     const ids = new Set<string>();
@@ -1223,11 +1149,6 @@ export function upstreamOf(edges: DagEdgeDefinition[], nodeId: string): string[]
         }
     }
     return result;
-}
-
-function graphEffects(output: unknown): GraphEffect[] {
-    if (!isRecord(output) || !Array.isArray(output.effects)) return [];
-    return output.effects.filter(isRecord).map(effect => effect as unknown as GraphEffect);
 }
 
 function jsonValue(value: unknown): JsonValue {

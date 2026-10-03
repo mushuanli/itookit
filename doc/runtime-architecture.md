@@ -561,7 +561,7 @@ sequenceDiagram
 
 | 热点 | 审查基线 → 实施后 | 结构与剩余工作 |
 |---|---:|---|
-| llm-flow/src/flow/executor.ts 的 execute | 约 770 → 716 行 | 已提取 scheduler-readiness，保留跳过、循环和返回屏障语义；运行状态、恢复与终结仍需拆分 |
+| llm-flow/src/flow/executor.ts 的 execute | 约 770 → 656 行 | 已提取 scheduler-readiness 和 graph-mutations，显式持有单次运行状态与宿主绑定端口；运行状态、恢复与终结仍需拆分 |
 | llm-ui/src/components/input/plugins/SlashCommandPlugin.ts 的 buildDefaultCommands | 约 439 → 3 行 | 命令描述移至 slash-command-catalog，参数解析移至 slash-tool-args；弹窗仅消费描述目录 |
 | llm-ui/src/shell/SlashCommandRouter.ts 的 buildSlashCallbacks | 约 366 → 12 行 | 按会话、模型、工具、导航领域组织处理器；创建状态通过宿主导航参数传递 |
 | kernel-adapters/src/llm-management/device/llm-device-driver.ts 的 ioctl | 约 205 → 11 行 | 管理命令使用类型化分派表；MCP、Skill、Chat 单独处理；输入 payload 校验仍可加强 |
@@ -586,13 +586,13 @@ API 仍有改进空间：UI 工厂参数中的 sessionManager 与 resolveSession
 
 公开 API 删除以仓库消费者迁移和外部产物验证为依据，不能推断外部 npm 用户均已迁移。后续发布须明确兼容变更：全局 Provider 注册改用实例 Registry/Factory，旧 /llm 聚合改用明确子入口，Tasks 的 Context 转发改为直接导入 llm-context。本轮未发布。
 
-本轮完成兼容清理、实例策略/诊断注入、显式 UI 创建参数、命令目录和 ioctl 分派拆分，以及 Flow 就绪判定提取。Flow execute 仍约 716 行，Session 协调与编辑器生命周期仍有大函数；UI 工厂的具体 Kernel 类型和外部 JSON/ioctl 解码仍需进一步治理。不能把顶层函数缩短视为所有复杂度已消除。
+本轮完成兼容清理、实例策略/诊断注入、显式 UI 创建参数、命令目录和 ioctl 分派拆分，以及 Flow 就绪判定、动态图 patch 与图事件处理提取。Flow execute 仍约 656 行，Session 协调与编辑器生命周期仍有大函数；UI 工厂的具体 Kernel 类型和外部 JSON/ioctl 解码仍需进一步治理。不能把顶层函数缩短视为所有复杂度已消除。
 
 ### 验证证据
 
 本轮 Context 31、Tasks 68、Flow 346、UI 67、Driver 63、Adapters 209、app-core 232 项测试通过；app-shell 的 SessionWorkbench/Tauri bootstrap 定向 28 项和宿主边界 11 项通过。相关包构建、Web 构建、全仓类型检查、架构守卫和文档检查通过。Driver 打包后在工作区外验证结构 ProviderFactory、ESM/CJS 与严格类型；UI 外部消费者验证 root/chat/settings、实例 Session API 与兼容入口删除。外部检查时也重建了设置模块产物，避免旧产物继续引用已删除的 MCP API。
 
-此前 Session 单例清理通过 215 项 Session 测试，本轮未重跑完整 Session 矩阵。完整 app-shell 矩阵仍有已知基线问题，以上定向通过不代表全仓测试矩阵通过。
+Session 回归补迁了 pending-user 测试中遗漏的 ContextAssembler 导入，直接引用 llm-context；完整 Session 矩阵 215 项通过。完整 app-shell 矩阵仍有已知基线问题，以上定向通过不代表全仓测试矩阵通过。
 
 主要源码入口：
 
@@ -602,3 +602,5 @@ API 仍有改进空间：UI 工厂参数中的 sessionManager 与 resolveSession
 - [Program/Effect 契约](../packages/durable-kernel/src/domain/types.ts)、[Context v2 bridge](../packages/llm-tasks/src/durable/context-program.ts)、[LLM Effect 构造与重试](../packages/llm-tasks/src/durable/program-helpers.ts)。
 - [Context 端口](../packages/llm-context/src/domain/durable.ts)、[通信驱动](../packages/driver-llm/src/core/driver.ts)、[Provider 注册表](../packages/driver-llm/src/providers/registry.ts)。
 - [UI 实例端口](../packages/llm-ui/src/domain/ports/SessionViewPort.ts)、[任务挂接](../packages/llm-ui/src/shell/RunAttachmentController.ts)。
+
+后续 GraphMutationRuntime 提取再次通过 Flow 346 项回归，覆盖整批身份绑定失败、patch 幂等冲突、容量限制、循环派发、join 与恢复路径。内部结构见 [Flow API](llm-flow-api.md#执行器内部责任边界)。

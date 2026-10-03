@@ -15,7 +15,9 @@ src/
 ├── index.ts                  统一导出
 ├── flow-definition-store.ts  FlowDefinitionStore（最小 FlowStore 接口 + 版本冲突）
 └── flow/
-    ├── executor.ts           DurableFlowExecutor（动态图调度 / 补偿 / 工作区）
+    ├── executor.ts           DurableFlowExecutor（调度 / checkpoint / 工作区生命周期）
+    ├── scheduler-readiness.ts 循环、路由、join 与 return 就绪判定
+    ├── graph-mutations.ts    动态图 patch、边状态及 join 取消约束
     ├── builtin-plugins.ts    内置插件 transform/reduce/route/spawn/flow/human/agent
     ├── structured/           输入补全、route@2 独立 Task 派发、隔离上下文、按键汇总
     ├── programs.ts           FlowValue / FlowHuman / FlowAggregate Program
@@ -56,3 +58,5 @@ pnpm --filter @itookit/llm-flow test
 变量声明、assign 写回、并发依赖、恢复与组合 Flow 隔离见 [Flow 内部变量](../../doc/design/flow-variables.md)。新变量能力统一经 `flow/variables.ts` 校验与提交，不允许节点直接改写 Session 参数。
 
 Scheduler 就绪判定在 flow/scheduler-readiness.ts，以显式运行状态消费循环、路由、join 与 return 范围；跳过状态仍由调度器持有，不改变 checkpoint 或租约边界。
+
+GraphMutationRuntime 只持有单次运行的显式图状态；宿主通过 bindNode 解析动态节点身份。整批绑定和校验完成后才发布节点、边与幂等记录，checkpoint 和租约仍由 executor 管理，不在此模块新增持久化或产品策略。

@@ -214,6 +214,23 @@ flowRevisionDigest(flow: Omit<FlowRevision, 'digest'>): string; // 修订摘要�
 
 ---
 
+## 执行器内部责任边界
+
+`GraphMutationRuntime` 消费单次运行的显式图状态，按顺序处理 patch、边激活/禁用与 join 取消。patch 保留原幂等指纹、图容量、端口、派发和变量校验；整批宿主身份绑定完成后才发布节点与边。`bindNode` 只接收节点和所属作用域默认身份，不能覆盖节点声明的能力及委派策略。它是包内组件，不新增 npm 包或公共根导出。
+
+```mermaid
+flowchart LR
+    Host[宿主身份解析] -->|bindNode 端口| Mutation[GraphMutationRuntime]
+    Scheduler[DurableFlowExecutor] -->|已完成节点的输出| Mutation
+    Mutation -->|校验后修改| State[单次运行图状态]
+    Mutation --> Validation[端口 / 容量 / 变量校验]
+    Scheduler --> Readiness[readyFlowNodes]
+    Readiness --> State
+    Scheduler -->|保存 checkpoint / 租约条件| Store[Kernel Session shared]
+```
+
+checkpoint、恢复、任务提交和工作区清理由执行器协调；图修改组件不自行写存储或取得租约。循环 back-edge 的派发顺序约束，以及 join 只能取消已观察依赖的约束保持原行为。
+
 ## 插件
 
 ```ts
@@ -236,6 +253,8 @@ packages/llm-flow/src/
 └── flow/
     ├── index.ts               flow 层 barrel
     ├── executor.ts            DurableFlowExecutor + DurableFlowExecutorOptions/FlowExecutionHandle + upstreamOf（未根导出）
+    ├── scheduler-readiness.ts readyFlowNodes（包内就绪判定）
+    ├── graph-mutations.ts     GraphMutationRuntime（包内图状态修改与节点身份绑定端口）
     ├── commands.ts            DagCommandService + DagCommandServiceOptions/DurableFlowSnapshot
     ├── programs.ts            FlowValueProgram/FlowHumanProgram/FlowAggregateProgram + 输入类型
     ├── operations.ts          transformOutcome/spawnOutcome/reduceOutcome/routeOutcome（纯操作，未根导出）
