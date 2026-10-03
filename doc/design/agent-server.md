@@ -12,6 +12,8 @@ Harness 只要求：一个 cwd、一张挂载表、一套目录权限，以及�
 
 fs-agent 是可选的远端文件/执行适配服务，不拥有另一套 Agent、Session、审批或任务调度系统。推理、工具授权和 Kernel 继续由应用层负责。
 
+拟新增的云存储与多端同步能力见 [项目多端同步设计](project-sync.md)。该设计独立管理云端项目版本、设备副本和条件发布，不改变本文普通远程挂载与执行的基础契约；项目数据布局及可选 .mindos 便携目录见其第 18 节。
+
 MVP 不要求自动同步、PublishedRevision、SyncBatch、版本发布 CAS、结果 sealing、ResultRevision、apply-back、可转移工作区租约或持久输出重放。已有独立工作区功能继续服务其原有用途，不成为普通 Harness 的必经步骤。远端复制与结果导出将来可由 RemoteBackend 扩展，不进入 Harness 核心模型。
 
 ## 2. 唯一规范路径
