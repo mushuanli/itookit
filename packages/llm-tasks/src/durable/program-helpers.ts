@@ -1,7 +1,7 @@
 import type { AgentEvent } from '../contracts';
 import type { ChatCompletionResponse, TokenUsage } from '@itookit/driver-llm/contracts';
 import type { ChatMessage, ToolCall } from '@itookit/llm-context';
-import { DEFAULT_EFFECT_TIMEOUT_MS } from '../contracts';
+import { DEFAULT_EFFECT_TIMEOUT_MS, resolveLlmRetryPolicy, resolveToolTimeoutMs } from '../contracts';
 import type {
     JsonValue,
     KernelAction,
@@ -77,10 +77,7 @@ export function llmEffect(
     tools?: import('@itookit/llm-context').ToolDefinition[],
     effectId?: string,
 ): KernelAction {
-    const retries = input.llmRetry?.retries ?? 3;
-    const backoffMs = input.llmRetry?.backoffMs ?? 1000;
-    if (!Number.isInteger(retries) || retries < 0 || retries > 3
-        || !Number.isFinite(backoffMs) || backoffMs < 0) throw new Error('Invalid llmRetry policy');
+    const { retries, backoffMs } = resolveLlmRetryPolicy(input.llmRetry);
     const request = compact({
         _maxAttempts: 1,
         messages,
@@ -121,6 +118,7 @@ export function toolEffect(
     call: ToolCall,
     handleId: string,
     cwd?: string,
+    timeoutMs?: number,
 ): KernelAction {
     return {
         type: 'effect',
@@ -136,7 +134,7 @@ export function toolEffect(
                 ...(cwd ? { cwd } : {}),
             },
             idempotencyKey: `${roundId}:${exchange}:tool:${call.id}`,
-            timeoutMs: DEFAULT_EFFECT_TIMEOUT_MS,
+            timeoutMs: resolveToolTimeoutMs(timeoutMs),
             grants: [{ handleId, right: 'execute' }],
         },
     };

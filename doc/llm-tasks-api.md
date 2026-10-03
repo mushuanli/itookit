@@ -53,6 +53,7 @@ interface DurableProgramInput {
     temperature?: number;
     maxTokens?: number;
     timeoutMs?: number;
+    llmRetry?: { retries?: number; backoffMs?: number };
     thinking?: boolean;
     reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
     stream?: boolean;                 // stream !== false → 流式（默认）；false → 非流式回退
@@ -70,6 +71,7 @@ interface DurableProgramInput {
 ```ts
 interface DurableAgentInput extends DurableProgramInput {
     maxExchanges?: number;            // Agent 循环最大轮次
+    toolTimeoutMs?: number;           // 每个工具 Effect 的超时
     workingDirectory?: string;
     approval?: 'none' | 'external' | 'all';
     tools?: ToolDefinition[];
@@ -251,7 +253,7 @@ dependencyWait(bindings: Array<{ taskId: string }>): {
 buildLlmTaskInput(options: LlmTaskInputOptions): DurableAgentInput;
 ```
 
-**`LlmTaskInputOptions`**：`{ sessionId, roundId, messages, connectionId?（默认 'default'）, model?, temperature?, maxTokens?, timeoutMs?, thinking?, reasoningEffort?, webSearch?, stream?, responseFormat?, outputValidation?, contextCompaction?, maxExchanges?, workingDirectory?, approval?（默认 'external'）, tools?, allowedToolIds?, externalToolIds?, skillContexts?, subtaskTool?, dependencyBindings?, includeDependencyOutputs? }` —— 将上层会话数据组装为 `DurableAgentInput`。
+**`LlmTaskInputOptions`**：`{ sessionId, roundId, messages, connectionId?（默认 'default'）, model?, temperature?, maxTokens?, timeoutMs?, llmRetry?, toolTimeoutMs?, thinking?, reasoningEffort?, webSearch?, stream?, responseFormat?, outputValidation?, contextCompaction?, maxExchanges?, workingDirectory?, approval?（默认 'external'）, tools?, allowedToolIds?, externalToolIds?, skillContexts?, subtaskTool?, dependencyBindings?, includeDependencyOutputs? }` —— 将上层会话数据组装为 `DurableAgentInput`。
 
 ---
 
@@ -296,3 +298,5 @@ LLM 请求失败策略：`DurableProgramInput.llmRetry?: { retries?: number; bac
 结构化输出的 `outputValidation.onInvalid: repair` 默认额外修复 3 次，显式 retries 优先；
 修复计入 maxExchanges。无效响应生成 `llm.output.invalid` 持久事件，包含解析错误、finishReason、
 响应长度与首尾片段、实际修复策略和预算，详见 [Flow 能力与输出](./design/flow-capabilities-and-output.md)。
+
+llmRetry.retries 表示附加尝试次数，默认 3，backoffMs 默认 1000；宿主可覆盖，机制只校验数值边界，禁止溢出总尝试次数。toolTimeoutMs 是正的安全整数，默认 300000。buildLlmTaskInput 验证并复制策略，工具 Effect 从持久 Agent 输入读取，恢复后不会重新读取宿主当前配置。

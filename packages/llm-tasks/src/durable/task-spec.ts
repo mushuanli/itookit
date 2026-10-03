@@ -3,6 +3,7 @@
 // 消除 llm-conversation（directTaskSpec）与 builtin-plugins（agentTask）两处重复的
 // compact({ sessionId/roundId/messages/model/... }) 模板。
 
+import { resolveLlmRetryPolicy, resolveToolTimeoutMs } from '../contracts';
 import type { ChatMessage, ToolDefinition } from '@itookit/llm-context';
 import type {
     DurableAgentInput,
@@ -28,6 +29,7 @@ export interface LlmTaskInputOptions {
     outputValidation?: DurableProgramInput['outputValidation'];
     contextCompaction?: DurableProgramInput['contextCompaction'];
     maxExchanges?: number;
+    toolTimeoutMs?: number;
     workingDirectory?: string;
     approval?: DurableAgentInput['approval'];
     tools?: ToolDefinition[];
@@ -52,7 +54,7 @@ export function buildLlmTaskInput(options: LlmTaskInputOptions): DurableAgentInp
         temperature: options.temperature,
         maxTokens: options.maxTokens,
         timeoutMs: options.timeoutMs,
-        llmRetry: options.llmRetry,
+        llmRetry: options.llmRetry === undefined ? undefined : resolveLlmRetryPolicy(options.llmRetry),
         thinking: options.thinking,
         reasoningEffort: options.reasoningEffort,
         webSearch: options.webSearch,
@@ -61,6 +63,7 @@ export function buildLlmTaskInput(options: LlmTaskInputOptions): DurableAgentInp
         outputValidation: options.outputValidation,
         contextCompaction: options.contextCompaction,
         maxExchanges: options.maxExchanges,
+        toolTimeoutMs: options.toolTimeoutMs === undefined ? undefined : resolveToolTimeoutMs(options.toolTimeoutMs),
         workingDirectory: options.workingDirectory,
         approval: options.approval ?? 'external',
         tools: options.tools,

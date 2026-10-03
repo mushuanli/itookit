@@ -42,3 +42,5 @@ pnpm --filter @itookit/llm-tasks test:watch  # 监听模式
 ```
 
 ContextTaskProgram 为 Agent/Chat v2 bridge，负责把 context 写集转换为 Kernel actions；预算、Notes 与检索策略全部归独立 context 包。
+
+执行策略：llmRetry.retries 是附加尝试次数（默认 3），没有固定业务上限，只校验可安全表示的总尝试次数。toolTimeoutMs 默认 300000，可由宿主覆盖；buildLlmTaskInput 验证并快照策略，Agent 每轮工具 Effect 使用持久输入中的值。

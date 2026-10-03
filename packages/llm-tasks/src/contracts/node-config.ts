@@ -82,6 +82,8 @@ export interface LlmNodeConfig {
 
     // ── Execution policy ──
     maxExchanges?: number;
+    toolTimeoutMs?: number;
+    llmRetry?: import('./execution-policy').LlmRetryPolicy;
     /** Per LLM request timeout. */
     timeoutMs?: number;
     approval?: 'none' | 'external' | 'all';

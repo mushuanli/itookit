@@ -2,9 +2,9 @@ import { expect, it } from 'vitest';
 import type { ToolInvokeResult } from '@itookit/tools/contracts';
 import { DurableAgentProgram } from './agent-program';
 
-function pending(maxExchanges = 4) {
+function pending(maxExchanges = 4, toolTimeoutMs?: number) {
     const program = new DurableAgentProgram();
-    const initial = program.init({ sessionId: 's', roundId: 'r', connectionId: 'c', maxExchanges,
+    const initial = program.init({ sessionId: 's', roundId: 'r', connectionId: 'c', maxExchanges, toolTimeoutMs,
         messages: [{ role: 'user', content: 'Fix code' }] });
     const llm = program.reduce(initial.state, { type: 'signal', sequence: 1,
         signal: { type: 'capabilities', payload: { llmHandleId: 'llm', toolHandleId: 'tool' } } });
@@ -12,7 +12,7 @@ function pending(maxExchanges = 4) {
         result: { choices: [{ message: { role: 'assistant', content: '', tool_calls: [
             { id: 'edit', type: 'function', function: { name: 'Edit', arguments: '{}' } },
         ] }, finish_reason: 'tool_calls' }] } });
-    return { program, state: JSON.parse(JSON.stringify(tool.state)) };
+    return { program, state: JSON.parse(JSON.stringify(tool.state)), actions: tool.actions };
 }
 
 const mismatch: ToolInvokeResult = { toolId: 'Edit', success: false, output: 'Read the file again',
@@ -60,4 +60,15 @@ it('keeps legacy unsuccessful tool results fatal unless explicitly recoverable',
     const next = program.reduce(state, { type: 'effect-completed', effectId: 'tool-1-edit',
         result: { ...mismatch, recoverable: false } as never });
     expect(next.next.type).toBe('fail');
+});
+
+it('preserves host tool timeout across persisted exchanges', () => {
+    const { program, state, actions } = pending(4, 4321);
+    expect(actions).toContainEqual(expect.objectContaining({ type: 'effect', effect: expect.objectContaining({ kind: 'tool.call', timeoutMs: 4321 }) }));
+    const next = program.reduce(state, { type: 'effect-completed', effectId: 'tool-1-edit', result: mismatch as never });
+    const again = program.reduce(JSON.parse(JSON.stringify(next.state)), { type: 'effect-completed', effectId: 'llm-exchange-2',
+        result: { choices: [{ message: { role: 'assistant', content: '', tool_calls: [
+            { id: 'retry', type: 'function', function: { name: 'Edit', arguments: '{}' } },
+        ] }, finish_reason: 'tool_calls' }] } });
+    expect(again.actions).toContainEqual(expect.objectContaining({ type: 'effect', effect: expect.objectContaining({ kind: 'tool.call', timeoutMs: 4321 }) }));
 });

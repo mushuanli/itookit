@@ -27,9 +27,9 @@ it.each([
         // Return an overbroad catalog to verify admission also filters at the Task boundary.
         const resolveTools = vi.fn(async () => ({ definitions: [{ name: 'write_file' }, { name: 'WebSearch' }], externalIds: ['write_file'] }));
         const resolveHarnessToolIds = vi.fn(async () => ['write_file']);
-        const policy = mode === 'agent' && ids === undefined ? { systemPrompt: ['Host custom policy'], maxExchanges: 3 } : undefined;
+        const policy = mode === 'agent' && ids === undefined ? { systemPrompt: ['Host custom policy'], maxExchanges: 3, llmRetry: { retries: 8, backoffMs: 20 }, toolTimeoutMs: 2500 } : undefined;
         const coordinator = new ConversationRunCoordinator({ directAgentPolicy: policy, kernel, resolveTools, resolveHarnessToolIds, engine: {}, eventBus: {}, dagPlugins: {} } as never);
-        if (policy) { policy.systemPrompt[0] = 'Changed after construction'; policy.maxExchanges = 99; }
+        if (policy) { policy.systemPrompt[0] = 'Changed after construction'; policy.maxExchanges = 99; policy.llmRetry.retries = 0; }
         const internal = coordinator as any;
         vi.spyOn(internal, 'startRound').mockResolvedValue(undefined);
         vi.spyOn(internal, 'projectRun').mockReturnValue(undefined);
@@ -56,6 +56,7 @@ it.each([
         if (mode === 'agent') expect(task.input).toMatchObject({ maxExchanges: policy ? 3 : DEFAULT_AGENT_MAX_EXCHANGES });
         expect(JSON.stringify(task.input)).not.toContain('Execute the user request with the available tools');
         if (policy) {
+            expect(task.input).toMatchObject({ llmRetry: { retries: 8, backoffMs: 20 }, toolTimeoutMs: 2500 });
             expect(JSON.stringify(task.input)).toContain('Host custom policy');
             expect(JSON.stringify(task.input)).not.toContain('Changed after construction');
         }

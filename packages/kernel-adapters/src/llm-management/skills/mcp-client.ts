@@ -3,13 +3,12 @@
 // MCPClient — MCP (Model Context Protocol) client.
 // Manages connections to multiple MCP servers via stdio / Streamable HTTP transports.
 
-import type { MCPConnectionOptions } from '../contracts/mcp-transport';
-import { createModuleLogger } from '@itookit/common';
+import { snapshotMCPConnectionOptions, type MCPConnectionOptions } from '../contracts/mcp-transport';
 import { MCP_PROTOCOL_VERSION, type MCPDiscovery } from '@itookit/tools/mcp-contracts';
 import { type ToolDefinition } from '@itookit/llm-context';
 import type { MCPConfig, MCPServerConfig } from './types';
 
-const log = createModuleLogger('device-llm:mcp');
+const noopLog = { debug() {}, info() {}, warn() {}, error() {} };
 
 // ─── Internal types ───────────────────────────────────────────────────────────
 
@@ -62,8 +61,9 @@ export class MCPClient {
     private servers = new Map<string, MCPServerConnection>();
     private tools = new Map<string, { server: string; tool: MCPToolInfo }>();
 
+    private get log() { return this.options.logger ?? noopLog; }
     private readonly options: MCPConnectionOptions;
-    constructor(private config?: MCPConfig, options: MCPConnectionOptions = {}) { this.options = { ...options }; }
+    constructor(private config?: MCPConfig, options: MCPConnectionOptions = {}) { this.options = snapshotMCPConnectionOptions(options); }
 
     async initialize(): Promise<void> {
         if (!this.config?.servers) return;
@@ -71,13 +71,13 @@ export class MCPClient {
             try {
                 await this.connectServer(serverConfig);
             } catch (error: any) {
-                log.error('Failed to connect MCP server', { server: serverConfig.name, error: error.message });
+                this.log.error('Failed to connect MCP server', { server: serverConfig.name, error: error.message });
             }
         }
     }
 
     async connectServer(config: MCPServerConfig): Promise<void> {
-        log.debug('Connecting MCP server', { name: config.name, transport: config.transport });
+        this.log.debug('Connecting MCP server', { name: config.name, transport: config.transport });
 
         const connection = new MCPServerConnection(config, this.options);
         await connection.connect();
@@ -88,7 +88,7 @@ export class MCPClient {
             this.tools.set(`${config.name}/${tool.name}`, { server: config.name, tool });
         }
 
-        log.info('MCP server connected', { name: config.name, toolCount: tools.length });
+        this.log.info('MCP server connected', { name: config.name, toolCount: tools.length });
     }
 
     async disconnectServer(name: string): Promise<void> {
@@ -185,7 +185,7 @@ export class MCPServerConnection {
     private client: import('@modelcontextprotocol/client').Client | undefined;
     private connecting: Promise<void> | undefined;
     private readonly options: MCPConnectionOptions;
-    constructor(private readonly config: MCPServerConfig, options: MCPConnectionOptions = {}) { this.options = { ...options }; }
+    constructor(private readonly config: MCPServerConfig, options: MCPConnectionOptions = {}) { this.options = snapshotMCPConnectionOptions(options); }
 
     connect(): Promise<void> {
         if (this.client) return Promise.resolve();
@@ -194,7 +194,7 @@ export class MCPServerConnection {
 
     private async open(): Promise<void> {
         const { Client } = await import('@modelcontextprotocol/client');
-        const client = new Client({ name: 'mindos', version: '1.0.0' }, {
+        const client = new Client(this.options.clientInfo ?? { name: 'mcp-client', version: '1.0.0' }, {
             supportedProtocolVersions: [MCP_PROTOCOL_VERSION],
             inputRequired: { autoFulfill: false },
             versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } },

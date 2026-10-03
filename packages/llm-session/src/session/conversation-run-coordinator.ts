@@ -562,6 +562,8 @@ function directTaskSpec(
             stream: execution.config.stream,
             approval: 'external',
             maxExchanges: mode === 'agent' ? policy.maxExchanges : undefined,
+            llmRetry: mode === 'agent' ? policy.llmRetry : undefined,
+            toolTimeoutMs: mode === 'agent' ? policy.toolTimeoutMs : undefined,
             tools: definitions,
             allowedToolIds,
             externalToolIds: catalog.externalIds,

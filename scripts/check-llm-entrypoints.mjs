@@ -25,8 +25,8 @@ for (const format of ['js', 'cjs']) {
     assert.doesNotMatch([...codec.values()].join('\n'), /LLMDeviceDriver|HostMCPTransport|LLM_PROVIDERS|@itookit\/vfs-core|@modelcontextprotocol/,
         `${format}: config entry must not load management runtime or product catalogs`);
     const core = graph(`llm-core.${format}`);
-    assert.doesNotMatch([...core.values()].join('\n'), /LLM_PROVIDERS|DEFAULT_AGENTS|MODEL_PRICING/,
-        `${format}: core entry must not load product catalogs`);
+    assert.doesNotMatch([...core.values()].join('\n'), /LLM_PROVIDERS|DEFAULT_AGENTS|MODEL_PRICING|@itookit\/common/,
+        `${format}: core entry must not load product catalogs or application globals`);
     const host = graph(`llm-mcp-host.${format}`);
     const registry = [...host.entries()].filter(([, source]) => source.includes('var hostFactory'));
     assert.equal(registry.length, 1, `${format}: host bridge must have one registry`);

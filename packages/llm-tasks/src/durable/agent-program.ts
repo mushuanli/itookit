@@ -234,7 +234,7 @@ function requestTool(
     if (!call || !handle) return fail(state, 'Tool resource handle is required');
     state.phase = 'tool';
     actions.push(emit({ type: 'tool:running', call: callInfo(call) }));
-    actions.push(toolEffect(state.input.roundId, state.exchanges, call, handle, state.input.workingDirectory));
+    actions.push(toolEffect(state.input.roundId, state.exchanges, call, handle, state.input.workingDirectory, state.input.toolTimeoutMs));
     return { state, actions, next: { type: 'wait', on: { type: 'effect', id: toolEffectId(state.exchanges, call) } } };
 }
 

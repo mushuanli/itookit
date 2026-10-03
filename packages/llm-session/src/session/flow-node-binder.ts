@@ -259,6 +259,8 @@ function resolveModelSettings(
             ?? numberValue(defaults.maxTokens) ?? context.setup.config.constraints?.maxTokens,
         timeoutMs: numberValue(config.timeoutMs) ?? agent?.constraints?.timeout
             ?? numberValue(defaults.timeoutMs) ?? context.setup.config.constraints?.timeout,
+        toolTimeoutMs: config.toolTimeoutMs ?? defaults.toolTimeoutMs,
+        llmRetry: config.llmRetry ?? defaults.llmRetry,
         thinking: booleanValue(config.thinking) ?? agent?.enableThinking
             ?? booleanValue(defaults.thinking) ?? context.setup.config.enableThinking,
         reasoningEffort: reasoningValue(config.reasoningEffort) ?? agent?.reasoningEffort

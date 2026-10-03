@@ -8,7 +8,7 @@ export class LLMDeviceDriver extends ManagementDriver {
     constructor(vfs: IVFSManager, options: LLMDeviceDriverOptions = {}) {
         super(vfs, {
             ...options,
-            mcp: options.mcp ?? { stdioTransport: snapshotMCPStdioHost() },
+            mcp: options.mcp ?? { stdioTransport: snapshotMCPStdioHost(), clientInfo: { name: 'mindos', version: '1.0.0' } },
             presets: options.presets ?? createMindosLlmPresets(),
             providerConnectionPolicy: options.providerConnectionPolicy ?? firstChatModelConnection,
         });

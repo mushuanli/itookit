@@ -96,7 +96,7 @@ function exited(output: unknown): TaskInputEvent {
     };
 }
 
-it.each([undefined, { retries: 0, backoffMs: 0 }, { retries: 3, backoffMs: 5 }])(
+it.each([undefined, { retries: 0, backoffMs: 0 }, { retries: 3, backoffMs: 5 }, { retries: 8, backoffMs: 12 }])(
     'builds an explicit durable LLM retry policy %s', llmRetry => {
         const action = llmEffect({ sessionId: 's', roundId: 'r', connectionId: 'c', messages: [], llmRetry }, [], 'h');
         expect(action).toMatchObject({ type: 'effect', effect: {
@@ -105,7 +105,7 @@ it.each([undefined, { retries: 0, backoffMs: 0 }, { retries: 3, backoffMs: 5 }])
         } });
     });
 
-it.each([{ retries: -1 }, { retries: 4 }, { retries: 1.5 }, { backoffMs: -1 }])(
+it.each([{ retries: -1 }, { retries: Number.MAX_SAFE_INTEGER }, { retries: 1.5 }, { backoffMs: -1 }])(
     'rejects invalid llmRetry %s', llmRetry => {
         expect(() => llmEffect({ sessionId: 's', roundId: 'r', connectionId: 'c', messages: [], llmRetry }, [], 'h'))
             .toThrow('Invalid llmRetry');

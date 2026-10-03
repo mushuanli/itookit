@@ -29,13 +29,20 @@ it('connects identical configs to independently owned hosts and snapshots caller
     vi.stubGlobal('window', {});
     const first = hostTransport(), second = hostTransport();
     const factoryA = vi.fn(async () => first), factoryB = vi.fn(() => second);
-    const options: MCPConnectionOptions = { stdioTransport: factoryA };
+    const identity = { name: 'host-a', version: '2.0.0' };
+    const options: MCPConnectionOptions = { stdioTransport: factoryA, clientInfo: identity };
     const a = new MCPServerConnection(config, options);
     const b = new MCPServerConnection(config, { stdioTransport: factoryB });
-    options.stdioTransport = false;
+    options.stdioTransport = false; identity.name = 'mutated';
     try {
         await Promise.all([a.connect(), b.connect()]);
         expect(a.isConnected()).toBe(true); expect(b.isConnected()).toBe(true);
+        expect(first.send).toHaveBeenCalledWith(expect.objectContaining({ params: expect.objectContaining({
+            _meta: expect.objectContaining({ 'io.modelcontextprotocol/clientInfo': { name: 'host-a', version: '2.0.0' } }),
+        }) }));
+        expect(second.send).toHaveBeenCalledWith(expect.objectContaining({ params: expect.objectContaining({
+            _meta: expect.objectContaining({ 'io.modelcontextprotocol/clientInfo': { name: 'mcp-client', version: '1.0.0' } }),
+        }) }));
         expect(factoryA).toHaveBeenCalledWith(config); expect(factoryB).toHaveBeenCalledWith(config);
         await a.disconnect(); expect(first.close).toHaveBeenCalledOnce();
         expect(second.close).not.toHaveBeenCalled(); expect(b.isConnected()).toBe(true);
@@ -95,4 +102,19 @@ it('forwards instance transports through the client and managed discovery lifecy
         expect(transportB.close).not.toHaveBeenCalled();
     } finally { await client.disconnectAll(); await manager.disconnectAll(); }
     expect(transportB.close).toHaveBeenCalledOnce();
+});
+
+it('keeps client logging scoped to the injected sink', async () => {
+    const failure = new Error('injected host failed');
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const options = { logger, stdioTransport: async () => { throw failure; } };
+    const first = new MCPClient({ servers: [config] }, options);
+    const second = new MCPClient({ servers: [config] }, { stdioTransport: options.stdioTransport });
+    await first.initialize(); await second.initialize();
+    expect(logger.error).toHaveBeenCalledOnce();
+    expect(logger.error).toHaveBeenCalledWith('Failed to connect MCP server', { server: config.name, error: failure.message });
+});
+
+it('rejects invalid MCP identity before opening a transport', () => {
+    expect(() => new MCPServerConnection(config, { clientInfo: { name: '', version: '1' } })).toThrow('non-empty');
 });

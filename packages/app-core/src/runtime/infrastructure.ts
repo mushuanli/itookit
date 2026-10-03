@@ -1,7 +1,7 @@
 import { createMindosLlmPresets, firstChatModelConnection } from '@itookit/kernel-adapters/llm/presets';
 import { createVFS, MemoryBackend, type IFileSystem, type IStorageBackend, type IVFSManager, type MountOptions } from '@itookit/vfs-core';
 import { LLMDeviceDriver, type CodexAppServerTransport } from '@itookit/kernel-adapters/llm/core';
-import { t, traceBoot } from '@itookit/common';
+import { t, traceBoot, createModuleLogger } from '@itookit/common';
 import { type ILLMLogger } from '@itookit/driver-llm/contracts';
 
 export interface ApplicationInfrastructureOptions {
@@ -62,7 +62,7 @@ async function initializeDevices(options: ApplicationInfrastructureOptions, vfs:
     logStep(t('boot.llmDriver'));
     const llmDriver = new LLMDeviceDriver(vfs, {
         presets: createMindosLlmPresets(), providerConnectionPolicy: firstChatModelConnection,
-        llmLogger: options.llmLogger, mcp: options.mcp, codexTransport: options.codexTransport,
+        llmLogger: options.llmLogger, mcp: { clientInfo: { name: 'mindos', version: '1.0.0' }, logger: createModuleLogger('llm:mcp'), ...options.mcp }, codexTransport: options.codexTransport,
     });
     let started = performance.now();
     await traceBoot('llmDriver.init', () => llmDriver.init());

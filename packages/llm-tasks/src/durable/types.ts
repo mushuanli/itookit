@@ -20,8 +20,8 @@ export interface DurableProgramInput {
     temperature?: number;
     maxTokens?: number;
     timeoutMs?: number;
-    /** Additional attempts per LLM exchange; default 3, maximum 3. */
-    llmRetry?: { retries?: number; backoffMs?: number };
+    /** Additional attempts per LLM exchange; default 3, configured by the host. */
+    llmRetry?: import('../contracts').LlmRetryPolicy;
     thinking?: boolean;
     reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
     /** stream !== false → LLM streams (default); false → non-streaming fallback. */
@@ -46,6 +46,7 @@ export interface DurableAgentInput extends DurableProgramInput {
      */
     skillContexts?: Array<NonNullable<import('@itookit/tools/contracts').ToolInvokeResult['skillContext']>>;
     maxExchanges?: number;
+    toolTimeoutMs?: number;
     workingDirectory?: string;
     approval?: 'none' | 'external' | 'all';
     tools?: ToolDefinition[];

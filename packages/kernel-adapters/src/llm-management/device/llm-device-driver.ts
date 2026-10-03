@@ -1,4 +1,4 @@
-import type { MCPConnectionOptions } from '../contracts/mcp-transport';
+import { snapshotMCPConnectionOptions, type MCPConnectionOptions } from '../contracts/mcp-transport';
 import type { ProviderConnectionTestParams } from '@itookit/driver-llm/contracts';
 import { listProviderModels } from '@itookit/driver-llm';
 // @file: device-llm/device/llm-device-driver.ts
@@ -193,7 +193,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     }
 
     constructor(private readonly vfs: IVFSManager, options?: LLMDeviceDriverOptions) {
-        this.mcpOptions = { ...options?.mcp };
+        this.mcpOptions = snapshotMCPConnectionOptions(options?.mcp);
         this.presets = snapshotLlmPresets(options?.presets);
         this.providerConnectionPolicy = options?.providerConnectionPolicy;
         this.shellRunner = options?.shellRunner;

@@ -2,7 +2,7 @@
 //
 // MCPManager — MCP server config storage and active connection lifecycle.
 
-import type { MCPConnectionOptions } from '../contracts/mcp-transport';
+import { snapshotMCPConnectionOptions, type MCPConnectionOptions } from '../contracts/mcp-transport';
 import { mcpTimeoutMs, type MCPServer, type MCPDiscovery } from '@itookit/tools/mcp-contracts';
 import type { IVFSManager, IFileSystem } from '@itookit/vfs-core';
 import { MCPServerConnection } from '../skills/mcp-client';
@@ -24,7 +24,7 @@ export class MCPManager {
         private readonly vfs: IVFSManager,
         private readonly onChanged: () => void,
         options: MCPConnectionOptions = {},
-    ) { this.options = { ...options }; }
+    ) { this.options = snapshotMCPConnectionOptions(options); }
     private readonly options: MCPConnectionOptions;
 
     // ─── Read accessors ────────────────────────────────────────────────────
