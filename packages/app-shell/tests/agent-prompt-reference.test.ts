@@ -2,7 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { AgentConfigEditor } from '../../llm-settings-ui/src/editors/AgentConfigEditor';
 import { buildExecutorOptions } from '../../llm-ui/src/shell/AgentProvider';
-import type { SystemPromptDefinition } from '@itookit/common';
+import type { SystemPromptDefinition } from '@itookit/llm-tasks/contracts';
 
 const cleanup: Array<() => unknown> = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); vi.restoreAllMocks(); });

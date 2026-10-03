@@ -1,6 +1,7 @@
 import { FSError } from '@itookit/vfs-core';
 import type { ISessionRepository } from '@itookit/llm-session';
-import { formatDefaultFileTitle, type SessionSubmission } from '@itookit/common';
+import { formatDefaultFileTitle } from '@itookit/common';
+import { type SessionSubmission } from '@itookit/llm-flow/contracts';
 import { hasCommittedSubmission } from '@itookit/llm-session';
 import type { ProjectDraftPromotion, ProjectDraftRecord, ProjectDraftComposer, DraftStore } from './contracts';
 

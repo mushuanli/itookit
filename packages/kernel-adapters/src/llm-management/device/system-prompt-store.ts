@@ -3,7 +3,7 @@
 // (system segments + quick-prompt presets). Seeded from DEFAULT_AGENTS on init.
 
 import type { IFileSystem, ISeqFileTransaction } from '@itookit/vfs-core';
-import type { SystemPromptDefinition } from '@itookit/common';
+import type { SystemPromptDefinition } from '@itookit/tools/contracts';
 import { DEFAULT_AGENTS } from '../constants/agents';
 
 const SYSTEM_PROMPT_PATH = '/llm/systemprompt';

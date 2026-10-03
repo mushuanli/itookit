@@ -39,7 +39,7 @@ import {
     HistoryQueryOptions,
     getPromptHistory,
 } from '../services/prompt-history-service';
-import { log } from '../utils/logger';
+import { createSessionHost, type SessionHost } from '../utils/host-ports';
 import { SessionRegistry } from './session-registry';
 import { SessionQuery } from './session-query';
 import { RoundOperations } from './round-operations';
@@ -60,6 +60,8 @@ import { SessionMemoryControls } from './session-memory-controls';
  * Conversation session facade backed by Round persistence and Kernel runs.
  */
 export class SessionManager implements ISession, SessionQuery {
+    readonly host: SessionHost;
+    readonly promptHistory?: import('../services/prompt-history-service').PromptHistoryService;
     readonly memory: SessionMemoryControls;
     private registry: SessionRegistry;
     private roundOps: RoundOperations;
@@ -79,6 +81,9 @@ export class SessionManager implements ISession, SessionQuery {
         engine: ISessionRepository,
         agentService: IAgentConfigService,
         options: {
+            agentResolution?: import('./agent-resolver').AgentResolutionPolicy;
+            hostPorts?: import('../utils/host-ports').SessionHostPorts;
+            promptHistory?: import('../services/prompt-history-service').PromptHistoryService;
             kernel: Kernel;
             dagPlugins: DagPluginCatalog;
             flowStore: FlowStore;
@@ -96,9 +101,11 @@ export class SessionManager implements ISession, SessionQuery {
             workspaceManager?: import('./conversation-run-coordinator').ConversationRunCoordinatorOptions['workspaceManager'];
         }
     ) {
+        this.host = createSessionHost(options.hostPorts);
+        this.promptHistory = options.promptHistory;
         this.canWriteSession = options.canWriteSession;
-        this.registry = new SessionRegistry(engine, round => restoreFlowHistory(options.kernel, round));
-        this.agentResolver = new AgentResolver(agentService, options.resolveSessionSkills, options.resolveMCPToolIds);
+        this.registry = new SessionRegistry(engine, round => restoreFlowHistory(options.kernel, round, this.host), this.host);
+        this.agentResolver = new AgentResolver(agentService, options.resolveSessionSkills, options.resolveMCPToolIds, this.host, options.agentResolution);
         const attachments = new AttachmentProcessor(engine);
 
         if (!options?.kernel) throw new Error('SessionManager requires Kernel');
@@ -140,9 +147,10 @@ export class SessionManager implements ISession, SessionQuery {
             options.resolveSessionContext,
             options.workspaceManager,
             options.resolveHarnessToolIds,
+            this.host,
         );
 
-        this.roundOps = new RoundOperations(this.registry, this.runs);
+        this.roundOps = new RoundOperations(this.registry, this.runs, this.promptHistory);
         this.flowRerun = new FlowRerunService(this.registry, this.runs, options.flowStore, options.dagPlugins);
         this.branchService = new BranchService(this.registry);
     }
@@ -177,7 +185,7 @@ export class SessionManager implements ISession, SessionQuery {
                 break;
             case 'navigate':
                 this.branchService.switchBranch(s.ref).catch(e => {
-                    log.warn('signal(navigate) failed', { ref: s.ref, error: e });
+                    this.host.logger.warn('signal(navigate) failed', { ref: s.ref, error: e });
                 });
                 break;
         }
@@ -322,7 +330,7 @@ export class SessionManager implements ISession, SessionQuery {
                         this.durableSession, sessionId, this.registry.getSessionRuntime(sessionId),
                     );
                 } catch (error) {
-                    log.warn('Durable conversation projection failed', { sessionId, error });
+                    this.host.logger.warn('Durable conversation projection failed', { sessionId, error });
                 }
             }
         } finally {
@@ -540,23 +548,23 @@ export class SessionManager implements ISession, SessionQuery {
     // ================================================================
 
     async searchHistory(options?: HistoryQueryOptions): Promise<PromptHistoryEntry[]> {
-        return getPromptHistory()?.search(options) ?? [];
+        return this.promptHistory?.search(options) ?? [];
     }
 
     async getRecentPrompts(count: number = 20): Promise<PromptHistoryEntry[]> {
-        return getPromptHistory()?.getRecent(count) ?? [];
+        return this.promptHistory?.getRecent(count) ?? [];
     }
 
     async removeFromHistory(text: string): Promise<boolean> {
-        return getPromptHistory()?.remove(text) ?? false;
+        return this.promptHistory?.remove(text) ?? false;
     }
 
     async clearHistory(): Promise<void> {
-        await getPromptHistory()?.clear();
+        await this.promptHistory?.clear();
     }
 
     async getHistoryCount(): Promise<number> {
-        return getPromptHistory()?.getCount() ?? 0;
+        return this.promptHistory?.getCount() ?? 0;
     }
 
     // ================================================================
@@ -623,11 +631,11 @@ export function createSessionManager(
     options: ConstructorParameters<typeof SessionManager>[2]
 ): SessionManager {
     if (sessionManagerInstance) {
-        log.warn('SessionManager already exists, returning existing instance');
+        sessionManagerInstance.host.logger.warn('SessionManager already exists, returning existing instance');
         return sessionManagerInstance;
     }
 
-    sessionManagerInstance = new SessionManager(engine, agentService, options);
+    sessionManagerInstance = new SessionManager(engine, agentService, { ...options, promptHistory: options.promptHistory ?? getPromptHistory() });
     return sessionManagerInstance;
 }
 

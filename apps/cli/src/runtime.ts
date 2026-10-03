@@ -5,7 +5,8 @@ import { leaseSkewConfig } from './lease-config';
 import { mkdir } from 'node:fs/promises';
 import { memoryPolicyForAgent, grantRunMemory } from './memory-policy';
 import path from 'node:path';
-import type { DagRunSpec, LLMConnection, LLMProvider } from '@itookit/common';
+import type { DagRunSpec } from '@itookit/llm-flow/contracts';
+import type { LLMConnection, LLMProvider } from '@itookit/driver-llm/contracts';
 import { parse } from 'yaml';
 import { SessionFileSkillSource, resolveSessionSkillContext } from '@itookit/kernel-adapters';
 import { LLMDeviceDriver } from '@itookit/kernel-adapters/llm';
@@ -298,7 +299,7 @@ export async function createCliRuntime(
         resolveNewRunContext: sessionId => resolveSessionSkillContext(kernel, core.sessions, sessionId, workflow.config.goal),
         resolveTools: flowCapabilities.resolveTools,
         resolveSkillContexts: flowCapabilities.resolveSkillContexts,
-        bindPatchNode: (id, node, defaults) => flowCapabilities.bindNode(id, node as import('@itookit/common').FlowNodeDefinition, defaults as never),
+        bindPatchNode: (id, node, defaults) => flowCapabilities.bindNode(id, node as import('@itookit/llm-flow/contracts').FlowNodeDefinition, defaults as never),
         // A crashed host keeps the Run's scheduler lease until the TTL expires; tests
         // shorten it the same way they shorten the Session lease. The skew budget is the
         // explicit cross-host clock-error constraint for shared-storage deployments.
@@ -311,7 +312,7 @@ export async function createCliRuntime(
         if (!manifest.rootTaskId) return;
         await projection.sync({ sessionId: manifest.sessionId, rootTaskId: manifest.rootTaskId,
             input: `${workflow.config.goal}\n\n${JSON.stringify(manifest.flow?.parameters ?? {}, null, 2)}`,
-            ...(manifest.flow ? { flow: { flowId: manifest.flow.definition.id as import('@itookit/common').FlowId,
+            ...(manifest.flow ? { flow: { flowId: manifest.flow.definition.id as import('@itookit/llm-flow/contracts').FlowId,
                 revision: manifest.flow.definition.revision, parameters: manifest.flow.parameters } } : {}),
             selectResult: output => selectFinalResult(output, workflow.config.result.task, workflow.config.result.output),
         }, tasks);

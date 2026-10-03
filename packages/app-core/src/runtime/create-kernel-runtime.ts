@@ -17,6 +17,7 @@ import { createRuntimeContextResolver } from './context-service';
 import { createRuntimeContextGc, type RuntimeContextGc, type RuntimeContextGcOptions } from './context-gc';
 
 export interface CreateKernelRuntimeOptions {
+    contextEngineOptions?: import('@itookit/llm-context').ContextEngineOptions;
     contextGc?: RuntimeContextGcOptions | false;
     /** Override the context storage/engine ports at the host composition boundary. */
     contextService?: import('@itookit/kernel-adapters').ContextServiceResolver;
@@ -64,7 +65,7 @@ export async function createKernelRuntime(
     const contextGc = options.contextService || options.contextGc === false ? undefined
         : createRuntimeContextGc(() => kernel, options.contextGc);
     const adapters = await createKernelAdaptersRuntime({
-        contextService: options.contextService ?? createRuntimeContextResolver(() => kernel, () => adapters.llmService, contextGc?.observe),
+        contextService: options.contextService ?? createRuntimeContextResolver(() => kernel, () => adapters.llmService, contextGc?.observe, options.contextEngineOptions),
         llmDriver: options.llmDriver,
         runMode: 'kernel',
         fileContextForSession: options.fileContextForSession,

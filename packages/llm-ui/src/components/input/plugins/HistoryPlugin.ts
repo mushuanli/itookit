@@ -1,8 +1,9 @@
+import type { PromptHistoryPort } from '../../../domain/ports/SessionViewPort';
 // @file: llm-ui/components/input/plugins/HistoryPlugin.ts
 
 import type { InputPlugin, InputPluginContext } from './InputPlugin';
 import { PopupPanel, PopupItem } from './PopupPanel';
-import type { PromptHistoryService, PromptHistoryEntry } from '@itookit/llm-session';
+import type { PromptHistoryEntry } from '@itookit/llm-session';
 import { truncateText } from '../../../utils/textUtils';
 import { formatTimeAgo } from '../../../utils/timeUtils';
 
@@ -26,7 +27,7 @@ export class HistoryPlugin implements InputPlugin {
     private panel: PopupPanel | null = null;
     private cachedEntries: PromptHistoryEntry[] = [];
 
-    constructor(private historyService: PromptHistoryService) {}
+    constructor(private historyService: PromptHistoryPort) {}
 
     activate(ctx: InputPluginContext): void {
         this.ctx = ctx;

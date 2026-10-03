@@ -1,8 +1,4 @@
-// @file: llm-conversation/utils/logger.ts
+import { createSessionHost } from './host-ports';
 
-import { createModuleLogger } from './host-ports';
-
-/**
- * llm-driver 模块的统一日志实例
- */
-export const log = createModuleLogger('llm-conversation');
+/** Silent default for legacy standalone helpers; runtimes inject their own logger. */
+export const log = createSessionHost().logger;

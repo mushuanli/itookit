@@ -1,7 +1,7 @@
 import type { ContextPrepareInput, ContextCursor, IContextService, PreparedContext } from '@itookit/llm-context';
 import { CONTEXT_TOOL_IDS, invokeContextTool, ContextError } from '@itookit/llm-context';
 import { assertEffectGrant, type EffectAdapter, type EffectExecutionContext } from '@itookit/durable-kernel';
-import type { ChatCompletionResponse } from '@itookit/common';
+import type { ChatCompletionResponse } from '@itookit/driver-llm/contracts';
 import type { ToolInvokeResult } from '@itookit/tools/contracts';
 import type { LlmChatEffectRequest } from '../effects/llm-chat-effect';
 import type { ToolCallEffectRequest } from '../effects/tool-call-effect';

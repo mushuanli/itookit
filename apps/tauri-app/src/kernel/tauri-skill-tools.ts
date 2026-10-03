@@ -1,8 +1,4 @@
-import type {
-    SkillDefinition,
-    SkillToolBinding,
-    ToolHandler,
-} from '@itookit/common';
+import type { SkillDefinition, SkillToolBinding, ToolHandler } from '@itookit/tools/contracts';
 import type { SkillToolHandlerFactory } from '@itookit/kernel-adapters';
 import type { TauriNativeShell } from '../shell/tauri-native-shell';
 

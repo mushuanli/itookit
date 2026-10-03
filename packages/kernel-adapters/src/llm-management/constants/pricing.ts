@@ -3,8 +3,9 @@
 // 类型来自 @itookit/common；此文件只负责 VFS IO 和模型字段覆盖。
 
 import type { IFileSystem } from '@itookit/vfs-core';
-import type { LLMModel, ModelPricingConfig, ModelPricingEntry } from '@itookit/common';
-import { lookupPricingEntry, extractPrices } from '@itookit/common';
+import type { LLMModel } from '@itookit/driver-llm/contracts';
+import type { ModelPricingConfig, ModelPricingEntry } from '@itookit/kernel-adapters/contracts';
+import { lookupPricingEntry, extractPrices } from '@itookit/kernel-adapters/contracts';
 import { MODEL_PRICING } from './providers';
 
 export const PRICING_FILE_PATH = '/llm/pricing.json';

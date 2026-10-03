@@ -1,6 +1,6 @@
 import { realpath, readFile, readdir, stat, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import type { ToolVFSContext } from '@itookit/common';
+import type { ToolVFSContext } from '@itookit/tools/contracts';
 import { buildTool } from '@itookit/tools';
 import { z } from 'zod/v4';
 import type { WorkspaceAccess, WorkspaceGrant } from './types';

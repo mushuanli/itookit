@@ -7,12 +7,15 @@ import ts from 'typescript';
 
 const application = new Set(['@itookit/app-core', '@itookit/app-shell', '@itookit/app-settings']);
 const coreDependencies = new Set(['common', 'llm-context', 'vfs-core', 'durable-kernel', 'kernel-adapters',
-    'llm-flow', 'llm-session', 'driver-llm'].map(name => '@itookit/' + name));
+    'llm-flow', 'llm-session', 'llm-tasks', 'tools', 'driver-llm'].map(name => '@itookit/' + name));
 const browserGlobals = new Set(['window', 'document', 'localStorage', 'sessionStorage', 'navigator',
     'Window', 'Document', 'Element', 'Node', 'MutationObserver', 'ResizeObserver']);
 
 export function dependencyError(source, target) {
     if (source === target) return;
+    if (source === '@itookit/common' && target.startsWith('@itookit/')) return 'common must not depend on capability packages';
+    if (source === '@itookit/ui-common' && target.startsWith('@itookit/') && !['@itookit/common', '@itookit/vfs-core'].includes(target)) return 'shared UI must receive domain data through generic ports';
+    if (source === '@itookit/kernel-adapters' && ['@itookit/llm-tasks', '@itookit/llm-flow', '@itookit/llm-session'].includes(target)) return 'adapters must not depend on execution or conversation layers';
     if (['@itookit/tools', '@itookit/device-tty', '@itookit/llm-tasks', '@itookit/llm-flow', '@itookit/llm-session'].includes(source) &&
         ['@itookit/common', '@itookit/llm-common'].includes(target)) return 'execution capabilities must use owned contracts and injected ports';
     if (source === '@itookit/driver-llm' && target !== '@itookit/llm-context') return 'driver-llm must receive host capabilities through its public ports';
@@ -21,6 +24,11 @@ export function dependencyError(source, target) {
     if (source === '@itookit/vfs-ui' && target !== '@itookit/vfs-core') return 'vfs-ui must not depend on host packages; use its public ports';
     if (source === '@itookit/app-core' && !coreDependencies.has(target)) return 'app-core may only depend on its platform-neutral capabilities';
     if (source !== '@itookit/app-shell' && application.has(target)) return 'capability packages must not depend on application packages';
+}
+
+export function manifestDependencyError(source, target) {
+    if (source === '@itookit/driver-llm') return 'driver-llm published manifest must have no runtime dependencies';
+    return dependencyError(source, target);
 }
 
 function publicSubpath(pkg, subpath) {
@@ -36,6 +44,10 @@ function ownerOf(file, packages) {
 }
 
 export function importError(source, file, specifier, packages) {
+    if (source.name === '@itookit/llm-ui' && !['src/index.ts', 'src/settings.ts'].some(path => file === resolve(source.dir, path))) {
+        if (specifier.startsWith('@itookit/llm-settings-ui') || (specifier.startsWith('.') && resolve(file, '..', specifier).replace(/\.ts$/, '') === resolve(source.dir, 'src/settings')))
+            return 'chat and shared UI must not load optional settings implementations';
+    }
     if (source.name === '@itookit/app-core' && (specifier.startsWith('node:') || builtinModules.includes(specifier))) return 'app-core must receive native capabilities through injected ports';
     if (specifier.startsWith('.')) {
         const target = ownerOf(resolve(file, '..', specifier), packages);
@@ -124,7 +136,7 @@ export async function checkBoundaries(root) {
         for (const name of Object.keys({ ...pkg.dependencies, ...pkg.peerDependencies })) {
             const target = packages.find(candidate => candidate.name === name);
             if (pkg.host) continue;
-            const error = target?.host ? 'packages must not depend on app hosts' : dependencyError(pkg.name, name);
+            const error = target?.host ? 'packages must not depend on app hosts' : manifestDependencyError(pkg.name, name);
             if (error) errors.push(`${relative(root, pkg.dir)}/package.json: ${error} (${name})`);
         }
         for (const file of await filesIn(resolve(pkg.dir, 'src'))) {

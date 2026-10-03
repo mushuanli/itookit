@@ -9,8 +9,7 @@
 //   - Executing the import in dependency order
 
 import { Toast } from '@itookit/ui-common';
-import type { IConnectionService
-} from '@itookit/common';
+import type { IConnectionService } from '@itookit/kernel-adapters/contracts';
 import { Modal } from '@itookit/ui-common';
 import {
     parseLLMConfig,
@@ -18,7 +17,7 @@ import {
     getProviderDefs,
     type LLMConfigFile, type LLMConnectionDef,
 } from '@itookit/kernel-adapters/llm';
-import type { ModelPricingConfig } from '@itookit/common';
+import type { ModelPricingConfig } from '@itookit/kernel-adapters/contracts';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

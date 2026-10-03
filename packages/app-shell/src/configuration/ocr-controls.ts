@@ -1,5 +1,6 @@
 import { OcrService } from '@itookit/app-core';
-import { escapeHTML, randomUUID, t, type IAgentManagementService, type NavigationRequest } from '@itookit/common';
+import { escapeHTML, randomUUID, t, type NavigationRequest } from '@itookit/common';
+import { type IAgentManagementService } from '@itookit/kernel-adapters/contracts';
 import { Modal, Toast, renderOcrSettings, readOcrSettings, type OcrSettingsState, type EditorTarget, type OcrControls } from '@itookit/ui-common';
 
 export interface OcrConfigurationControls extends OcrControls {

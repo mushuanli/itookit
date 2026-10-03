@@ -30,16 +30,16 @@ async function main() {
     const backend = await openIndexedDBBackend({ dbName: 'MindOS-v3' });
     const ui: AppUI = {
         createChatEditor: (service, deps) => lazyEditorFactory(async () =>
-            (await import('@itookit/llm-ui')).createLLMFactory(service, deps)),
+            (await import('@itookit/llm-ui/chat')).createLLMFactory(service, deps)),
         createAgentEditor: service => lazyEditorFactory(async () =>
-            (await import('@itookit/llm-ui')).createAgentEditorFactory(service)),
+            (await import('@itookit/llm-ui/settings')).createAgentEditorFactory(service)),
         createFlowEditor: deps => lazyEditorFactory(async () =>
-            (await import('@itookit/llm-ui')).createFlowsEditorFactory(deps)),
+            (await import('@itookit/llm-ui/chat')).createFlowsEditorFactory(deps)),
         createFlowContextMenu: createFlowContextMenuConfig,
         installFlowLibrary,
         restoreFlowLibrary,
         createSkillEditor: service => lazyEditorFactory(async () =>
-            (await import('@itookit/llm-ui')).createSkillsEditorFactory(service)),
+            (await import('@itookit/llm-ui/settings')).createSkillsEditorFactory(service)),
         createAIContextMenu: createAIContextMenuConfig,
         llmUiEditors: {
             ProviderSettingsEditor,

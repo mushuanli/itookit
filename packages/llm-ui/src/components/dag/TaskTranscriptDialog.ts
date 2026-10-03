@@ -1,4 +1,5 @@
-import { escapeHTML, t, type ICommandBus } from '@itookit/common';
+import { escapeHTML, t } from '@itookit/common';
+import { type ICommandBus } from '@itookit/llm-session/contracts';
 import { FlowCommand, type FlowTaskTranscript } from '@itookit/llm-session';
 
 /** Interactive pages stay bounded; export re-reads the pinned version on demand. */

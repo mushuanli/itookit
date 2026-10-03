@@ -1,4 +1,4 @@
-import type { FormLayout, JsonValue } from '@itookit/common';
+import type { FormLayout, JsonValue } from '@itookit/llm-flow/contracts';
 import { escapeHTML } from '@itookit/common';
 
 interface JsonSchema {

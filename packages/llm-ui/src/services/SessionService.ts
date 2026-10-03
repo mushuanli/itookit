@@ -2,7 +2,7 @@
 
 
 import { SessionCommand, ISessionRepository, SessionSnapshot, type ConversationManifest, type SessionRepositoryChange } from '@itookit/llm-session';
-import type { ICommandBus } from '@itookit/common';
+import type { ICommandBus } from '@itookit/llm-session/contracts';
 import type { ChatInputSettings } from '../domain/ports/IChatInputPresenter';
 
 export interface SessionLoadResult {

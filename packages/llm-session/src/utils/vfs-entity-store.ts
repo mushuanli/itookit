@@ -1,7 +1,7 @@
 // @file: llm-conversation/src/utils/vfs-entity-store.ts
 
 import { FileBackedService } from './file-backed-service';
-import { log } from './logger';
+import { createSessionHost, type SessionHost } from './host-ports';
 
 /**
  * VFS JSON 实体的通用 CRUD 配置
@@ -33,7 +33,8 @@ export class VFSEntityStore<T extends Identifiable> {
     constructor(
         private service: FileBackedService,
         private engine: FileBackedService['engine'],
-        private config: EntityStoreConfig
+        private config: EntityStoreConfig,
+        private readonly host: SessionHost = createSessionHost()
     ) { }
 
     /**
@@ -85,7 +86,7 @@ export class VFSEntityStore<T extends Identifiable> {
 
         if (nodeId) {
             await this.engine.driver.delete([nodeId]);
-            log.debug(`${this.config.typeName} file deleted`, { id });
+            this.host.logger.debug(`${this.config.typeName} file deleted`, { id });
         }
 
         return cache.filter(c => c.id !== id);

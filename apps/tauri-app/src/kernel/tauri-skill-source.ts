@@ -1,4 +1,4 @@
-import type { ToolVFSContext } from '@itookit/common';
+import type { ToolVFSContext } from '@itookit/tools/contracts';
 import { SessionFileSkillSource } from '@itookit/kernel-adapters';
 import { parse } from 'yaml';
 

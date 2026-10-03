@@ -2,7 +2,8 @@
 // 连接 + 模型层级选择：快速按钮/弹窗 + 设置面板的 connection select / tier cards。
 // 从 ChatInputView 抽出，自包含（状态 + DOM + 弹窗渲染），变更通过 onChange 回调通知宿主。
 
-import { t, type ModelTier } from '@itookit/common';
+import { t } from '@itookit/common';
+import { type ModelTier } from '@itookit/driver-llm/contracts';
 import { ChatInputTemplates } from '../templates/ChatInputTemplates';
 import { PopupPanel, type PopupItem } from './plugins/PopupPanel';
 import type { ConnectionOption } from '../../domain/types';

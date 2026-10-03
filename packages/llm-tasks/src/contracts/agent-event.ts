@@ -1,4 +1,5 @@
-import type { ChatCompletionParams } from '@itookit/driver-llm/contracts';
+import type { AgentEventStreamThinking, AgentEventStreamContent, AgentEventCitations, AgentEventLlmRequest } from '@itookit/driver-llm/contracts';
+export type { AgentEventStreamThinking, AgentEventStreamContent, AgentEventCitations, AgentEventLlmRequest } from '@itookit/driver-llm/contracts';
 // Canonical AgentEvent schema — single event vocabulary for the entire LLM subsystem.
 //
 // Replaces 5 event vocabularies + 3 translation layers (~91 events) with ~22 events.
@@ -10,7 +11,6 @@ import type { ChatCompletionParams } from '@itookit/driver-llm/contracts';
 //   - await_signal is the ONLY pause mechanism (unifies HITL / plan-confirm / request_input)
 
 import type { TokenUsage } from '@itookit/driver-llm/contracts';
-import type { Citation } from '@itookit/driver-llm/contracts';
 
 // ─── Round lifecycle (authoritative) ──────────────────────────────────
 
@@ -40,24 +40,6 @@ export interface AgentEventError {
         code?: string;
         stack?: string;
     };
-}
-
-// ─── Streaming (transient — never written to Log) ────────────────────
-
-export interface AgentEventStreamThinking {
-    type: 'stream:thinking';
-    delta: string;
-}
-
-export interface AgentEventStreamContent {
-    type: 'stream:content';
-    delta: string;
-}
-
-/** 联网搜索结果引用（内置 web_search / grounding 检索），终态一次性携带。 */
-export interface AgentEventCitations {
-    type: 'citations';
-    citations: Citation[];
 }
 
 // ─── Tool lifecycle ──────────────────────────────────────────────────
@@ -197,13 +179,6 @@ export interface EventEnvelope<T> {
 }
 
 // ─── Canonical union ─────────────────────────────────────────────────
-
-export interface AgentEventLlmRequest {
-    type: 'llm:request';
-    effectId: string;
-    connectionId: string;
-    request: Omit<ChatCompletionParams, 'signal'>;
-}
 
 export type AgentEvent =
     | AgentEventLlmRequest

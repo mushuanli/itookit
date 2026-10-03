@@ -92,3 +92,7 @@ pnpm --filter @itookit/kernel-adapters typecheck
 ## 模型管理子入口
 
 `@itookit/kernel-adapters/llm` 承接旧 device-llm 的 LLMDeviceDriver、LLM_IOCTL、配置、费用、Skill 与 MCP 管理。源码在 `src/llm-management/`，回归在 `tests/llm-management/`；不是额外 npm 包。公开通信客户端与契约来自 driver-llm，禁止其反向依赖本包。MCP stdio 保留 browser/default 条件入口。详见 [模型集成](./doc/llm-management/README.md)。
+
+## 配置契约入口
+
+`@itookit/kernel-adapters/contracts` 定义 Agent、连接管理、恢复与定价契约及纯策略，不加载适配器运行时、VFS、YAML 或 MCP SDK。Session 与设置 UI 直接消费此入口；适配层不得反向依赖 Session、Flow 或 Tasks。模型事件来自 driver-llm/contracts 的 LlmCommunicationEvent。

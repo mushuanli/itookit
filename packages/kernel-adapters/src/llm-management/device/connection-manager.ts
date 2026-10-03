@@ -2,9 +2,9 @@
 //
 // ConnectionManager — CRUD for LLMConnection with VFS persistence.
 
-import type { LLMConnection, ConnectionMeta, LLMProvider } from '@itookit/common';
+import type { LLMConnection, ConnectionMeta, LLMProvider } from '@itookit/driver-llm/contracts';
 import type { IVFSManager, IFileSystem } from '@itookit/vfs-core';
-import { toConnectionMeta, aggregateProviderCosts } from '@itookit/common';
+import { toConnectionMeta, aggregateProviderCosts } from '@itookit/kernel-adapters/contracts';
 import { DEFAULT_CONNECTIONS, CONST_CONFIG_VERSION } from '../constants';
 import { VFSHelpers } from './vfs-helpers';
 import type { ProviderManager } from './provider-manager';

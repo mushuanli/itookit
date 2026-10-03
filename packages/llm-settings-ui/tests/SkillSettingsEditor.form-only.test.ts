@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { expect, it } from 'vitest';
 import yaml from 'js-yaml';
-import type { LLMSkill } from '@itookit/common';
+import type { LLMSkill } from '@itookit/kernel-adapters/contracts';
 import { SkillSettingsEditor } from '../src/editors/SkillSettingsEditor';
 
 function parse(text: string): LLMSkill {

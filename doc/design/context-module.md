@@ -375,7 +375,7 @@ GC 与发布需要共同的 fence。活跃 Task 在线回收需要 stage 发布�
 
 旧 API 迁移规则：
 
-- `common` 的 Context 类型（包括 [node-config.ts](../../packages/llm-tasks/src/contracts/node-config.ts) 中的 ContextCompactionPolicy）、llm-tasks 的 ContextAssembler 导出在兼容期只转发或提供显式旧 DTO 转换；实现和新类型唯一来源是 context。最终消费者直接 `import type` 公开接口。
+- common 不再导出 Context 类型；[node-config.ts](../../packages/llm-tasks/src/contracts/node-config.ts) 中的 ContextCompactionPolicy 与 llm-tasks 的 ContextAssembler 导出在兼容期只转发或提供显式旧 DTO 转换；实现和新类型唯一来源是 context。最终消费者直接 `import type` 公开接口。
 - 旧 ChatMessage、Round/Artifact DTO 由边界 mapper 转换，context 不反向依赖宿主或聚合兼容层。Provider wire 编码由 codec 适配，不把现有临时清洗规则当永久 API。
 - llm-session 仍拥有 Round/branch 的业务身份，Context Profile 的版本和选择规则迁出；旧 profile 文件只作为迁移输入。
 - Kernel `SessionContextApi` / ContextCommit / ContextBranch 属于历史通用提交 API；经 adapter 读取旧 context.seq，建立稳定 legacy ID 映射。新 Context 不双写两个权威 head；待消费者全部迁移后移除 Kernel 的 Context 命名 API，旧磁盘数据保留只读迁移支持。

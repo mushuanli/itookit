@@ -3,7 +3,7 @@ import type { IEditor, SessionDraftControls } from '@itookit/ui-common';
 
 /** Navigation adapts a headless draft use case into editor controls. */
 export function createProjectDraftControls(composer: ProjectDraftComposer,
-    navigation: { check(): Promise<void>; open(id: string): Promise<IEditor> }): SessionDraftControls {
+    navigation: { check(): Promise<void>; open(id: string): Promise<IEditor> }): SessionDraftControls<import('@itookit/llm-flow/contracts').SessionSubmission> {
     return {
         initialData: composer.initialData,
         attachments: composer.attachments,

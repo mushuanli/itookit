@@ -1,4 +1,4 @@
-import type { LLMSkill } from '@itookit/common';
+import type { LLMSkill } from '@itookit/kernel-adapters/contracts';
 
 export function readSkillSupportFields(val: (name: string) => string, chk: (name: string) => boolean): Pick<LLMSkill, 'fsRoot' | 'referencePaths' | 'templatePath' | 'correctionLog'> {
     const path = val('correctionLog').trim();

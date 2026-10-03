@@ -428,7 +428,7 @@ function createEffects(
 }
 
 async function persistLoadedSkill(
-    result: import('@itookit/common').SkillLoadResult,
+    result: import('@itookit/tools/contracts').SkillLoadResult,
     context: import('@itookit/durable-kernel').EffectExecutionContext,
 ): Promise<void> {
     await rememberLoadedSkill(result.skillId, context.sessionState, result.snapshot);

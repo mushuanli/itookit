@@ -103,3 +103,20 @@ describe('host application startup', () => {
         }
     });
 });
+
+it('isolates conversation managers and prompt history across runtime disposal', async () => {
+    const first = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'cli' });
+    const second = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'cli' });
+    try {
+        expect(first.sessionManager).not.toBe(second.sessionManager);
+        expect(first.sessionManager.promptHistory).not.toBe(second.sessionManager.promptHistory);
+        await first.sessionManager.promptHistory!.add('first host');
+        await second.sessionManager.promptHistory!.add('second host');
+        expect((await first.sessionManager.getRecentPrompts(10)).map(entry => entry.text)).toEqual(['first host']);
+        expect((await second.sessionManager.getRecentPrompts(10)).map(entry => entry.text)).toEqual(['second host']);
+        await first.dispose();
+        await second.sessionManager.promptHistory!.add('still active');
+        expect((await second.sessionManager.getRecentPrompts(10)).map(entry => entry.text)).toContain('still active');
+        expect(second.sessionManager.getStatus()).toBe('unbound');
+    } finally { await second.dispose(); await first.dispose(); }
+});

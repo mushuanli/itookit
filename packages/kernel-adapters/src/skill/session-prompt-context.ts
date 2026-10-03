@@ -32,7 +32,7 @@ export function resolveSessionSelectedSkills(kernel: Kernel, registry: SessionCa
         const service = (await registry.get(sessionId)).skillService;
         return withSkillDriftPersistence(service, state, async () => {
             await registry.restore(sessionId, loaded?.value);
-            const skills: import('@itookit/common').LLMSkill[] = [];
+            const skills: import('@itookit/kernel-adapters/contracts').LLMSkill[] = [];
             for (const id of new Set(ids)) {
                 const definition = service.getSkill(id);
                 if (!definition?.enabled || definition.disableModelInvocation || definition.triggerStrategy === 'action') {

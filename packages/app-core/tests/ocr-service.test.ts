@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { MemoryBackend } from '@itookit/vfs-core';
-import type { ILLMService } from '@itookit/common';
+import type { ILLMService } from '@itookit/driver-llm/contracts';
 import { createApplicationRuntime, type ApplicationRuntime } from '../src/runtime/create-application-runtime';
 import { OcrService } from '../src/configuration/ocr-service';
 

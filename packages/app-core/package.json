@@ -25,7 +25,9 @@
     "@itookit/llm-session": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
     "@itookit/driver-llm": "workspace:*",
-    "@itookit/llm-context": "workspace:*"
+    "@itookit/llm-context": "workspace:*",
+    "@itookit/llm-tasks": "workspace:*",
+    "@itookit/tools": "workspace:*"
   },
   "devDependencies": {
     "@itookit/vfsdriver-indexeddb": "workspace:*",

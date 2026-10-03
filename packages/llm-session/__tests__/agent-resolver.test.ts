@@ -107,3 +107,20 @@ it('resolves independent model reasoning efforts with legacy fallback', () => {
     expect(resolve(conn, 'standard', 'b')).toEqual({ enableThinking: true, reasoningEffort: 'high' });
     expect(resolve(conn, 'fast', 'legacy')).toEqual({ enableThinking: true, reasoningEffort: 'medium' });
 });
+
+it('allows hosts to reject missing agents without relaxing exact resolution', async () => {
+    const resolver = new AgentResolver(service(), undefined, undefined, undefined, { missingAgent: 'reject' });
+    await expect(resolver.resolveForChat('missing')).rejects.toThrow('Agent not found: missing');
+    await expect(resolver.resolveExact('missing')).rejects.toThrow('Kernel requires exact agent resolution');
+});
+
+it('uses a host fallback only for chat and reports why resolution failed', async () => {
+    const failures: unknown[] = [];
+    const resolver = new AgentResolver(service(), undefined, undefined, undefined, {
+        missingAgent: (id, failure) => { failures.push([id, failure]); return { id: 'custom', name: 'Custom', type: 'agent', agentVersion: 'v1' }; },
+    });
+    expect((await resolver.resolveForChat('missing')).id).toBe('custom');
+    expect(failures).toEqual([['missing', { reason: 'not-found' }]]);
+    await expect(resolver.resolveExact('missing')).rejects.toThrow('Agent not found');
+    expect(failures).toHaveLength(1);
+});

@@ -3,17 +3,8 @@ import { renderFlowOutput } from './dag/FlowOutput';
 import { enhanceInputFieldsEditor } from './dag/InputFieldsEditor';
 import { enhanceInvocationEditor } from './dag/InvocationEditor';
 import { openRunPicker } from './dag/RunPicker';
-import type {
-    FlowDraft,
-    FlowNodeId,
-    FlowRevision,
-    ICommandBus,
-    FlowEdgeDefinition,
-    DagPluginManifest,
-    DagPluginPresentation,
-    FlowNodeDefinition,
-    JsonValue,
-} from '@itookit/common';
+import type { FlowDraft, FlowNodeId, FlowRevision, FlowEdgeDefinition, DagPluginManifest, DagPluginPresentation, FlowNodeDefinition, JsonValue } from '@itookit/llm-flow/contracts';
+import type { ICommandBus } from '@itookit/llm-session/contracts';
 import type { DurableFlowSnapshot } from '@itookit/llm-session';
 import { FlowCommand } from '@itookit/llm-session';
 import type { TaskSnapshot, TaskStatus } from '@itookit/durable-kernel';

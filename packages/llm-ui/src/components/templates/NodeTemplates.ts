@@ -2,7 +2,8 @@ import { renderFlowIdentity } from '../history/FlowIdentity';
 // @file: llm-ui/components/templates/NodeTemplates.ts
 
 import { ExecutionNode, SessionGroup } from '@itookit/llm-session';
-import { escapeHTML, type Citation, ACTION_ICONS, t } from '@itookit/common';
+import { escapeHTML, ACTION_ICONS, t } from '@itookit/common';
+import { type Citation } from '@itookit/driver-llm/contracts';
 import { LayoutTemplates } from './LayoutTemplates';
 
 export class NodeTemplates {

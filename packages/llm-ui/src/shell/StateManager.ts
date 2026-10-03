@@ -1,9 +1,10 @@
+import type { SessionViewPort } from '../domain/ports/SessionViewPort';
 // @file: llm-ui/shell/StateManager.ts
 
 import type { UIState, CollapseStateMap } from '../domain/types';
 import type { IChatInputPresenter, IChatInputConfig, ChatInputSettings } from '../domain/ports/IChatInputPresenter';
 import { fromConversationState, type StateService } from '../services/StateService';
-import type { ConversationManifest, SessionManager } from '@itookit/llm-session';
+import type { ConversationManifest } from '@itookit/llm-session';
 import { createDebouncedSave, DebouncedFn } from '../utils/debounce';
 import { ErrorHandler } from '../utils/errorHandler';
 /**
@@ -27,7 +28,7 @@ export class StateManager {
 
     constructor(
         private stateService: StateService,
-        private sessionManager: SessionManager,
+        private sessionManager: Pick<SessionViewPort, 'isGenerating'>,
         private sessionId: string,
         private readonly validateAgentFn: (id: string) => string,
         initialBranch = 'main'

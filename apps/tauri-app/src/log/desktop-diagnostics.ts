@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { IToolService } from '@itookit/common';
+import type { IToolService } from '@itookit/tools/contracts';
 import { errorDetails } from '@itookit/common';
 
 export async function recordDiagnostic(event: string, value: unknown): Promise<void> {

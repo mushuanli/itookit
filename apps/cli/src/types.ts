@@ -75,7 +75,7 @@ export interface ConnectionConfig {
 }
 
 export interface AgentConfig {
-    response_format?: import('@itookit/common').ResponseFormat;
+    response_format?: import('@itookit/driver-llm/contracts').ResponseFormat;
     output_validation?: { on_invalid?: 'fail' | 'repair' | 'continue'; retries?: number };
     memory_policy?: {
         shared_memory?: { id: string; incarnation: string };
@@ -106,7 +106,7 @@ export interface AgentConfig {
 
 /** 路由条件：字符串为相等匹配，对象支持 eq/neq/in/exists/and/or/not 组合。 */
 export interface TaskConfig {
-    port_schemas?: import('@itookit/common').NodePortSchemas;
+    port_schemas?: import('@itookit/llm-flow/contracts').NodePortSchemas;
     delegation?: { agent: string; instruction?: string; max_tasks?: number; max_concurrency?: number;
         failure_policy?: 'fail-fast' | 'continue' };
     id: string;

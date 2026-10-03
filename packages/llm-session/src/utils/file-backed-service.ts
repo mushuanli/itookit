@@ -1,3 +1,4 @@
+import { createSessionHost, type SessionLogger } from './host-ports';
 import type { IFileSystem } from '@itookit/vfs-core';
 export type ChangeListener = () => void;
 
@@ -8,7 +9,7 @@ export abstract class FileBackedService {
     protected initialized = false;
     protected listeners = new Set<ChangeListener>();
 
-    constructor(fs: IFileSystem) { this.engine = fs; }
+    constructor(fs: IFileSystem, protected readonly serviceLogger: SessionLogger = createSessionHost().logger) { this.engine = fs; }
 
     // ── 生命周期 ──────────────────────────────────────────────
 
@@ -52,7 +53,7 @@ export abstract class FileBackedService {
                 code === 'ENOENT' ||
                 code === 'NOT_FOUND';
             if (!isNotFound) {
-                console.warn(`[${this.constructor.name}] Failed to read ${path}:`, e);
+                this.serviceLogger.warn('Failed to read persisted entity', { path, error: e });
             }
             return null;
         }

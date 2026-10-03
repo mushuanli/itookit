@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowStore } from '@itookit/llm-flow';
 import { FlowDefinitionStore } from '@itookit/llm-flow';
-import { essayReviewDraft, seedDefaultFlows, ESSAY_REVIEW_FLOW_ID } from '../src/persistence/default-flows';
+import { essayReviewDraft, seedDefaultFlows, ESSAY_REVIEW_FLOW_ID } from '../src/presets/default-flows';
 
 interface MemoryFile { nodeId: string; name: string; content: string; }
 

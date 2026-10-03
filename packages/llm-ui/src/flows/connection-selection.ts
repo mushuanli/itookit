@@ -1,4 +1,5 @@
-import type { ConnectionMeta, ICommandBus } from '@itookit/common';
+import type { ConnectionMeta } from '@itookit/driver-llm/contracts';
+import type { ICommandBus } from '@itookit/llm-session/contracts';
 import { SessionCommand } from '@itookit/llm-session';
 import type { FlowConnectionSelection } from '../components/FlowParameterForm';
 

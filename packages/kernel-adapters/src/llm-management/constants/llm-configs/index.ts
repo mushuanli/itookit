@@ -6,7 +6,8 @@
 //   2. Create llm-configs/<name>.ts (bridge module, exports provider + connections)
 //   3. Import and add to the aggregated maps below
 
-import type { LLMProvider, DefaultConnectionDef } from '@itookit/common';
+import type { LLMProvider } from '@itookit/driver-llm/contracts';
+import type { DefaultConnectionDef } from '@itookit/kernel-adapters/contracts';
 
 // ─── Aggregated external providers (keyed by provider id) ────────────────────
 

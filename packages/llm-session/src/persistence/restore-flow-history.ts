@@ -1,10 +1,11 @@
+import { createSessionHost, type SessionHost } from '../utils/host-ports';
 import type { EventEnvelope, Kernel } from '@itookit/durable-kernel';
 import { readFlowRunMembers } from '@itookit/llm-flow';
 import type { PersistedRound } from './round-types';
 import { projectTaskInteractions, runTasks } from './flow-run-projection';
 
 /** Rebuild a display snapshot without modifying the Round or resuming its tasks. */
-export async function restoreFlowHistory(kernel: Kernel, round: PersistedRound): Promise<PersistedRound> {
+export async function restoreFlowHistory(kernel: Kernel, round: PersistedRound, host: SessionHost = createSessionHost()): Promise<PersistedRound> {
     if (!round.flow || round._deleted || (['completed', 'failed', 'cancelled'].includes(round.status) && round.result?.flowInteractions?.length)) return round;
     const rootId = round.executions.find(execution => execution.role === 'primary')?.taskId;
     if (!rootId) return round;
@@ -17,7 +18,7 @@ export async function restoreFlowHistory(kernel: Kernel, round: PersistedRound):
     for (const task of runTasks(root, tasks, members.map(member => member.taskId))) {
         if (task.id === root.id) continue;
         const events = await taskEvents(kernel, round.sessionId, task.id);
-        interactions.push(...projectTaskInteractions(task, events));
+        interactions.push(...projectTaskInteractions(task, events, host.translate));
     }
     if (!interactions.length) return round;
     return { ...round, result: { assistantBlocks: [], toolResults: [], ...round.result, flowInteractions: interactions.sort((a, b) => a.createdAt - b.createdAt) } };

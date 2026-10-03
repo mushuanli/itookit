@@ -1,5 +1,5 @@
 import { skillContextResolver } from './session/conversation-run-coordinator';
-import { traceBoot } from './utils/host-ports';
+import { createSessionHost, type SessionHostPorts } from './utils/host-ports';
 import { FlowInvocationService } from './session/flow-invocations';
 import type { FlowInvocationSessions } from './persistence/flow-invocation-sessions';
 import { RoundLog as InvocationRoundLog } from './persistence/round-log';
@@ -30,13 +30,12 @@ export { RoundOperations } from './session/round-operations';
 export { BranchService } from './session/branch-service';
 export { SessionState, type HistoryMessage } from './session/session-state';
 export { SessionEventBus } from './session/session-event-bus';
-export { AgentResolver, type AgentInfo, type ModelInfo } from './session/agent-resolver';
+export { AgentResolver, type AgentInfo, type ModelInfo, type AgentResolutionPolicy, type AgentResolutionFailure } from './session/agent-resolver';
 export { AttachmentProcessor } from './session/attachment-processor';
 
 export { SessionRepository } from './persistence/session-repository';
 export type { SessionHistoryChain } from './persistence/history-chain';
 export { FlowEngine, FLOW_MODULE_NAME } from './persistence/flow-engine';
-export { seedDefaultFlows, essayReviewDraft, ESSAY_REVIEW_FLOW_ID } from './persistence/default-flows';
 export { RoundLog, roundToProjection, hasEffectiveAssistant } from './persistence/round-log';
 export { RoundGraphService, RoundGraphError } from './persistence/round-graph-service';
 export * from '@itookit/llm-flow';
@@ -91,8 +90,8 @@ import type { ToolDefinition } from '@itookit/llm-context';
 import type { Kernel } from '@itookit/durable-kernel';
 import type { IAgentConfigService } from './services/agent-service';
 import type { ISessionRepository } from './persistence/types';
-import { SessionManager, createSessionManager } from './session/session-manager';
-import { initializePromptHistory } from './services/prompt-history-service';
+import { SessionManager } from './session/session-manager';
+import { PromptHistoryService } from './services/prompt-history-service';
 import { CommandBus } from './core/command-bus';
 import { ExtensionRegistry } from './core/extension-registry';
 import { createSessionPlugin, SessionCommand } from './plugins/session-plugin';
@@ -103,6 +102,8 @@ import { DagCommandService } from '@itookit/llm-flow';
 import { registerDurablePrograms } from '@itookit/llm-flow';
 
 export interface ConversationSystemOptions {
+    hostPorts?: SessionHostPorts;
+    agentResolution?: import('./session/agent-resolver').AgentResolutionPolicy;
     memoryProvider?: import('./session/session-memory-provider').SessionMemoryProvider;
     retrieveMemory?: import('./session/conversation-run-coordinator').ConversationRunCoordinatorOptions['retrieveMemory'];
     agentService: IAgentConfigService;
@@ -138,60 +139,73 @@ export interface ConversationSystem {
     sessionManager: SessionManager;
     commandBus: CommandBus;
     dag: DagCommandService;
+    dispose(): Promise<void>;
 }
 
 export async function initializeConversationSystem(
     options: ConversationSystemOptions,
 ): Promise<ConversationSystem> {
-    await initializeServices(options);
-    registerDurablePrograms(options.kernel);
-    const sessionManager = createSessionManager(
-        options.sessionEngine,
-        options.agentService,
-        {
-            kernel: options.kernel,
-            dagPlugins: options.dagPlugins,
-            flowStore: options.flowStore,
-            resolveTools: options.resolveTools,
-            resolveHarnessToolIds: options.resolveHarnessToolIds,
-            resolveMCPToolIds: options.resolveMCPToolIds,
-            resolveSessionContext: options.resolveSessionContext,
-            resolveSessionSkills: options.resolveSessionSkills,
-            retrieveMemory: options.retrieveMemory,
-            memoryProvider: options.memoryProvider,
-            canWriteSession: options.canWriteSession,
-            workspaceManager: options.workspaceManager,
-        },
-    );
-    const system = createControlPlane(options, sessionManager);
+    const promptHistory = await initializeServices(options);
+    let system: ConversationSystem | undefined;
+    try {
+        registerDurablePrograms(options.kernel);
+        const manager = createManagedSession(options, promptHistory);
+        system = createControlPlane(options, manager);
+        await initializeInvocations(options, system);
+        return system;
+    } catch (error) {
+        try { if (system) await system.dispose(); else await promptHistory.dispose(); }
+        catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Conversation initialization and cleanup failed'); }
+        throw error;
+    }
+}
+
+function createManagedSession(options: ConversationSystemOptions, promptHistory: PromptHistoryService): SessionManager {
+    return new SessionManager(options.sessionEngine, options.agentService, {
+        agentResolution: options.agentResolution, hostPorts: options.hostPorts, promptHistory,
+        kernel: options.kernel, dagPlugins: options.dagPlugins, flowStore: options.flowStore,
+        resolveTools: options.resolveTools, resolveHarnessToolIds: options.resolveHarnessToolIds,
+        resolveMCPToolIds: options.resolveMCPToolIds, resolveSessionContext: options.resolveSessionContext,
+        resolveSessionSkills: options.resolveSessionSkills, retrieveMemory: options.retrieveMemory,
+        memoryProvider: options.memoryProvider, canWriteSession: options.canWriteSession,
+        workspaceManager: options.workspaceManager,
+    });
+}
+
+async function initializeInvocations(options: ConversationSystemOptions, system: ConversationSystem): Promise<void> {
     const invocations = new FlowInvocationService(options.kernel, new FlowDefinitionStore(options.flowStore, options.dagPlugins), system.commandBus, options.canWriteSession, async id => {
         const manifest = await new InvocationRoundLog(options.sessionEngine, id).loadManifest();
         return { branch: manifest.currentBranch, head: manifest.currentHead };
     }, (id, selected) => resolveSessionConnection(options, id, selected), options.flowInvocationSessions);
     invocations.register();
-    await traceBoot('flowInvocations.recover', () => invocations.recover());
-    return system;
+    await createSessionHost(options.hostPorts).traceBoot('flowInvocations.recover', () => invocations.recover());
 }
 
-async function initializeServices(options: ConversationSystemOptions): Promise<void> {
-    await traceBoot('agentService.init', () => options.agentService.init());
-    await traceBoot('sessionEngine.init', () => options.sessionEngine.init());
-    await traceBoot('promptHistory.init', () => initializePromptHistory(options.promptHistoryFiles)).catch(error => {
-        console.warn('[Conversation] Prompt history initialization failed:', error);
+async function initializeServices(options: ConversationSystemOptions): Promise<PromptHistoryService> {
+    const host = createSessionHost(options.hostPorts);
+    await host.traceBoot('agentService.init', () => options.agentService.init());
+    await host.traceBoot('sessionEngine.init', () => options.sessionEngine.init());
+    const history = new PromptHistoryService(options.promptHistoryFiles, host);
+    await host.traceBoot('promptHistory.init', () => history.init()).catch(error => {
+        host.logger.warn('Prompt history initialization failed', { error });
     });
+    return history;
 }
 
 function createControlPlane(
     options: ConversationSystemOptions,
     sessionManager: SessionManager,
 ): ConversationSystem {
+    let disposal: Promise<void> | undefined;
     const commandBus = new CommandBus();
     commandBus.register(SessionCommand.GetConnections, async () => ({ connections: (await options.agentService.getConnections()).map(connection => ({ ...connection,
         enabled: connection.enabled !== false && options.agentService.getProvider(connection.providerId)?.enabled !== false })),
         defaultId: (await options.agentService.getDefaultConnection())?.id }));
     const dag = createDagCommands(options, commandBus);
     activateConversationPlugins(sessionManager, commandBus);
-    return { sessionManager, commandBus, dag };
+    return { sessionManager, commandBus, dag, dispose: () => disposal ??= (async () => {
+        sessionManager.destroy(); await sessionManager.promptHistory?.dispose();
+    })() };
 }
 
 function createDagCommands(
@@ -209,7 +223,7 @@ function createDagCommands(
         workspaceManager: options.workspaceManager,
         kernel: options.kernel,
         plugins: options.dagPlugins,
-        bindNode: (sessionId, node, defaults) => bindStandaloneFlowNode(node, defaults, sessionId, new AgentResolver(options.agentService, options.resolveSessionSkills, options.resolveMCPToolIds)),
+        bindNode: (sessionId, node, defaults) => bindStandaloneFlowNode(node, defaults, sessionId, new AgentResolver(options.agentService, options.resolveSessionSkills, options.resolveMCPToolIds, createSessionHost(options.hostPorts), options.agentResolution)),
         resolveSessionContext: options.resolveSessionContext,
         resolveTools: options.resolveTools,
         resolveSkillContexts: skillContextResolver({ resolveSkills: (ids, sessionId) => options.resolveSessionSkills?.(sessionId!, ids) ?? Promise.resolve([]), resolveTools: options.resolveTools }),
@@ -253,4 +267,4 @@ async function resolveSessionConnection(options: ConversationSystemOptions, sess
 export { hasCommittedSubmission } from './persistence/submission-receipt';
 
 export * from './contracts';
-export { configureSessionHostPorts, type SessionHostPorts } from './utils/host-ports';
+export { createSessionHost, type SessionHostPorts, type SessionHost, type SessionLogger, type SessionTextKey } from './utils/host-ports';

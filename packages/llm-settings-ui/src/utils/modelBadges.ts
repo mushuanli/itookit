@@ -3,7 +3,7 @@
 // Provider / Connection / Agent 三处 editor 共用，避免重复渲染逻辑。
 // 图标与颜色统一来自 @itookit/common 的 MODEL_CAPABILITY_META / MODEL_CATEGORY_META。
 
-import type { LLMModel } from '@itookit/common';
+import type { LLMModel } from '@itookit/driver-llm/contracts';
 import { t, MODEL_CAPABILITY_META, MODEL_CATEGORY_META } from '@itookit/common';
 
 /** 能力键 → LLMModel 字段映射（固定渲染顺序） */

@@ -2,7 +2,8 @@
 // Layer 3 — Agent 默认定义（个性化功能定制）。
 // Agents define prompts and capabilities independently of model connections.
 
-import type { AgentType, AgentConfig, PromptPreset, AgentDefinition, InitialAgentDef } from '@itookit/common';
+import type { AgentType, AgentConfig, AgentDefinition, InitialAgentDef } from '@itookit/kernel-adapters/contracts';
+import type { PromptPreset } from '@itookit/tools/contracts';
 
 // 向后兼容：从 common 重新导出，避免其他包直接引用 device-llm 内部路径
 export type { AgentType, AgentConfig, AgentDefinition, InitialAgentDef };

@@ -5,7 +5,9 @@ import { editorResourceId } from '@itookit/ui-common';
 // new chat session instance with the declared parameters filled in.
 
 import { IEditor, type EditorFactory, type EditorOptions } from '@itookit/ui-common';
-import { NAVIGATION_EVENTS, type FlowDraft, type ICommandBus } from '@itookit/common';
+import { NAVIGATION_EVENTS } from '@itookit/common';
+import { type FlowDraft } from '@itookit/llm-flow/contracts';
+import { type ICommandBus } from '@itookit/llm-session/contracts';
 import { FlowCommand } from '@itookit/llm-session';
 import { DagWorkbench } from './DagWorkbench';
 import { FlowLauncher, flowIdFromNodeId } from '../flows/run-flow';

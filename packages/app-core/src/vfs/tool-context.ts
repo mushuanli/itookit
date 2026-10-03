@@ -1,4 +1,4 @@
-import type { ToolVFSContext } from '@itookit/common';
+import type { ToolVFSContext } from '@itookit/tools/contracts';
 import { createVFSFileDiscoverySource, discoverFiles, normalizeVirtualPath, pathUtils, type FileSystemContext } from '@itookit/vfs-core';
 
 /** One exact-path adapter per authorized view. Never resolves a basename globally. */

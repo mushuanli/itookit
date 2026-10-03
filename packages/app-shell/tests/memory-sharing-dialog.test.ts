@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { t, type IAgentConfigService } from '@itookit/common';
+import { t } from '@itookit/common';
+import { type IAgentConfigService } from '@itookit/kernel-adapters/contracts';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { Kernel } from '@itookit/durable-kernel';
 import { MemorySharingControls, SessionMemoryProvider, SharedMemoryStore } from '@itookit/llm-session';

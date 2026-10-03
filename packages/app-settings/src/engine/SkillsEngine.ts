@@ -35,10 +35,7 @@ import type {
     IAssetOperations,
     ITagOperations,
 } from '@itookit/vfs-core';
-import type {
-    LLMSkill,
-    IAgentManagementService,
-} from '@itookit/common';
+import type { LLMSkill, IAgentManagementService } from '@itookit/kernel-adapters/contracts';
 import { FSCapabilityError } from '@itookit/vfs-core';
 import { EventBus } from '@itookit/vfs-core';
 import yaml from 'js-yaml';

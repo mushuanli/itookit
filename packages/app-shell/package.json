@@ -21,7 +21,9 @@
   },
   "dependencies": {
     "@itookit/app-core": "workspace:*",
-    "@itookit/kernel-adapters": "workspace:*"
+    "@itookit/kernel-adapters": "workspace:*",
+    "@itookit/tools": "workspace:*",
+    "@itookit/llm-flow": "workspace:*"
   },
   "peerDependencies": {
     "@itookit/app-settings": "workspace:*",
@@ -55,6 +57,9 @@
     "@itookit/ui-common": "workspace:*",
     "jsdom": "^27.2.0",
     "tsx": "^4.20.6",
-    "@itookit/mdx-adapter": "workspace:*"
+    "@itookit/mdx-adapter": "workspace:*",
+    "@itookit/llm-tasks": "workspace:*",
+    "@itookit/llm-flow": "workspace:*",
+    "@itookit/llm-context": "workspace:*"
   }
 }

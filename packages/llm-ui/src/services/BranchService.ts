@@ -4,7 +4,7 @@
 import { SessionCommand, type SessionGroup } from '@itookit/llm-session';
 import type { BranchItem } from '../domain/types';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
-import type { ICommandBus } from '@itookit/common';
+import type { ICommandBus } from '@itookit/llm-session/contracts';
 
 
 export class BranchError extends Error {

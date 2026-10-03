@@ -20,7 +20,8 @@ src/
 
 - `llm-session/contracts` 拥有会话、命令/扩展和配置管理契约及纯策略函数，入口不加载 Session 运行时、VFS 或 YAML。
 - 实现不依赖 common/llm-common；模型、上下文、工具和编排契约直接来自所属模块。
-- 翻译、日志、启动追踪经 `configureSessionHostPorts` 注入；端口按当前会话系统的进程级 singleton 生命周期配置，启动前设置、关闭后重置。默认使用英文提示、空日志和直接启动操作。
+- 翻译、日志、启动追踪经 `ConversationSystemOptions.hostPorts` 实例注入。工厂返回独立 SessionManager、提示词历史和幂等异步 dispose；禁止通过全局配置覆盖其他实例。旧单例工厂仅用于兼容。默认英文提示、空日志和直接启动操作。
+- Agent 缺失行为经 `agentResolution` 注入；精确解析、授权和持久执行模式约束保持严格。业务提示词、评分阈值与预设留在宿主，不进入本包。
 
 - Round 只表达对话历史，使用 `historyParentIds`。
 - Run 引用通过 `executions` 附着到 Round。
@@ -57,3 +58,5 @@ CLI 使用共享 `FlowRunProjection` 按根 Task 幂等写入 History Round；�
 Flow 重跑以 Session manifest/持久 Round 索引为来源，空分支或无历史也能运行；新分支从空历史创建。`flowBranchExecutions` 按分支 Round 引用生成输出成员，禁止用 Session 全部 Task 代替分支成员。
 
 Agent 定义的 `capabilityPolicy` 位于顶层；`AgentResolver` 读取 `agentDef.capabilityPolicy`，不是 `agentDef.config.capabilityPolicy`。
+
+Agent、连接管理、恢复与定价的权威契约位于 kernel-adapters/contracts。本包为既有 Session API 保留具名转发，构建必须内联其 JavaScript 与声明，发布产物不得保留对适配器包的导入；它仅列为开发依赖。

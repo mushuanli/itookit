@@ -1,5 +1,6 @@
 /// <reference path="./flow-files.d.ts" />
-import type { FlowDraft, ICommandBus } from '@itookit/common';
+import type { FlowDraft } from '@itookit/llm-flow/contracts';
+import type { ICommandBus } from '@itookit/llm-session/contracts';
 import { FlowCommand } from '@itookit/llm-session';
 import essayReview from './library/essay-review-isolated.flow?raw';
 

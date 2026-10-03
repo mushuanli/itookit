@@ -1,4 +1,6 @@
-import { escapeHTML, generateUUID, t, type SystemPromptDefinition, type IAgentManagementService } from '@itookit/common';
+import { escapeHTML, generateUUID, t } from '@itookit/common';
+import { type SystemPromptDefinition } from '@itookit/tools/contracts';
+import { type IAgentManagementService } from '@itookit/kernel-adapters/contracts';
 import { Toast, type EditorHostContext } from '@itookit/ui-common';
 
 /** The shared text is a preview; only its identity is stored in the Agent. */

@@ -2,7 +2,7 @@
 // Flow-level settings modal: named connection slots (bound to global LLM
 // connections + one default) and declared runtime parameters with defaults.
 
-import type { FlowConnection, FlowVariables, FlowDefaults, FlowParameter, FlowRunPolicy, JsonValue } from '@itookit/common';
+import type { FlowConnection, FlowVariables, FlowDefaults, FlowParameter, FlowRunPolicy, JsonValue } from '@itookit/llm-flow/contracts';
 import { escapeHTML, t } from '@itookit/common';
 
 export interface FlowSettingsOptions {

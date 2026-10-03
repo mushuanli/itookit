@@ -3,7 +3,9 @@
 // Frequently modified: each new field or type changes the rendered template.
 
 import { t, SKILL_TYPE_META, ENTITY_ICONS } from '@itookit/common';
-import type { LLMSkill, SkillType, MCPServer } from '@itookit/common';
+import type { LLMSkill } from '@itookit/kernel-adapters/contracts';
+import type { SkillType } from '@itookit/tools/contracts';
+import type { MCPServer } from '@itookit/tools/mcp-contracts';
 
 const escapeSupportValue = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 

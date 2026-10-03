@@ -9,7 +9,8 @@ import {
     ENTITY_ICONS
 } from '@itookit/common';
 import { BaseSettingsEditor, Toast, Modal } from '@itookit/ui-common';
-import type { MCPServer, IAgentManagementService } from '@itookit/common';
+import type { MCPServer } from '@itookit/tools/mcp-contracts';
+import type { IAgentManagementService } from '@itookit/kernel-adapters/contracts';
 import { bindMCPContent, renderMCPPrompts, parseMCPStringMap } from './mcp-content';
 import { hasMCPStdioHost } from '@itookit/kernel-adapters/llm';
 import { mcpTimeoutMs } from '@itookit/tools/mcp-contracts';

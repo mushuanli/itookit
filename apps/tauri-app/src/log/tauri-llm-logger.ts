@@ -8,7 +8,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import type { ILLMLogger, LLMRequestLog, LLMResponseLog } from '@itookit/common';
+import type { ILLMLogger, LLMRequestLog, LLMResponseLog } from '@itookit/driver-llm/contracts';
 
 interface LogRecord {
     userContent?: string;

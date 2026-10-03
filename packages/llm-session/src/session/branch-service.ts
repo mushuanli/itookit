@@ -4,7 +4,7 @@ import { SessionGroup } from '../core/types';
 import { ConversationError, ConversationErrorCode } from '../core/errors';
 import { BranchTreeNode } from '../persistence/types';
 import { SessionRegistry } from './session-registry';
-import { log } from '../utils/logger';
+import type { SessionHost } from '../utils/host-ports';
 import { RoundLog, roundToProjection } from '../persistence/round-log';
 import { buildFlowChildren, buildToolChildren } from '../persistence/projection';
 import type {
@@ -19,6 +19,7 @@ import type {
  * Depends on SessionRegistry for ensureBound(), reloadSessionData(), and event emission.
  */
 export class BranchService {
+    private get host(): SessionHost { return this.registry.host; }
     private registry: SessionRegistry;
 
     constructor(registry: SessionRegistry) {
@@ -115,7 +116,7 @@ export class BranchService {
             }
             return result;
         } catch (e) {
-            log.error('getSiblings failed', { error: e });
+            this.host.logger.error('getSiblings failed', { error: e });
             return session ? [session] : [];
         }
     }

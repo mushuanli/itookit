@@ -19,11 +19,8 @@ import { t, escapeAttr, ACTION_ICONS } from '@itookit/common';
 
 import {generateShortUUID} from '@itookit/common';
 import { BaseSettingsEditor, requestSettingsSave } from '@itookit/ui-common';
-import type { IConnectionService,
-    LLMProvider,
-    LLMModel,
-    ModelCategory,
-} from '@itookit/common';
+import type { IConnectionService } from '@itookit/kernel-adapters/contracts';
+import type { LLMProvider, LLMModel, ModelCategory } from '@itookit/driver-llm/contracts';
 import { Modal, Toast } from '@itookit/ui-common';
 import { exportBundleToLLM, fromConnectionDef } from '@itookit/kernel-adapters/llm';
 import { runLLMImport } from './llm-import';

@@ -22,7 +22,7 @@ Provider / Connection 使用 `configuration-form.ts` 的自动保存表单，新
 ## 新增 Provider 内置联网搜索能力
 
 1. `packages/kernel-adapters/src/llm-management/constants/providers.ts` — provider 定义加 `capabilities.serverSideWebSearch: true`
-2. `packages/llm-session/src/contracts/connection.ts` — `supportsServerSideSearch()` 确认协议支持
+2. `packages/kernel-adapters/src/llm-management/contracts/connection.ts` — `supportsServerSideSearch()` 确认协议支持
 3. provider 实现类注入内置工具并提取 `citations`（参考 `responses.ts` / `gemini.ts`）
 4. 详见 [web-search.md](./web-search.md)
 
@@ -39,7 +39,7 @@ Provider / Connection 使用 `configuration-form.ts` 的自动保存表单，新
 
 ## 新增 Agent
 
-1. `packages/llm-session/src/contracts/agent.ts` — 更新 `AgentDefinition` 接口（如需新字段）
+1. `packages/kernel-adapters/src/llm-management/contracts/agent.ts` — 更新 `AgentDefinition` 接口（如需新字段）
 2. `packages/kernel-adapters/src/llm-management/constants/agents.ts` — `DEFAULT_AGENTS` 预设模板
 3. `packages/llm-settings-ui/src/editors/AgentConfigEditor.ts` — 编辑器 UI
 4. `packages/llm-session/src/session/agent-resolver.ts` — AgentResolver.resolve()

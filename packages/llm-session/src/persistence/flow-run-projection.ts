@@ -1,3 +1,4 @@
+import { t, type SessionTextKey } from '../utils/host-ports';
 import { flowLogicInteraction } from '../session/flow-logic-history';
 import { readFlowRunMembers } from '@itookit/llm-flow';
 import { formatFlowOutput, outputText } from '@itookit/llm-flow/contracts';
@@ -94,9 +95,9 @@ export function runTasks(root: TaskRecord, tasks: TaskRecord[], members: string[
     return tasks.filter(task => ids.has(task.id)).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 }
 
-export function projectTaskInteractions(task: TaskRecord, events: EventEnvelope[] = []): FlowInteraction[] {
+export function projectTaskInteractions(task: TaskRecord, events: EventEnvelope[] = [], translate: (key: SessionTextKey) => string = t): FlowInteraction[] {
     const status = flowTaskStatus(task), actor = flowActor(task);
-    const result: FlowInteraction[] = events.flatMap(event => flowLogicInteraction(task, event) ?? []);
+    const result: FlowInteraction[] = events.flatMap(event => flowLogicInteraction(task, event, translate) ?? []);
     const input = ['flow.input', 'flow.human'].includes(task.program.kind);
     const answered = Object.values(task.interactions ?? {}).some(request => request.status === 'resolved');
     if (!['flow.dispatch', 'flow.aggregate', 'flow.value'].includes(task.program.kind) && (!input || (task.output !== undefined && !answered))) result.push({

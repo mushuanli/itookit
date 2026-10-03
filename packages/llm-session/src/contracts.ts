@@ -8,3 +8,4 @@ export * from './contracts/connection';
 export * from './contracts/pricing';
 export * from './contracts/chat';
 export * from './contracts/restore';
+export type { SessionGroup, SessionStatus, SessionEventEnvelope, RegistryEvent } from './core/types';

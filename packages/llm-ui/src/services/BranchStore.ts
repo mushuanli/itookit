@@ -2,7 +2,7 @@
 
 import type { BranchItem } from '../domain/types';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
-import type { ICommandBus } from '@itookit/common';
+import type { ICommandBus } from '@itookit/llm-session/contracts';
 import type { ErrorHandler } from '../utils/errorHandler';
 
 /**

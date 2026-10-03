@@ -21,4 +21,4 @@ kernel.registerProgram(new DurableChatProgram());
 
 完整边界见 [Kernel Session / Task 最终设计](../../doc/feat/harness-session-task-final-design.md)。
 
-公共契约入口 `@itookit/llm-tasks/contracts` 提供执行事件、节点配置与执行默认值，不会初始化运行时。新代码从所属模块导入；llm-common 的旧入口保留兼容转发。本包实现已移除 common/llm-common 依赖。
+公共契约入口 `@itookit/llm-tasks/contracts` 提供执行事件、节点配置与执行默认值，不会初始化运行时。新代码从所属模块导入；原 llm-common 和 common 的 LLM 兼容入口均已删除。本包实现已移除 common/llm-common 依赖。

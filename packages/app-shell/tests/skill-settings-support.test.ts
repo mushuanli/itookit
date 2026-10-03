@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { Toast } from '@itookit/ui-common';
 import { SkillSettingsEditor } from '../../llm-settings-ui/src/editors/SkillSettingsEditor';
 import { saveCurrent } from '../../llm-settings-ui/src/editors/skill/SkillOperations';
-import type { LLMSkill } from '@itookit/common';
+import type { LLMSkill } from '@itookit/kernel-adapters/contracts';
 
 // Use the editor's YAML dependency; this integration harness lives with app-shell's DOM tests.
 const yaml = createRequire(resolve(process.cwd(), '../llm-settings-ui/package.json'))('js-yaml');

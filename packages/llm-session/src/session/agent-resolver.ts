@@ -8,7 +8,7 @@ import type { ConnectionMeta } from '@itookit/driver-llm/contracts';
 import type { WebSearchMode } from '../contracts';
 import { IAgentConfigService } from '../services/agent-service';
 import { ConversationError, ConversationErrorCode } from '../core/errors';
-import { log } from '../utils/logger';
+import { createSessionHost, type SessionHost } from '../utils/host-ports';
 
 export interface AgentInfo {
     id: string;
@@ -25,9 +25,14 @@ export interface ModelInfo {
 }
 
 /** Why an agentId could not be turned into a usable ExecutorConfig. */
-interface AgentResolutionFailure {
+export interface AgentResolutionFailure {
     reason: 'not-found' | 'error';
     detail?: string;
+}
+
+export interface AgentResolutionPolicy {
+    /** Reject missing agents or provide a host-defined fallback. Default preserves the legacy fallback. */
+    missingAgent?: 'reject' | ((agentId: string, failure: AgentResolutionFailure | null) => ExecutorConfig | Promise<ExecutorConfig>);
 }
 
 function describeError(error: unknown): string {
@@ -44,7 +49,9 @@ function describeError(error: unknown): string {
 export class AgentResolver {
     constructor(private agentService: IAgentConfigService,
         private readonly resolveSessionSkills?: (sessionId: string, ids: string[]) => Promise<import('../contracts').LLMSkill[]>,
-        private readonly resolveMCPProfiles?: (sessionId: string, ids: string[]) => Promise<string[]>) {}
+        private readonly resolveMCPProfiles?: (sessionId: string, ids: string[]) => Promise<string[]>,
+        private readonly host: SessionHost = createSessionHost(),
+        private readonly policy: AgentResolutionPolicy = {}) {}
 
     async getMCPToolIds(ids: string[], sessionId: string): Promise<string[]> {
         if (!ids.length) return [];
@@ -83,29 +90,25 @@ export class AgentResolver {
         } catch (e) {
             if (e instanceof ConversationError) throw e;
             failure = { reason: 'error', detail: describeError(e) };
-            log.error('Failed to resolve agent', { agentId, error: e });
+            this.host.logger.error('Failed to resolve agent', { agentId, error: e });
         }
 
         if (!config) {
             this.reportFallback(agentId, failure);
-            config = await this.getFallbackConfig();
+            config = await this.resolveMissingAgent(agentId, failure);
         }
 
         return config;
     }
 
-    /** Explain an unusable agentId: unknown/empty id, or an exception during resolution. */
+    private async resolveMissingAgent(agentId: string, failure: AgentResolutionFailure | null): Promise<ExecutorConfig> {
+        const policy = this.policy.missingAgent;
+        if (policy === 'reject') throw new ConversationError(ConversationErrorCode.AGENT_NOT_FOUND, `Agent not found: ${agentId}`);
+        return policy ? policy(agentId, failure) : this.getFallbackConfig();
+    }
+
     private reportFallback(agentId: string, failure: AgentResolutionFailure | null): void {
-        const requested = agentId ? `'${agentId}'` : "'' (empty agentId)";
-        const reason = failure?.reason === 'error'
-            ? `resolution threw ${failure.detail}`
-            : 'no agent with that id';
-        const known = this.agentService.listAgents().map(agent => agent.id);
-        console.warn(
-            `[AgentResolver] agentId ${requested} unusable (${reason}) — using fallback config. `
-            + `Known agents: ${known.length ? known.join(', ') : '(none loaded)'}`,
-        );
-        log.warn('Agent not found, using fallback', { agentId, failure });
+        this.host.logger.warn('Agent resolution failed', { agentId, failure });
     }
 
     /**
@@ -209,7 +212,7 @@ export class AgentResolver {
             }
             return list;
         } catch (e) {
-            log.error('Failed to get available agents', { error: e });
+            this.host.logger.error('Failed to get available agents', { error: e });
             return [{ id: 'default', name: 'Default Assistant', icon: '🤖', category: 'System' }];
         }
     }
@@ -222,7 +225,7 @@ export class AgentResolver {
             if (!connMeta?.model) return [];
             return [{ id: connMeta.model, name: connMeta.model, provider: connMeta.name }];
         } catch (e) {
-            log.error('getModelsForAgent failed', { agentId, error: e });
+            this.host.logger.error('getModelsForAgent failed', { agentId, error: e });
             return [];
         }
     }
@@ -256,7 +259,7 @@ export class AgentResolver {
                 usage,
             });
         } catch (e) {
-            log.error('Failed to record usage cost', { connectionId, sessionId, error: e });
+            this.host.logger.error('Failed to record usage cost', { connectionId, sessionId, error: e });
         }
     }
 

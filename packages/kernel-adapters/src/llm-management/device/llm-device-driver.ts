@@ -13,7 +13,9 @@ import { listProviderModels } from '@itookit/driver-llm';
 //  6. 维护 Chat / MCP / Skill Session 生命周期
 //  7. 创建 /dev/llm/connection/<id>、/dev/llm/mcp/<id>、/dev/llm/skills/<id> 设备节点
 
-import type { ILLMManagementService, LLMConnection, LLMProvider, ConnectionMeta, ChatMessage, ChatCompletionChunk, ChatCompletionParams, ChatCompletionResponse, TokenUsage, LLMSkill, ConnectionTestResult, InitialAgentDef } from '@itookit/common';
+import type { ILLMManagementService, LLMSkill, InitialAgentDef } from '@itookit/kernel-adapters/contracts';
+import type { LLMConnection, LLMProvider, ConnectionMeta, ChatCompletionChunk, ChatCompletionParams, ChatCompletionResponse, TokenUsage, ConnectionTestResult } from '@itookit/driver-llm/contracts';
+import type { ChatMessage } from '@itookit/llm-context';
 import type { MCPServer } from '@itookit/tools/mcp-contracts';
 import type { ToolDefinition } from '@itookit/tools/contracts';
 import type {
@@ -220,7 +222,7 @@ export interface LLMDeviceDriverOptions {
      * LLM 流量日志记录器（可选）。
      * Web 环境注入 NoopLLMLogger，Tauri 环境注入 FileLogger。
      */
-    llmLogger?: import('@itookit/common').ILLMLogger;
+    llmLogger?: import('@itookit/driver-llm/contracts').ILLMLogger;
 }
 
 export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
@@ -243,7 +245,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     private readonly shellRunner: IShellRunner | undefined;
     private readonly codexRunner: CodexCommandRunner | undefined;
     private readonly codexTransport: CodexAppServerTransport | undefined;
-    private readonly llmLogger: import('@itookit/common').ILLMLogger | undefined;
+    private readonly llmLogger: import('@itookit/driver-llm/contracts').ILLMLogger | undefined;
 
     // ── Managers (initialised in init()) ──
     private vfsHelpers!: VFSHelpers;
@@ -779,11 +781,11 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     // ─── ILLMManagementService — Cost tracking ────────────────────────────────
 
-    async recordCost(params: Parameters<import('@itookit/common').ILLMManagementService['recordCost']>[0]): Promise<void> {
+    async recordCost(params: Parameters<import('@itookit/kernel-adapters/contracts').ILLMManagementService['recordCost']>[0]): Promise<void> {
         return this.costManager.recordCost(params);
     }
 
-    async writePricing(config: import('@itookit/common').ModelPricingConfig): Promise<void> {
+    async writePricing(config: import('@itookit/kernel-adapters/contracts').ModelPricingConfig): Promise<void> {
         return this.providerManager.writePricing(config);
     }
 
@@ -791,15 +793,15 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         dateFrom?: string;
         dateTo?: string;
         providerId?: string;
-    }): Promise<import('@itookit/common').CostRecord[]> {
+    }): Promise<import('@itookit/kernel-adapters/contracts').CostRecord[]> {
         return this.costManager.queryCosts(filter);
     }
 
-    getPricingConfig(): import('@itookit/common').ModelPricingConfig {
+    getPricingConfig(): import('@itookit/kernel-adapters/contracts').ModelPricingConfig {
         return this.providerManager.getPricingConfig();
     }
 
-    getPricingDefaults(): import('@itookit/common').ModelPricingConfig {
+    getPricingDefaults(): import('@itookit/kernel-adapters/contracts').ModelPricingConfig {
         return this.providerManager.getPricingDefaults();
     }
 

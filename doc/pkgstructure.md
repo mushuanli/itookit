@@ -14,7 +14,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 
 | Package | Role |
 |---|---|
-| `@itookit/common` | 共享接口、类型、i18n、工具。跨包契约之源，通过 llm-compat.ts 直接转发原有 LLM 具名导出，依赖对应能力模块；llm-common 包已删除。 |
+| `@itookit/common` | 通用工具、导航接口、日志、i18n 与图标元数据；无运行时包依赖，不再转发 LLM 契约。 |
 | `@itookit/llm-context` | 零运行时依赖的上下文领域：Profile、装配、窗口预算、Notes、原始历史、不可变请求与内容存储端口。详见 [Context API](context-api.md)。 |
 | `@itookit/durable-kernel` | 持久化执行内核：`DurableTaskProgram`（init/reduce 状态机）、`EffectAdapter`、Task/Resource/Budget/Interaction 调度与恢复。 |
 | `@itookit/llm-tasks` | 平台无关的 LLM Durable Program 层：`llm.agent`/`llm.chat`/`llm.plan` 状态机、依赖收集（`collectDependency`/`dependenciesReady`/`dependencyWait`）、`extractNodeOutput`、`buildLlmTaskInput`、ContextTaskProgram v2 bridge。 |

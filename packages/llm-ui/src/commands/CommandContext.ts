@@ -1,6 +1,6 @@
 // @file: llm-ui/commands/CommandContext.ts
 
-import type { ICommandBus, ISession } from '@itookit/common';
+import type { ICommandBus, ISession } from '@itookit/llm-session/contracts';
 import type { SessionGroup } from '@itookit/llm-session';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter';
@@ -48,5 +48,5 @@ export interface CommandContext {
     getSessionId: () => string;
     /** Execute explicit user shell input through the host's existing process policy. */
     executeDirectCommand?: (command: string) => Promise<void>;
-    resolveSubmission?: () => Promise<import('@itookit/common').SendIntent['submission']>;
+    resolveSubmission?: () => Promise<import('@itookit/llm-flow/contracts').SendIntent['submission']>;
 }

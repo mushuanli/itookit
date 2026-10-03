@@ -4,13 +4,7 @@
 // Process programs use ILLMService through the injected LLM resource port.
 // 不直接感知 device driver 的 open/write/readStream 模式。
 
-import type {
-    ChatCompletionParams,
-    ChatCompletionResponse,
-    ChatCompletionChunk,
-    ConnectionMeta,
-    LLMProvider,
-} from '@itookit/common';
+import type { ChatCompletionParams, ChatCompletionResponse, ChatCompletionChunk, ConnectionMeta, LLMProvider } from '@itookit/driver-llm/contracts';
 import type { ILLMService } from '@itookit/driver-llm/contracts';
 import type {
     IDeviceDriver,

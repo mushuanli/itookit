@@ -1,4 +1,6 @@
-import { randomUUID, type ConnectionMeta, type IConnectionService, type LLMProvider } from '@itookit/common';
+import { randomUUID } from '@itookit/common';
+import { type ConnectionMeta, type LLMProvider } from '@itookit/driver-llm/contracts';
+import { type IConnectionService } from '@itookit/kernel-adapters/contracts';
 import { FSError } from '@itookit/vfs-core';
 
 export interface ConfigurationStore extends Pick<IConnectionService, 'getProviders' | 'getConnections' | 'deleteProvider' | 'deleteConnection'> {

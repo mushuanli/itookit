@@ -2,7 +2,7 @@ import { editorResourceId } from '@itookit/ui-common';
 // @file llm-ui/editors/SkillSettingsEditor.ts
 import {t} from '@itookit/common';
 import { BaseSettingsEditor, SettingsValidationError, requestSettingsSave } from '@itookit/ui-common';
-import type { LLMSkill, IAgentManagementService } from '@itookit/common';
+import type { LLMSkill, IAgentManagementService } from '@itookit/kernel-adapters/contracts';
 import yaml from 'js-yaml';
 import { readSkillDraft } from './skill/skill-draft';
 
@@ -190,7 +190,7 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
 
     // ─── Events ─────────────────────────────────────────────────────────────
 
-    private bindEvents(mcpServers: import('@itookit/common').MCPServer[]) {
+    private bindEvents(mcpServers: import('@itookit/tools/mcp-contracts').MCPServer[]) {
         this.clearListeners();
         const ops = this.buildOpsDeps();
         const imp = this.buildImporterDeps();

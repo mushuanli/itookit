@@ -58,3 +58,5 @@ pnpm --filter @itookit/ui-common build        # tsup
 | [接口契约](../../doc/interface-contracts.md) | UI 体系接口与实现/消费关系 |
 | [架构设计](../../doc/architecture.md) | UI 层在整体分层中的位置 |
 | [开发模式](../../doc/dev-patterns.md) | i18n 与新增 UI 的流程 |
+
+`EditorOptions<TSubmission>` 与 `SessionDraftControls<TSubmission>` 通过泛型传递宿主提交数据，默认 unknown。本包不依赖 Flow 或 Session；LLM 编辑器适配层负责指定 SessionSubmission。

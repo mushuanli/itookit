@@ -4,7 +4,7 @@
 
 ## 1. 三态决策（WebSearchMode）
 
-权威决策点只有一个：`resolveWebSearchStrategy`（`llm-session/src/contracts/connection.ts`，纯函数；单测见 `packages/kernel-adapters/tests/llm-management/web-search-strategy.spec.ts`）。下游只做**派生**，不再重推。
+权威决策点只有一个：`resolveWebSearchStrategy`（`kernel-adapters/src/llm-management/contracts/connection.ts`，纯函数；单测见 `packages/kernel-adapters/tests/llm-management/web-search-strategy.spec.ts`）。下游只做**派生**，不再重推。
 
 ```ts
 export type WebSearchMode = 'builtin' | 'client-tool' | 'disabled';
@@ -38,7 +38,7 @@ C4Container
         Container(session, "llm-session", "TS", "三态决策 + 事件投影")
         Container(effects, "kernel-adapters", "TS", "参数下发 + citations 事件")
         Container(driver, "driver-llm", "TS", "内置 search 注入 + citations 提取")
-        Container(contracts, "llm-session/contracts", "TS", "WebSearchMode 纯函数契约")
+        Container(contracts, "kernel-adapters/contracts", "TS", "WebSearchMode 纯函数契约")
     }
 
     System_Ext(providers, "DeepSeek / OpenAI / Gemini", "外部 LLM")
@@ -61,7 +61,7 @@ C4Container
 C4Component
     title 联网搜索：单一决策点 + 单向派生
 
-    Container_Boundary(contract, "llm-session/contracts") {
+    Container_Boundary(contract, "kernel-adapters/contracts") {
         Component(strategy, "resolveWebSearchStrategy", "纯函数", "capability+protocol → WebSearchMode")
     }
     Container_Boundary(session, "llm-session") {
@@ -107,10 +107,10 @@ Provider.collectCitations
 
 | 类型 | 定义 | 说明 |
 |---|---|---|
-| `WebSearchMode` | `llm-session/src/contracts/connection.ts` | 三态判别联合 `'builtin' \| 'client-tool' \| 'disabled'` |
-| `resolveWebSearchStrategy` | `llm-session/src/contracts/connection.ts` | 纯函数，`(capabilities?, enabled?, protocol?) → WebSearchMode` |
-| `LLMProvider.capabilities.serverSideWebSearch` | `llm-session/src/contracts/connection.ts` | 服务端内置联网搜索能力（唯一事实源） |
-| `LLMProvider.responses.defaultThinkingEnabled` | `llm-session/src/contracts/connection.ts` | Responses 推理行为（DeepSeek 默认开启思考） |
+| `WebSearchMode` | `kernel-adapters/src/llm-management/contracts/connection.ts` | 三态判别联合 `'builtin' \| 'client-tool' \| 'disabled'` |
+| `resolveWebSearchStrategy` | `kernel-adapters/src/llm-management/contracts/connection.ts` | 纯函数，`(capabilities?, enabled?, protocol?) → WebSearchMode` |
+| `LLMProvider.capabilities.serverSideWebSearch` | `kernel-adapters/src/llm-management/contracts/connection.ts` | 服务端内置联网搜索能力（唯一事实源） |
+| `LLMProvider.responses.defaultThinkingEnabled` | `kernel-adapters/src/llm-management/contracts/connection.ts` | Responses 推理行为（DeepSeek 默认开启思考） |
 | `Citation` | `driver-llm/src/types/response.ts` | `{ text, source?, title?, page?, url? }`，统一 web_search / grounding / MCP 来源 |
 | `ExecutorConfig.webSearchMode` | `llm-session/core/types.ts` | 三态策略下发到 Direct Chat 编排层 |
 | `ChatCompletionParams.webSearch` | `driver-llm/src/types/response.ts` | 请求级布尔，仅 `builtin` 态为 true |
@@ -129,7 +129,7 @@ Provider.collectCitations
 
 | 场景 | 文件 |
 |---|---|
-| 三态策略纯函数 | `llm-session/src/contracts/connection.ts` |
+| 三态策略纯函数 | `kernel-adapters/src/llm-management/contracts/connection.ts` |
 | 三态下发（ExecutorConfig） | `llm-session/src/core/types.ts` |
 | 策略解析 | `llm-session/src/session/agent-resolver.ts` |
 | 派生 + 剥离客户端工具 + 事件投影 | `llm-session/src/session/conversation-run-coordinator.ts` |

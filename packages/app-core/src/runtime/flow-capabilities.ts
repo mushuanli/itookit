@@ -1,7 +1,8 @@
 import { bindStandaloneFlowNode, type FlowIdentityResolver } from '@itookit/llm-session';
 import { resolveSessionSelectedSkills } from '@itookit/kernel-adapters';
 import { buildSkillContexts } from '@itookit/llm-session';
-import { DEFAULT_HARNESS_TOOL_IDS, type FlowNodeDefinition } from '@itookit/common';
+import { DEFAULT_HARNESS_TOOL_IDS } from '@itookit/kernel-adapters/contracts';
+import { type FlowNodeDefinition } from '@itookit/llm-flow/contracts';
 import type { HeadlessKernelRuntime } from './create-kernel-runtime';
 
 /** Shared capability binding for standalone Flow hosts. */

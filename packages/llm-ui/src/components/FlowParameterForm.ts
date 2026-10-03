@@ -1,4 +1,6 @@
-import { escapeHTML, t, type FlowParameter, type JsonValue, type ConnectionMeta } from '@itookit/common';
+import { escapeHTML, t } from '@itookit/common';
+import { type FlowParameter, type JsonValue } from '@itookit/llm-flow/contracts';
+import { type ConnectionMeta } from '@itookit/driver-llm/contracts';
 
 type Field = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 export interface FlowConnectionSelection {

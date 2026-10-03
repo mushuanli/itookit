@@ -491,7 +491,7 @@ export class HistoryView implements IHistoryPresenter {
                 break;
 
             case 'message:citations': {
-                const p = (event as any).payload as { messageId?: string; citations?: import('@itookit/common').Citation[] } | undefined;
+                const p = (event as any).payload as { messageId?: string; citations?: import('@itookit/driver-llm/contracts').Citation[] } | undefined;
                 if (p?.messageId && p?.citations?.length) {
                     this.stream.updateCitations(p.messageId, p.citations);
                 }

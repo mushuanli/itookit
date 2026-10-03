@@ -16,7 +16,7 @@ import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { FakeSidecarDb } from './fake-sidecar';
 import { createApplicationRuntime } from '@itookit/app-core';
 import { SessionCommand } from '@itookit/llm-session';
-import { createAgentSendIntent } from '@itookit/common';
+import { createAgentSendIntent } from '@itookit/llm-flow/contracts';
 import { createSessionSkillControls, resolveSessionSkillContext } from '@itookit/kernel-adapters';
 import { TauriSkillSource } from '../../../apps/tauri-app/src/kernel/tauri-skill-source';
 

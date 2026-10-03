@@ -1,6 +1,11 @@
 import { createFileSystemSource, MemoryBackend, type FileSystemSourceOwner } from '@itookit/vfs-core';
 import { LLM_PROVIDERS } from '@itookit/kernel-adapters/llm';
-import { ENTITY_ICONS, t, type SystemPromptDefinition, type MCPServer, type IConnectionService, type ToolMeta, type ToolDefinition } from '@itookit/common';
+import { ENTITY_ICONS, t } from '@itookit/common';
+import { type SystemPromptDefinition } from '@itookit/llm-tasks/contracts';
+import { type MCPServer } from '@itookit/tools/mcp-contracts';
+import { type IConnectionService } from '@itookit/kernel-adapters/contracts';
+import { type ToolMeta } from '@itookit/tools/contracts';
+import { type ToolDefinition } from '@itookit/llm-context';
 
 export interface ToolboxTool { id: string; name: string; description: string; source: string; serverId?: string; enabled: boolean; parameters?: unknown }
 interface Catalog { listTools(): ToolMeta[]; getToolDefinitions(): ToolDefinition[] }

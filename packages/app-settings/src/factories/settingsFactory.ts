@@ -1,9 +1,8 @@
 import { editorResourceId } from '@itookit/ui-common';
 // @file app-settings/factories/settingsFactory.ts
-import type {IConnectionService} from '@itookit/common';
+import type { IConnectionService } from '@itookit/kernel-adapters/contracts';
 import type { EditorOptions } from '@itookit/ui-common';
-import type { IAgentManagementService
-} from '@itookit/common';
+import type { IAgentManagementService } from '@itookit/kernel-adapters/contracts';
 import type { EditorFactory, IEditor } from '@itookit/ui-common';
 import { SettingsService } from '../services/SettingsService';
 import { SETTINGS_PAGES } from '../engine/SettingsEngine';

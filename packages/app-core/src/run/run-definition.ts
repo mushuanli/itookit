@@ -1,4 +1,4 @@
-import type { DagEdgeDefinition, DagNodeDefinition, FlowParameter, FlowRevision, FlowRunPolicy, JsonValue } from '@itookit/common';
+import type { DagEdgeDefinition, DagNodeDefinition, FlowParameter, FlowRevision, FlowRunPolicy, JsonValue } from '@itookit/llm-flow/contracts';
 import { flowToDag, type FlowNodeBinder } from '@itookit/llm-flow';
 
 export type RunSourceFormat = 'yaml' | 'flow';
@@ -34,7 +34,7 @@ export interface RunConnectionConfig {
 }
 
 export interface RunAgentConfig {
-    memoryPolicy?: import('@itookit/common').MemoryPolicy;
+    memoryPolicy?: import('@itookit/llm-tasks/contracts').MemoryPolicy;
     id: string;
     name?: string;
     connection: string;
@@ -92,8 +92,8 @@ export interface RunDefinition {
         nodeDefaults?: Record<string, Record<string, JsonValue>>;
         nodeConnections?: Record<string, Record<string, JsonValue>>;
         maxNodes?: number;
-        templateVersion?: import('@itookit/common').DagRunSpec['templateVersion'];
-        parameterScopes?: import('@itookit/common').DagRunSpec['parameterScopes'];
+        templateVersion?: import('@itookit/llm-flow/contracts').DagRunSpec['templateVersion'];
+        parameterScopes?: import('@itookit/llm-flow/contracts').DagRunSpec['parameterScopes'];
     };
     parameters?: FlowParameter[];
     environment: RunEnvironment;
@@ -170,7 +170,7 @@ export async function createRunDefinitionFromFlow(flow: FlowRevision, options: {
 
 
 /** Compile the canonical RunDefinition into the executor-facing DagRunSpec. */
-export function toDagRunSpec(definition: RunDefinition): import('@itookit/common').DagRunSpec {
+export function toDagRunSpec(definition: RunDefinition): import('@itookit/llm-flow/contracts').DagRunSpec {
     const policy = definition.policy.runPolicy;
     return {
         nodes: structuredClone(definition.graph.nodes),

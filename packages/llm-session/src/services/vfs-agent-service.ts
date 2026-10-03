@@ -14,7 +14,7 @@ import type { MCPServer } from '@itookit/tools/mcp-contracts';
 import type { SystemPromptDefinition } from '@itookit/llm-tasks/contracts';
 
 import { IAgentManagementService } from './agent-service';
-import { log } from '../utils/logger';
+import { createSessionHost, type SessionHost } from '../utils/host-ports';
 
 // Agent 默认存储目录（VFS module-relative path）
 const AGENT_DEFAULT_DIR = '/default';
@@ -37,8 +37,9 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
     constructor(
         fs: IFileSystem,
         private readonly llmService: ILLMManagementService,
+        private readonly host: SessionHost = createSessionHost(),
     ) {
-        super(fs);
+        super(fs, host.logger);
     }
 
     // ─── FileBackedService lifecycle ─────────────────────────────────────────
@@ -84,9 +85,9 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
     private async refreshData(): Promise<void> {
         try {
             this._agents = await this.scanAgentFiles();
-            log.info('Agent service data refreshed', { agentCount: this._agents.length });
+            this.host.logger.info('Agent service data refreshed', { agentCount: this._agents.length });
         } catch (e) {
-            log.error('Failed to refresh agent service data', { error: e });
+            this.host.logger.error('Failed to refresh agent service data', { error: e });
         }
     }
 
@@ -97,12 +98,12 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
             const configVersion = this.llmService.getConfigVersion();
             const versionData = await this.readJson<{ version: number }>(VERSION_FILE);
             if (versionData && versionData.version >= configVersion) return;
-            log.info('Syncing default agents');
+            this.host.logger.info('Syncing default agents');
             await this.syncDefaultAgents();
             await this.syncDefaultSystemPrompts();
             await this.writeJson(VERSION_FILE, { version: configVersion, updatedAt: Date.now() });
         } catch (e) {
-            log.error('Failed to ensure defaults', { error: e });
+            this.host.logger.error('Failed to ensure defaults', { error: e });
         }
     }
 
@@ -130,7 +131,7 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
             } catch { /* ignore per-agent errors */ }
         }
 
-        log.info('Default agents synced', { created });
+        this.host.logger.info('Default agents synced', { created });
     }
 
     /** Seed each default agent's system prompt + quick-prompt presets as a System Prompt library entry. */
@@ -145,7 +146,7 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
                 if (await this.readJson(path)) continue;
                 await this.writeJson(path, entry);
             } catch (error) {
-                log.error('Failed to sync default system prompt', { id: def.id, error });
+                this.host.logger.error('Failed to sync default system prompt', { id: def.id, error });
             }
         }
     }
@@ -284,11 +285,11 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
                     if (dup.path !== canonical.path) {
                         try {
                             await this.engine.driver.delete([dup.path]);
-                            log.warn('Cleaned up duplicate agent file during save', {
+                            this.host.logger.warn('Cleaned up duplicate agent file during save', {
                                 agentId: agent.id, kept: canonical.path, removed: dup.path,
                             });
                         } catch (e) {
-                            log.error('Failed to delete duplicate agent file', { path: dup.path, error: e });
+                            this.host.logger.error('Failed to delete duplicate agent file', { path: dup.path, error: e });
                         }
                     }
                 }
@@ -499,7 +500,7 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
             const dupSummary = Array.from(this._duplicatePaths.entries()).map(
                 ([id, paths]) => `${id}: [${paths.join(', ')}]`
             );
-            log.warn('Duplicate agent files cleaned before full reset', {
+            this.host.logger.warn('Duplicate agent files cleaned before full reset', {
                 count: this._duplicatePaths.size, details: dupSummary,
             });
         }
@@ -603,7 +604,7 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
                     const dupPaths = duplicates.map(d => d._scanPath);
                     this._duplicatePaths.set(agentId, dupPaths);
 
-                    log.warn('Duplicate agent files detected — merging', {
+                    this.host.logger.warn('Duplicate agent files detected — merging', {
                         agentId, kept: _sp, removed: dupPaths,
                     });
 
@@ -612,7 +613,7 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
                         try {
                             await this.engine.driver.delete([dup._scanPath]);
                         } catch (e) {
-                            log.error('Failed to delete duplicate agent file', {
+                            this.host.logger.error('Failed to delete duplicate agent file', {
                                 path: dup._scanPath, error: e,
                             });
                         }

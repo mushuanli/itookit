@@ -1,3 +1,4 @@
+import { createSessionHost, type SessionHost } from '../utils/host-ports';
 import { flowLogicInteraction } from './flow-logic-history';
 import { flowActor, flowToolInteraction, flowToolId, flowRequestId } from './flow-identity';
 import { formatFlowOutput } from '@itookit/llm-flow/contracts';
@@ -12,7 +13,7 @@ import { flowInteractionNode } from '../persistence/projection';
 export class FlowHistory {
     readonly interactions: FlowInteraction[] = [];
     private attempts = new Map<string, { content: string; thinking: string }>();
-    constructor(private execution: ConversationExecution, private bus: SessionEventBus) {}
+    constructor(private execution: ConversationExecution, private bus: SessionEventBus, private host: SessionHost = createSessionHost()) {}
 
     async consume(handle: TaskHandle): Promise<void> {
         const task = (await handle.status()).task;
@@ -21,7 +22,7 @@ export class FlowHistory {
         const entry = visible && !input ? this.append(task) : undefined;
         for await (const envelope of handle.events()) {
             if (entry) this.event(entry, envelope);
-            const logic = flowLogicInteraction(task, envelope);
+            const logic = flowLogicInteraction(task, envelope, this.host.translate);
             if (logic && !this.interactions.some(item => item.id === logic.id)) this.append(task, logic);
             if (envelope.type === 'agent.event' && String((envelope.payload as AgentEvent).type).startsWith('tool:')) {
                 this.tool((await handle.status()).task, envelope.payload as AgentEvent);

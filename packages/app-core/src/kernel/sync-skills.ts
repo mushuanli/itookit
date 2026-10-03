@@ -1,4 +1,4 @@
-import type { SkillDefinition } from '@itookit/common';
+import type { SkillDefinition } from '@itookit/tools/contracts';
 
 export interface SkillSourceDriver {
     getSkills(): Promise<readonly SkillDefinition[]>;

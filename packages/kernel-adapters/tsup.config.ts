@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-    entry: { index: 'src/index.ts', llm: 'src/llm-management/index.ts', 'mcp-stdio': 'src/llm-management/skills/mcp-stdio.ts', 'mcp-stdio-browser': 'src/llm-management/skills/mcp-stdio-browser.ts' },
+    entry: { contracts: 'src/contracts.ts', index: 'src/index.ts', llm: 'src/llm-management/index.ts', 'mcp-stdio': 'src/llm-management/skills/mcp-stdio.ts', 'mcp-stdio-browser': 'src/llm-management/skills/mcp-stdio-browser.ts' },
     format: ['esm', 'cjs'],
     dts: true,
     clean: true,

@@ -1,4 +1,5 @@
-import { escapeHTML, t, type ICommandBus } from '@itookit/common';
+import { escapeHTML, t } from '@itookit/common';
+import { type ICommandBus } from '@itookit/llm-session/contracts';
 import { FlowCommand, SessionCommand } from '@itookit/llm-session';
 import { DagWorkbench } from '../components/DagWorkbench';
 

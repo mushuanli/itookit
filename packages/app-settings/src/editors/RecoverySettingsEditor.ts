@@ -1,6 +1,7 @@
 // @file: app-settings/editors/RecoverySettingsEditor.ts
 
-import {t, type RestorableItem, type IAgentManagementService} from '@itookit/common';
+import { t } from '@itookit/common';
+import { type RestorableItem, type IAgentManagementService } from '@itookit/kernel-adapters/contracts';
 import { BaseSettingsEditor, Toast, Modal, type EditorOptions } from '@itookit/ui-common';
 
 export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentManagementService> {

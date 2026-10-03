@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import type { SessionSkillControls } from '@itookit/common';
+import type { SessionSkillControls } from '@itookit/tools/contracts';
 import { bindSkillRefresh } from './skill-refresh';
 import type { SkillInfo } from '../domain/types';
 

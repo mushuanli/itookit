@@ -138,7 +138,7 @@
 
 | 场景 | 文件 |
 |---|---|
-| 三态策略纯函数（resolveWebSearchStrategy） | `llm-session/src/contracts/connection.ts` |
+| 三态策略纯函数（resolveWebSearchStrategy） | `kernel-adapters/src/llm-management/contracts/connection.ts` |
 | 策略解析 | `llm-session/src/session/agent-resolver.ts` |
 | 派生 + 剥离客户端工具 + citations 投影 | `llm-session/src/session/conversation-run-coordinator.ts` |
 | citations 事件发射 + 流式聚合 | `kernel-adapters/src/effects/llm-chat-effect.ts` |

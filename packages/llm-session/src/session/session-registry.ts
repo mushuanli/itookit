@@ -15,7 +15,7 @@ import { SessionState } from './session-state';
 import { SessionEventBus } from './session-event-bus';
 import { RoundLog, roundToProjection } from '../persistence/round-log';
 import { collectHistoryChain, type SessionHistoryChain } from '../persistence/history-chain';
-import { log } from '../utils/logger';
+import { createSessionHost, type SessionHost } from '../utils/host-ports';
 
 /**
  * Context returned by ensureBound() — shared across RoundOperations and BranchService.
@@ -50,9 +50,9 @@ export class SessionRegistry {
     private _eventBus: SessionEventBus;
     private _engine: ISessionRepository;
 
-    constructor(engine: ISessionRepository, private readonly restoreRound: (round: PersistedRound) => Promise<PersistedRound> = async round => round) {
+    constructor(engine: ISessionRepository, private readonly restoreRound: (round: PersistedRound) => Promise<PersistedRound> = async round => round, readonly host: SessionHost = createSessionHost()) {
         this._engine = engine;
-        this._eventBus = new SessionEventBus();
+        this._eventBus = new SessionEventBus(host);
     }
 
     // === 访问器（供 RoundOperations / BranchService 使用）===
@@ -85,7 +85,7 @@ export class SessionRegistry {
             }
             return this.getSnapshot();
         } catch (e) {
-            log.error('Failed to bind session', { sessionId, error: e });
+            this.host.logger.error('Failed to bind session', { sessionId, error: e });
             throw ConversationError.from(e);
         }
     }
@@ -217,8 +217,7 @@ export class SessionRegistry {
             const userRound = state.findUserRoundForAssistant(messageId);
             if (!userRound?.userMessage) {
                 const reason = state.describeRegenerateFailure(messageId);
-                log.warn('Regenerate rejected', { messageId, reason });
-                console.warn(`[SessionRegistry] ${reason}`);
+                this.host.logger.warn('Regenerate rejected', { messageId, reason });
                 return { allowed: false, reason };
             }
             return { allowed: true };
@@ -378,7 +377,7 @@ export class SessionRegistry {
                 cleaned++;
             }
         }
-        if (cleaned > 0) log.info('Idle sessions cleaned', { count: cleaned });
+        if (cleaned > 0) this.host.logger.info('Idle sessions cleaned', { count: cleaned });
         return cleaned;
     }
 

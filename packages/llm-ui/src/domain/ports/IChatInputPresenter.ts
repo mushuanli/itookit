@@ -1,6 +1,6 @@
 // @file: llm-ui/domain/ports/IChatInputPresenter.ts
 
-import type { JsonValue } from '@itookit/common';
+import type { JsonValue } from '@itookit/llm-flow/contracts';
 import type {
     ChatOverrides,
     ChatSessionSettings,

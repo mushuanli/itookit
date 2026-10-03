@@ -3,7 +3,7 @@
 import type { SessionRenderer } from './SessionRenderer';
 import type { ScrollController } from '../common/ScrollController';
 import { getPreviewText } from '../../utils/textUtils';
-import type { Citation } from '@itookit/common';
+import type { Citation } from '@itookit/driver-llm/contracts';
 import { NodeTemplates } from '../templates/NodeTemplates';
 
 /**
@@ -151,7 +151,7 @@ export class StreamController {
         sidecar.innerHTML = NodeTemplates.renderCitations(citations);
     }
 
-    updateToolProgress(nodeId: string, progress: import('@itookit/common').ToolProgress): void {
+    updateToolProgress(nodeId: string, progress: import('@itookit/tools/contracts').ToolProgress): void {
         const el = this.renderer.getNode(nodeId);
         if (!el || !['running', 'queued'].includes(el.dataset.status ?? '')) return;
         const activity = el.querySelector<HTMLElement>('.llm-ui-node__progress');

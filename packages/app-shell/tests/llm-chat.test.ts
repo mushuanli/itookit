@@ -16,7 +16,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LLMDriver } from '@itookit/driver-llm';
-import type { ChatMessage, Attachment } from '@itookit/common';
+import type { ChatMessage, Attachment } from '@itookit/llm-context';
 
 // ── Minimal 1×1 pixel PNG (standard test fixture, valid PNG binary) ───────────
 // filter=0x00, RGB=(0x26,0x89,0xF5) ≈ a blue pixel

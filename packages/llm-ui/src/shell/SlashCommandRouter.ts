@@ -11,11 +11,10 @@ import { showConfirmDialog } from '@itookit/ui-common';
 import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter'
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter'
 import type { IEditorEventBus } from '../domain/events'
-import type { ICommandBus
-} from '@itookit/common';
+import type { ICommandBus } from '@itookit/llm-session/contracts';
 import { Toast } from '@itookit/ui-common';
 
-import type { IAgentConfigService } from '@itookit/common';
+import type { IAgentConfigService } from '@itookit/kernel-adapters/contracts';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { BranchService } from '../services/BranchService';
 import type { DOMCache } from '../components/common/DOMCache';

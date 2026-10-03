@@ -1,5 +1,6 @@
-import { escapeHTML, t, DEFAULT_HARNESS_TOOL_IDS } from '@itookit/common';
-import type { AgentDefinition, LLMSkill } from '@itookit/llm-session/contracts';
+import { escapeHTML, t } from '@itookit/common';
+import { DEFAULT_HARNESS_TOOL_IDS } from '@itookit/kernel-adapters/contracts';
+import type { AgentDefinition, LLMSkill } from '@itookit/kernel-adapters/contracts';
 
 const ids = (value: string) => [...new Set(value.split(/[\s,]+/).filter(Boolean))];
 

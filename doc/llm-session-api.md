@@ -395,7 +395,6 @@ packages/llm-session/src/
 │   ├── session-directory-storage.ts  SessionDirectoryStorageResolver + sessionDirectoryStorage
 │   ├── session-projection.ts     createSessionDataProjection（会话记录的只读文件投影）
 │   ├── flow-engine.ts            FlowEngine + FLOW_MODULE_NAME（flows 模块，实现 FlowStore）
-│   ├── default-flows.ts          seedDefaultFlows/essayReviewDraft/ESSAY_REVIEW_FLOW_ID
 │   ├── round-log.ts              RoundLog + roundToProjection/hasEffectiveAssistant
 │   ├── round-graph-service.ts    RoundGraphService + RoundGraphError
 │   ├── round-types.ts            RoundManifest/PersistedRound/RoundProjection/BranchMeta
@@ -477,3 +476,5 @@ TTY 首次结束信息保持不变，后续结束通知与输出不覆盖；已�
 `ConversationManifest.parentSessionId?: string | null` 表示组织关系，缺省为顶层会话。`SessionRepository.createSession(title, folder?, parentSessionId?)` 创建独立历史与草稿，并使用父会话的项目分组。`updateManifest(id, { parentSessionId })` 调整归属；null 提升到顶层，循环及跨项目操作拒绝。父关系与子树目录在同一结构事务中更新，`folders.seq` 的关系版本防止并发结构修改遗漏新成员。
 
 `prepareSessionDeletion(id)` 记录可恢复意图并提升直接子会话；`pendingSessionDeletions()` 提供待清理 ID。宿主仍应通过 `SessionLifecycleService` 先停止执行再删除。删除意图在物理清理完成后移除，重启可以继续处理。此字段属于 `session.seq` 元信息，不写入 `history.seq` 的 Round 索引，也不编码成物理子目录。详见 [项目抽屉与子会话导航](design/project-session-navigation.md)。
+
+会话工厂接受实例级 `hostPorts` 与 `agentResolution`，返回独立 SessionManager 和幂等异步 dispose。UI 必须接入返回实例；旧单例入口仅用于兼容。业务预设移到 `packages/app-core/src/presets/default-flows.ts` 与 `packages/app-core/src/presets/essay-review.json`。

@@ -6,10 +6,11 @@ import type {
 import { sha256Hex } from '../content/digest';
 import { contextKey } from '../content/store';
 import { serializeContext } from '../content/serialize';
-import { ContextError, createContextEngine, estimateRequestTokens, requirePositive } from '../window/engine';
+import { ContextError, createContextEngine, measureContext, requirePositive } from '../window/engine';
 import { createContextReader, loadRequest } from './reader';
 
 export function createContextService(ports: ContextServicePorts): IContextService {
+    ports = { ...ports, engine: ports.engine ?? createContextEngine(ports.engineOptions) };
     const reader = createContextReader(ports);
     return { ...reader, request: cursor => loadRequest(ports, cursor),
         prepare: input => prepare(ports, input),
@@ -48,18 +49,26 @@ async function buildSnapshot(ports: ContextServicePorts, input: ContextPrepareIn
     const selection = engine.select(messages, input.request, input.notes
         ? { ...input.policy, maxMessages: 1, keepRecent: 1, strategy: 'checkpoint-reset' } : input.policy);
     const notes = await resolveNotes(ports, input, previous, selection.removed, history);
-    if (notes) {
-        selection.messages = insertNotes(selection.messages, notes);
-        if (estimateRequestTokens({ ...input.request, messages: selection.messages }) > (input.policy?.maxInputTokens ?? 64_000)) {
-            throw new ContextError('CONTEXT_COMPACTION_NO_PROGRESS', 'Checkpoint notes exceed the remaining context budget');
-        }
-        if (input.notes || selection.removed.length) selection.explanation.strategy = input.notes || input.policy?.strategy === 'checkpoint-reset' ? 'checkpoint-reset' : 'summary-tail';
-    }
+    if (notes) applyNotes(engine, input, selection, notes);
     const request = { ...input.request, messages: selection.messages };
-    selection.explanation.inputTokens = estimateRequestTokens(request);
+    const budget = measureContext(engine, request, input.policy);
+    if (budget.inputTokens > budget.maxInputTokens)
+        throw new ContextError('CONTEXT_REQUIRED_INPUT_TOO_LARGE', 'Selected context exceeds the input budget');
+    selection.explanation.inputTokens = budget.inputTokens;
+    selection.explanation.estimated = budget.estimated;
     return { schema: 1, contextId: input.contextId, revision: (previous?.revision ?? 0) + 1,
         generation: (previous?.generation ?? 0) + Number(Boolean(input.notes) || selection.removed.length > 0), history, notes,
         request, digest: await sha256Hex(JSON.stringify(request)), explanation: selection.explanation };
+}
+
+function applyNotes(engine: import('../domain/durable').IContextEngine, input: ContextPrepareInput,
+    selection: import('../domain/durable').WindowSelection, notes: WorkingNotes): void {
+    selection.messages = insertNotes(selection.messages, notes);
+    const budget = measureContext(engine, { ...input.request, messages: selection.messages }, input.policy);
+    if (budget.inputTokens > budget.maxInputTokens)
+        throw new ContextError('CONTEXT_COMPACTION_NO_PROGRESS', 'Checkpoint notes exceed the remaining context budget');
+    if (input.notes || selection.removed.length)
+        selection.explanation.strategy = input.notes || input.policy?.strategy === 'checkpoint-reset' ? 'checkpoint-reset' : 'summary-tail';
 }
 
 function mergeMessages(previous: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
@@ -95,7 +104,8 @@ async function resolveNotes(ports: ContextServicePorts, input: ContextPrepareInp
     const tokens = input.policy.summaryTokens ?? 1024;
     requirePositive(tokens);
     const sources: ChatMessage[] = previous?.notes ? [{ role: 'user', content: previous.notes.text }, ...removed] : removed;
-    if (estimateRequestTokens({ messages: sources }) > (input.policy.maxInputTokens ?? 64_000)) {
+    const budget = measureContext(ports.engine!, { ...input.request, messages: sources }, input.policy);
+    if (budget.inputTokens > budget.maxInputTokens) {
         throw new ContextError('CONTEXT_REQUIRED_INPUT_TOO_LARGE', 'Summary source exceeds the input budget; checkpoint notes are required');
     }
     const text = await ports.summarize(sources, tokens);

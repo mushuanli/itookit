@@ -1,16 +1,8 @@
 import { assertEffectGrant } from '@itookit/durable-kernel';
 import { createModuleLogger } from '@itookit/common';
-import type {
-    AgentEvent,
-    AssistantMessage,
-    ChatCompletionChunk,
-    ChatCompletionParams,
-    ChatCompletionResponse,
-    Citation,
-    FinishReason,
-    TokenUsage,
-    ToolCall,
-} from '@itookit/common';
+import type { LlmCommunicationEvent } from '@itookit/driver-llm/contracts';
+import type { AssistantMessage, ChatCompletionChunk, ChatCompletionParams, ChatCompletionResponse, Citation, FinishReason, TokenUsage } from '@itookit/driver-llm/contracts';
+import type { ToolCall } from '@itookit/llm-context';
 import type { ILLMService } from '@itookit/driver-llm/contracts';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/durable-kernel';
 import { expandMessagesAttachments } from '@itookit/driver-llm';
@@ -121,9 +113,9 @@ export async function prepareLlmChatEffectRequest(
 /** 流式事件批量窗口（ms）。合并 LLM 高频 chunk 为低频事件写入，缓解事件日志 O(n²) 轮询。 */
 const STREAM_BATCH_MS = 40;
 
-function makeEmitter(context: EffectExecutionContext, controller: AbortController): (event: AgentEvent) => Promise<void> {
+function makeEmitter(context: EffectExecutionContext, controller: AbortController): (event: LlmCommunicationEvent) => Promise<void> {
     const emit = context.emit;
-    return async (event: AgentEvent): Promise<void> => {
+    return async (event: LlmCommunicationEvent): Promise<void> => {
         try { await emit?.({ type: 'agent.event', payload: event }); }
         catch (error) { controller.abort(error); throw error; }
     };
@@ -134,7 +126,7 @@ async function completeChat(
     service: ILLMService,
     connectionId: string,
     params: ChatCompletionParams,
-    emit: (event: AgentEvent) => Promise<void>,
+    emit: (event: LlmCommunicationEvent) => Promise<void>,
 ): Promise<ChatCompletionResponse> {
     const response = await service.chat(connectionId, params);
     await emitFinalContent(emit, response);
@@ -154,7 +146,7 @@ async function chargeUsage(
 }
 
 async function emitFinalContent(
-    emit: (event: AgentEvent) => Promise<void>,
+    emit: (event: LlmCommunicationEvent) => Promise<void>,
     response: ChatCompletionResponse,
 ): Promise<void> {
     const message = response.choices[0]?.message;
@@ -167,7 +159,7 @@ async function streamChat(
     service: ILLMService,
     connectionId: string,
     params: ChatCompletionParams,
-    emit: (event: AgentEvent) => Promise<void>,
+    emit: (event: LlmCommunicationEvent) => Promise<void>,
 ): Promise<ChatCompletionResponse> {
     const batcher = new DeltaBatcher(emit);
     const aggregator = new ResponseAggregator();
@@ -203,7 +195,7 @@ class DeltaBatcher {
     private chain: Promise<void> = Promise.resolve();
     private failure?: { error: unknown };
 
-    constructor(private readonly emit: (event: AgentEvent) => Promise<void>) {}
+    constructor(private readonly emit: (event: LlmCommunicationEvent) => Promise<void>) {}
 
     push(type: 'stream:thinking' | 'stream:content', delta: string): void {
         if (this.failure) throw this.failure.error;

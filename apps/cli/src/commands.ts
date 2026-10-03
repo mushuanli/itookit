@@ -260,7 +260,7 @@ async function runLoaded(loaded: LoadedWorkflow, options: CommandOptions, overri
         const spec = toDagRunSpec(definition);
         if (override) {
             for (const node of spec.nodes) Object.assign(node, await runtime.flowCapabilities.bindNode(id,
-                node as import('@itookit/common').FlowNodeDefinition, spec.nodeDefaults?.[node.id] as never));
+                node as import('@itookit/llm-flow/contracts').FlowNodeDefinition, spec.nodeDefaults?.[node.id] as never));
         }
         // `submit` resolves as soon as the durable root exists, before the nodes are
         // dispatched, so this handle is live but its node map is still empty here.

@@ -2,7 +2,7 @@
 // Layer 1 — Provider 目录（云提供商定义 + 模型 catalog）。
 // 职责：持有 apiKey + 模型目录，是认证与模型信息的唯一来源。
 
-import type { LLMProvider } from '@itookit/common';
+import type { LLMProvider } from '@itookit/driver-llm/contracts';
 import { externalProviders } from './llm-configs';
 
 // ─── VFS 存储路径 ──────────────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ const P = {
 // 此常量同时作为 pricing.json 不存在时的编译期 fallback，
 // 以及首次启动时写入 /llm/pricing.json 的默认内容。
 
-import type { ModelPricingEntry } from '@itookit/common';
+import type { ModelPricingEntry } from '@itookit/kernel-adapters/contracts';
 
 export const MODEL_PRICING: ModelPricingEntry[] = [
     {

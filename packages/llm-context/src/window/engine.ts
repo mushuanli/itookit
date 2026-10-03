@@ -1,6 +1,6 @@
 import type { ChatMessage } from '../domain/message';
 import type { ContextCompactionPolicy } from '../domain/policy';
-import type { IContextEngine, WindowSelection } from '../domain/durable';
+import type { IContextEngine, WindowSelection, ContextEngineOptions, ContextBudget } from '../domain/durable';
 import { compactMessages, validateContextCompaction } from './compact-messages';
 import { ProviderMessageAdapter } from '../assembly/provider-message-adapter';
 
@@ -13,24 +13,41 @@ export function estimateRequestTokens(request: Record<string, unknown>): number 
     return new TextEncoder().encode(JSON.stringify(request)).byteLength;
 }
 
-export function createContextEngine(): IContextEngine { return { select }; }
+export function createContextEngine(options: ContextEngineOptions = {}): IContextEngine {
+    const defaults = { maxMessages: 100, keepRecent: 20, maxInputTokens: 64_000, ...options.defaultPolicy };
+    validateContextCompaction(defaults);
+    const measure = (request: Record<string, unknown>, policy?: ContextCompactionPolicy): ContextBudget => {
+        const maxInputTokens = policy?.maxInputTokens ?? defaults.maxInputTokens;
+        requirePositive(maxInputTokens);
+        const inputTokens = (options.estimateTokens ?? estimateRequestTokens)(request);
+        if (!Number.isSafeInteger(inputTokens) || inputTokens < 0)
+            throw new ContextError('CONTEXT_INVALID_TOKEN_COUNT', 'Token counter returned an invalid count');
+        return { inputTokens, maxInputTokens, estimated: options.estimated ?? true };
+    };
+    return { measure, select: (messages, request, policy) => select(messages, request, policy ?? defaults, measure) };
+}
 
-function select(messages: ChatMessage[], request: Record<string, unknown>, policy?: ContextCompactionPolicy): WindowSelection {
+/** Legacy engines may implement selection only; their budget uses the default counter. */
+export function measureContext(engine: IContextEngine, request: Record<string, unknown>, policy?: ContextCompactionPolicy): ContextBudget {
+    return engine.measure ? engine.measure(request, policy) : createContextEngine().measure!(request, policy);
+}
+
+function select(messages: ChatMessage[], request: Record<string, unknown>, policy: ContextCompactionPolicy, measure: NonNullable<IContextEngine['measure']>): WindowSelection {
     validateContextCompaction(policy);
     new ProviderMessageAdapter().validate(messages);
-    const limit = policy?.maxInputTokens ?? 64_000;
-    requirePositive(limit);
-    let selected = compactMessages(messages, policy ?? { maxMessages: 100, keepRecent: 20 });
-    while (estimateRequestTokens({ ...request, messages: selected }) > limit) {
+    let selected = compactMessages(messages, policy);
+    let budget = measure({ ...request, messages: selected }, policy);
+    while (budget.inputTokens > budget.maxInputTokens) {
         const next = removeOldestGroup(selected);
         if (next.length === selected.length) throw new ContextError('CONTEXT_REQUIRED_INPUT_TOO_LARGE', 'Required context exceeds input budget');
         selected = next;
+        budget = measure({ ...request, messages: selected }, policy);
     }
     new ProviderMessageAdapter().validate(selected);
     const included = new Set(selected);
     return { messages: structuredClone(selected), removed: messages.filter(message => !included.has(message)),
         explanation: { strategy: selected.length === messages.length ? 'retain' : 'prune',
-            inputTokens: estimateRequestTokens({ ...request, messages: selected }), estimated: true,
+            inputTokens: budget.inputTokens, estimated: budget.estimated,
             removedMessages: messages.length - selected.length } };
 }
 

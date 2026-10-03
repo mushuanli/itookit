@@ -5,7 +5,7 @@
 //
 // 同一 Provider 可有多个 Connection，每个 Connection 选取不同的模型族作为 tier 策略。
 
-import type { DefaultConnectionDef } from '@itookit/common';
+import type { DefaultConnectionDef } from '@itookit/kernel-adapters/contracts';
 import { externalConnections } from './llm-configs';
 
 /** 系统默认连接 ID */

@@ -3,7 +3,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { AgentConfigEditor } from '../../llm-settings-ui/src/editors/AgentConfigEditor';
 import { MCPSettingsEditor } from '../../llm-settings-ui/src/editors/MCPSettingsEditor';
 import { Toast } from '@itookit/ui-common';
-import type { AgentDefinition, MCPServer } from '@itookit/common';
+import type { AgentDefinition } from '@itookit/kernel-adapters/contracts';
+import type { MCPServer } from '@itookit/tools/mcp-contracts';
 
 const service = () => ({ getConnections: async () => [], getProviders: () => [],
     listSystemPrompts: async () => [], getMCPServers: async () => [], getSkills: async () => [] });

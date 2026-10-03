@@ -1,5 +1,6 @@
 import type { EditorFileType as FileTypeDefinition, EditorResolver as CustomEditorResolver } from './browser/types';
-import type {NavigationRequest, ICommandBus} from '@itookit/common';
+import type { NavigationRequest } from '@itookit/common';
+import type { ICommandBus } from '@itookit/llm-session/contracts';
 import type { ApplicationRuntime } from '@itookit/app-core';
 import type { FileCreationConfig, EditorFactory, EditorOptions, ContextMenuConfig } from '@itookit/ui-common';
 import type { IStorageBackend, IVFSManager, MountOptions, IFileSystem } from '@itookit/vfs-core';
@@ -68,12 +69,14 @@ export interface AdditionalMount {
 // （装配层，已依赖全部所需类型），llm-ui 的实现靠结构类型在入口处兼容。
 
 export interface ChatEditorDeps {
+    defaultHarnessToolIds?: readonly string[];
+    sessionManager?: import('@itookit/llm-session').SessionManager;
     sessionRepository: ISessionRepository;
     ocr?: import('@itookit/ui-common').OcrControls;
     commandBus?: ICommandBus;
     kernel?: Kernel;
     privilegedCommands?: IPrivilegedCommandService;
-    sessionSkills?: import('@itookit/common').SessionSkillControls;
+    sessionSkills?: import('@itookit/tools/contracts').SessionSkillControls;
 }
 
 export interface FlowEditorDeps {
@@ -151,7 +154,7 @@ export interface AppOptions {
     /** The initial editor finished mounting (or the workspace has no editor to wait for). */
     onEditorReady?: () => void;
     /** LLM traffic logger (NoopLLMLogger for web, TauriLLMLogger for Tauri) */
-    llmLogger?: import('@itookit/common').ILLMLogger;
+    llmLogger?: import('@itookit/driver-llm/contracts').ILLMLogger;
     /** Runtime transport for the local Codex app-server (Node/Tauri only). */
     codexTransport?: import('@itookit/driver-llm').CodexAppServerTransport;
     /** Platform capabilities implemented by the owning application. */

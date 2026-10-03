@@ -1,7 +1,7 @@
 import { SettingsValidationError } from '@itookit/ui-common';
 import { renderProtocolOptions } from './provider-form';
 import { getProviderProtocols } from '@itookit/driver-llm/contracts';
-import { resolveModelForTier } from '@itookit/llm-session/contracts';
+import { resolveModelForTier } from '@itookit/kernel-adapters/contracts';
 import { showConfigurationForm, addConfigurationAction, addConfigurationEnabled } from './configuration-form';
 import { t } from '@itookit/common';
 // @file: llm-ui/editors/ConnectionSettingsEditor.ts
@@ -12,13 +12,8 @@ import { t } from '@itookit/common';
 
 import {generateShortUUID} from '@itookit/common';
 import { BaseSettingsEditor } from '@itookit/ui-common';
-import type { IConnectionService,
-    ConnectionMeta,
-    LLMConnection,
-    LLMProvider,
-    ModelTier,
-    ApiProtocol
-} from '@itookit/common';
+import type { IConnectionService } from '@itookit/kernel-adapters/contracts';
+import type { ConnectionMeta, LLMConnection, LLMProvider, ModelTier, ApiProtocol } from '@itookit/driver-llm/contracts';
 import { Toast } from '@itookit/ui-common';
 import { fromConnectionDef, serializeLLMConfig } from '@itookit/kernel-adapters/llm';
 import { runLLMImport } from './llm-import';

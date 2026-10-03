@@ -3,7 +3,7 @@
 import YAML from 'yaml';
 import { FileBackedService } from '../utils/file-backed-service';
 import type { IFileSystem } from '@itookit/vfs-core';
-import { log } from '../utils/logger';
+import { createSessionHost, type SessionHost } from '../utils/host-ports';
 
 // ============================================
 // 类型定义
@@ -83,14 +83,14 @@ export class PromptHistoryService extends FileBackedService {
     private dirty = false;
     private writeTimer: ReturnType<typeof setTimeout> | null = null;
 
-    constructor(fs: IFileSystem) {
-        super(fs);
+    constructor(fs: IFileSystem, private readonly host: SessionHost = createSessionHost()) {
+        super(fs, host.logger);
     }
 
     protected async onLoad(): Promise<void> {
         // FileBackedService.init() 会调用此方法
         // 此时 engine 已就绪，但不急于加载数据（懒加载）
-        log.debug('PromptHistoryService module ready');
+        this.host.logger.debug('PromptHistoryService module ready');
     }
 
     // ============================================
@@ -245,11 +245,11 @@ export class PromptHistoryService extends FileBackedService {
             await this.writeYaml(HISTORY_FILE, yamlContent);
             this.dirty = false;
 
-            log.debug('Prompt history persisted', {
+            this.host.logger.debug('Prompt history persisted', {
                 count: this.entries.length,
             });
         } catch (e) {
-            log.error('Failed to persist prompt history', { error: e });
+            this.host.logger.error('Failed to persist prompt history', { error: e });
         }
     }
 
@@ -286,12 +286,12 @@ export class PromptHistoryService extends FileBackedService {
                 this.entries = content.entries;
                 this.maxEntries = content.max_entries || DEFAULT_MAX_ENTRIES;
 
-                log.debug('Prompt history loaded', {
+                this.host.logger.debug('Prompt history loaded', {
                     count: this.entries.length,
                 });
             }
         } catch (e) {
-            log.warn('Failed to load prompt history, starting fresh', { error: e });
+            this.host.logger.warn('Failed to load prompt history, starting fresh', { error: e });
             this.entries = [];
         }
 
@@ -326,7 +326,7 @@ export class PromptHistoryService extends FileBackedService {
                 e.message?.toLowerCase().includes('not found') ||
                 e.code === 'NOT_FOUND';
             if (!isNotFound) {
-                log.warn('Failed to read YAML', { path, error: e });
+                this.host.logger.warn('Failed to read YAML', { path, error: e });
             }
             return null;
         }

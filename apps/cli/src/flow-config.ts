@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import type { FlowDraft, FlowRevision } from '@itookit/common';
+import type { FlowDraft, FlowRevision } from '@itookit/llm-flow/contracts';
 import { flowRevisionDigest } from '@itookit/llm-flow';
 
 /** Load a `.flow` draft or revision and normalize it to an immutable FlowRevision. */

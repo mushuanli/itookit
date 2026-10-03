@@ -30,7 +30,7 @@ export function validateSkillVersionSnapshot(value: unknown): SkillVersionSnapsh
     return structuredClone(snapshot);
 }
 
-export function snapshotLoadResult(snapshot: SkillVersionSnapshot): import('@itookit/common').SkillLoadResult {
+export function snapshotLoadResult(snapshot: SkillVersionSnapshot): import('@itookit/tools/contracts').SkillLoadResult {
     return { skillId: snapshot.definition.id, success: true, toolIds: snapshot.definition.tools.map(tool => tool.toolId),
         instructions: snapshot.instructions, compactInstructions: snapshot.compactInstructions, snapshot: structuredClone(snapshot) };
 }

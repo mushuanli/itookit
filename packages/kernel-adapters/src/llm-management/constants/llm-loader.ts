@@ -9,11 +9,8 @@
 //   - mcp                  — MCP server configs
 
 import yaml from 'js-yaml';
-import type {
-    LLMProvider, DefaultConnectionDef, LLMModel, LLMConnection,
-    AgentDefinition, AgentType, AgentConfig,
-    ModelPricingEntry,
-} from '@itookit/common';
+import type { LLMProvider, LLMModel, LLMConnection } from '@itookit/driver-llm/contracts';
+import type { DefaultConnectionDef, AgentDefinition, AgentType, AgentConfig, ModelPricingEntry } from '@itookit/kernel-adapters/contracts';
 
 // ─── .llm File Types ─────────────────────────────────────────────────────────
 

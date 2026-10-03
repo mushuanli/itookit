@@ -1,5 +1,5 @@
+import type { SessionViewPort } from '../domain/ports/SessionViewPort';
 import { acquireConnectionOptions } from './connection-options-cache';
-import { DEFAULT_HARNESS_TOOL_IDS } from '@itookit/common';
 import { rerunSession } from './rerun-session';
 import { t } from '@itookit/common';
 import { openSessionFlowOutputs } from '../flows/session-output';
@@ -10,13 +10,11 @@ import { promptFlowParameters } from '../components/FlowParameterForm';
 
 import { IEditor, EditorOptions, EditorHostContext, EditorEvent, EditorEventMap, EditorEventCallback, CollapseExpandResult, Toast } from '@itookit/ui-common';
 import { EventBus } from '@itookit/vfs-core';
-import type {
-    ICommandBus,
-} from '@itookit/common';
+import type { ICommandBus } from '@itookit/llm-session/contracts';
 import type { EventEnvelope, Kernel, InteractionRequest, JsonValue } from '@itookit/durable-kernel';
 
 import {
-    ISessionRepository, IAgentConfigService, SessionManager, getSessionManager,
+    ISessionRepository, IAgentConfigService, getSessionManager,
     type ConversationManifest, SessionCommand,
 } from '@itookit/llm-session';
 
@@ -88,9 +86,11 @@ interface InitialSessionData {
 
 const ACTIVE_PRIVILEGED_TASK_KEY = 'ui.privileged.active-task';
 
-export interface LLMEditorOptions extends EditorOptions {
+export interface LLMEditorOptions extends EditorOptions<import('@itookit/llm-flow/contracts').SessionSubmission> {
     sessionId: string;
     sessionRepository: ISessionRepository;
+    sessionManager?: SessionViewPort;
+    defaultHarnessToolIds?: readonly string[];
     agentService: IAgentConfigService;
     initialInputState?: { text?: string; agentId?: string };
     isNewSession?: boolean;
@@ -105,7 +105,7 @@ export interface LLMEditorOptions extends EditorOptions {
     kernel?: Kernel;
     /** Application service for durable privileged slash commands. */
     privilegedCommands?: IPrivilegedCommandService;
-    sessionSkills?: import('@itookit/common').SessionSkillControls;
+    sessionSkills?: import('@itookit/tools/contracts').SessionSkillControls;
     onLoadMetrics?: (metrics: SessionLoadMetrics) => void;
 }
 
@@ -139,7 +139,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private directoryMenu?: WorkspaceDirectoryMenu;
 
     // === Services ===
-    private sessionManager: SessionManager;
+    private sessionManager: SessionViewPort;
     private commandBus!: ICommandBus;
     private sessionService!: SessionService;
     private stateService!: StateService;
@@ -216,7 +216,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
     constructor(_container: HTMLElement, options: LLMEditorOptions) {
         this.options = options;
-        this.sessionManager = getSessionManager();
+        this.sessionManager = options.sessionManager ?? getSessionManager();
         if (options.title) this.currentTitle = options.title;
     }
 
@@ -577,8 +577,8 @@ export class LLMWorkspaceEditor implements IEditor {
         if (this.inputDialogKey === key) return true;
         const values = payload.values && typeof payload.values === 'object' && !Array.isArray(payload.values) ? payload.values : {};
         const parameters = Object.entries(fields).map(([name, field]) => ({
-            ...(field as unknown as import('@itookit/common').FlowInputField), name,
-            required: (field as unknown as import('@itookit/common').FlowInputField).required !== false,
+            ...(field as unknown as import('@itookit/llm-flow/contracts').FlowInputField), name,
+            required: (field as unknown as import('@itookit/llm-flow/contracts').FlowInputField).required !== false,
             ...(Object.hasOwn(values, name) ? { default: values[name] } : {}),
         }));
         this.inputDialogAbort?.abort();
@@ -711,7 +711,7 @@ export class LLMWorkspaceEditor implements IEditor {
         if (this.chatInput?.getConfig().settings.flowId) return skills.map(skill => ({ ...skill, capabilitiesManagedByFlow: true }));
         const agentId = this.chatInput?.getConfig().agentId || 'default';
         const policy = this.agentService.findAgent(agentId)?.capabilityPolicy;
-        const grants = new Set(policy?.toolIds ?? DEFAULT_HARNESS_TOOL_IDS);
+        const grants = new Set(policy?.toolIds ?? this.options.defaultHarnessToolIds ?? []);
         return skills.map(skill => ({ ...skill, authorizedToolCount: (skill.toolIds ?? []).filter(id => grants.has(id)).length }));
     }
 
@@ -1007,7 +1007,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private registerInputPlugins(): void {
         const chatInput = this.chatInput as ChatInput;
 
-        const promptHistory = getPromptHistory();
+        const promptHistory = this.sessionManager.promptHistory ?? (this.options.sessionManager ? undefined : getPromptHistory());
         if (promptHistory) {
             this.historyPlugin = new HistoryPlugin(promptHistory);
             chatInput.registerPlugin(this.historyPlugin);

@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { createApplicationRuntime } from '@itookit/app-core';
 import { SessionCommand } from '@itookit/llm-session';
-import { createAgentSendIntent } from '@itookit/common';
+import { createAgentSendIntent } from '@itookit/llm-flow/contracts';
 import { FakeSidecarDb } from './fake-sidecar';
 
 /** Point the global default connection at a local endpoint that accepts the request and never answers. */

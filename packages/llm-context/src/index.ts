@@ -7,7 +7,7 @@ export * from './window/compact-messages';
 export { sha256Hex as contextDigest } from './content/digest';
 export { sha256Bytes, sha256Hex, sha256HexSync, type DigestInput } from './content/digest';
 export type * from './domain/durable';
-export { createContextEngine, ContextError, estimateRequestTokens } from './window/engine';
+export { createContextEngine, ContextError, estimateRequestTokens, measureContext } from './window/engine';
 export { createContextContentStore, contextKey, type ImmutableContentPort } from './content/store';
 export { createContextService } from './application/service';
 export { createContextProfiles, type IContextProfiles, type ContextProfilePort } from './application/profiles';

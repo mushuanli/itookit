@@ -13,10 +13,7 @@
  * }
  * ```
  */
-import type {
-    IAgentConfigService,
-    AgentDefinition
-} from '@itookit/common';
+import type { IAgentConfigService, AgentDefinition } from '@itookit/kernel-adapters/contracts';
 import type { ContextMenuConfig, MenuItem } from '@itookit/ui-common';
 import type { IFileSystem } from '@itookit/vfs-core';
 import { escapeHTML, escapeAttr } from '@itookit/common';

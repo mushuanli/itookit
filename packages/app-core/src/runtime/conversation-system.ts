@@ -2,13 +2,12 @@ import { createFlowCapabilities } from './flow-capabilities';
 import { createFlowInvocationSessions, initializeConversationSystem, type CommandBus, type FlowEngine, type SessionManager, type SessionRepository, type VFSAgentService } from '@itookit/llm-session';
 import { resolveSessionSkillContext, resolveSessionSelectedSkills } from '@itookit/kernel-adapters';
 import type { IFileSystem, IVFSManager } from '@itookit/vfs-core';
-import { resetSessionManager } from '@itookit/llm-session';
 import type { HeadlessKernelRuntime } from './create-kernel-runtime';
 import { withWorkspaceScopeCleanup } from './workspace-scope-cleanup';
-import { configureSessionHostPorts } from '@itookit/llm-session';
 import { t, createModuleLogger, traceBoot } from '@itookit/common';
 
 export interface ConversationSystemOptions {
+    agentResolution?: import('@itookit/llm-session').AgentResolutionPolicy;
     vfs: IVFSManager;
     /** Root view shared by Session-independent services; holds the Flow invocation marker. */
     systemFS: IFileSystem;
@@ -32,11 +31,12 @@ export interface ConversationSystemOptions {
  */
 export async function createConversationSystem(
     options: ConversationSystemOptions,
-): Promise<{ sessionManager: SessionManager; commandBus: CommandBus }> {
+): Promise<{ sessionManager: SessionManager; commandBus: CommandBus; dispose(): Promise<void> }> {
     const { vfs, agentService, sessionRepository, flowEngine, kernel, systemFS } = options;
-    configureSessionHostPorts({ translate: t, logger: createModuleLogger('llm-conversation'), traceBoot });
     const capabilities = createFlowCapabilities(kernel);
     return initializeConversationSystem({
+        agentResolution: options.agentResolution,
+        hostPorts: { translate: t, logger: createModuleLogger('llm-conversation'), traceBoot },
         agentService,
         sessionEngine: sessionRepository,
         promptHistoryFiles: await vfs.openFileSystem('/home/admin/.config/mindos/prompt-history'),
@@ -54,10 +54,4 @@ export async function createConversationSystem(
         resolveHarnessToolIds: capabilities.resolveHarnessToolIds,
         resolveMCPToolIds: capabilities.resolveMCPToolIds,
     });
-}
-
-/** The conversation layer is process-wide; release it during host shutdown. */
-export function disposeConversationSystem(): void {
-    resetSessionManager();
-    configureSessionHostPorts();
 }

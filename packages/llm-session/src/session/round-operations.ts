@@ -20,8 +20,8 @@ import { SessionState } from './session-state';
 import { SessionRegistry } from './session-registry';
 import { SessionRunCoordinator } from './session-run-coordinator';
 import { RoundLog } from '../persistence/round-log';
-import { getPromptHistory } from '../services/prompt-history-service';
-import { log } from '../utils/logger';
+import type { PromptHistoryService } from '../services/prompt-history-service';
+import type { SessionHost } from '../utils/host-ports';
 import { ulid } from '../persistence/ulid';
 
 /**
@@ -30,10 +30,11 @@ import { ulid } from '../persistence/ulid';
  * Depends on SessionRegistry for conversation state and SessionRunCoordinator for execution.
  */
 export class RoundOperations {
+    private get host(): SessionHost { return this.registry.host; }
     private registry: SessionRegistry;
     private runs: SessionRunCoordinator;
 
-    constructor(registry: SessionRegistry, runs: SessionRunCoordinator) {
+    constructor(registry: SessionRegistry, runs: SessionRunCoordinator, private readonly promptHistory?: PromptHistoryService) {
         this.registry = registry;
         this.runs = runs;
     }
@@ -61,8 +62,8 @@ export class RoundOperations {
             );
         }
 
-        getPromptHistory()?.add(text, { agentId, sessionId }).catch((e) => {
-            log.warn('Failed to record prompt history', { error: e });
+        this.promptHistory?.add(text, { agentId, sessionId }).catch((e) => {
+            this.host.logger.warn('Failed to record prompt history', { error: e });
         });
 
         return this.runs.submit(
@@ -341,7 +342,7 @@ export class RoundOperations {
                     await roundLog.deleteRound(roundId);
                 }
             } catch (e) {
-                log.warn('Failed to delete round', { sessionId, roundId, role: session?.role, error: e });
+                this.host.logger.warn('Failed to delete round', { sessionId, roundId, role: session?.role, error: e });
             }
         }
 
@@ -380,9 +381,9 @@ export class RoundOperations {
                 try {
                     await roundLog.refs().delete(branchName);
                     result.deletedBranches.push(branchName);
-                    log.info('Orphaned branch cleaned up', { branchName });
+                    this.host.logger.info('Orphaned branch cleaned up', { branchName });
                 } catch (e) {
-                    log.warn('Failed to cleanup orphaned branch', { branchName, error: e });
+                    this.host.logger.warn('Failed to cleanup orphaned branch', { branchName, error: e });
                 }
             }
         }
@@ -409,7 +410,7 @@ export class RoundOperations {
                     }
                 } catch { orphaned.push(branchName); }
             }
-        } catch (e) { log.warn('Failed to check orphaned branches', { error: e }); }
+        } catch (e) { this.host.logger.warn('Failed to check orphaned branches', { error: e }); }
         return orphaned;
     }
 

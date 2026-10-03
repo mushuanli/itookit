@@ -9,3 +9,5 @@ export type * from './contracts/skill-types';
 export type * from './contracts/skill-service';
 export type * from './contracts/fs-skill-types';
 export type * from './contracts/sub-agent';
+
+export type * from './contracts/prompt';

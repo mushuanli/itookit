@@ -2,7 +2,7 @@
 
 
 import { SessionCommand, SessionGroup, type BranchTreeNode } from '@itookit/llm-session';
-import type { ICommandBus } from '@itookit/common';
+import type { ICommandBus } from '@itookit/llm-session/contracts';
 import { ChatNavItem, NavPanelData } from '../domain/ports/INavigationPresenter';
 import { BranchItem, CollapseStateMap } from '../domain/types';
 import { getPreviewText } from '../utils/textUtils';

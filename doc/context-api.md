@@ -16,7 +16,7 @@
 | `createContextGc` / `scheduleContextGc` | 引用标记、保留期、预算、定时维护 | [collector.ts](../packages/llm-context/src/gc/collector.ts)、[scheduler.ts](../packages/llm-context/src/gc/scheduler.ts) |
 | `ContextServiceResolver` | 按真实 Task/Session 获取服务 | [context-service.ts](../packages/app-core/src/runtime/context-service.ts) |
 
-`ChatMessage`、`ToolDefinition`、`ContextPlan`、`ContextSnapshot`、`ContextCompactionPolicy` 等类型以 Context 为唯一来源。common 与 llm-tasks 入口保留转发，原 llm-common 已删除；Session 的 Profile 文件存储仍由 adapter 负责。
+`ChatMessage`、`ToolDefinition`、`ContextPlan`、`ContextSnapshot`、`ContextCompactionPolicy` 等类型以 Context 为唯一来源。llm-tasks 入口保留相关类型转发，原 llm-common 与 common 的 LLM 转发均已删除；Session 的 Profile 文件存储仍由 adapter 负责。
 
 ## 持久执行
 
@@ -116,3 +116,5 @@ await runtime.contextGc?.collect();
 - [context-gc.test.ts](../packages/app-core/tests/context-gc.test.ts)：重启自动清理、写权限检查和已提交历史检索。
 
 CLI 的 22 个既有 SIGKILL 恢复用例也已通过；这不等同于覆盖 Context 发布协议的全部进程 kill-point 或各后端断电矩阵。CLI 非崩溃测试有两个既有路由/supervisor 场景失败，在临时关闭 v2 的 v1 对照中同样复现。
+
+`ContextEngineOptions` 可注入默认窗口与完整请求计量；`IContextEngine.measure` 将预算检查贯穿窗口、Notes 和摘要。`ContextServicePorts.engineOptions` 自动构造默认引擎，显式 engine 优先。计量器返回非负安全整数；默认是 UTF-8 字节估算。app-core 的 `contextEngineOptions` 同步用于真实摘要请求。

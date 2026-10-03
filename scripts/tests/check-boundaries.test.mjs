@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dependencyError, sourceErrors } from '../check-boundaries.mjs';
+import { dependencyError, manifestDependencyError, sourceErrors } from '../check-boundaries.mjs';
 
 const pkg = (name, host = false) => ({ name: '@itookit/' + name, dir: '/repo/' + (host ? 'apps/' : 'packages/') + name, host, exports: { '.': './src/index.ts', './style.css': './src/style.css' } });
 const core = pkg('app-core'), shell = pkg('app-shell'), vfs = pkg('vfs-ui'), host = pkg('web', true);
@@ -75,4 +75,37 @@ test('public LLM mechanisms reject host dependencies', () => {
     assert.equal(inspectDriver("import type { ChatMessage } from '@itookit/llm-context';").length, 0);
     assert.equal(inspectDriver("import { createContextService } from '@itookit/llm-context';").length, 1);
     assert.equal(inspectDriver("import { Client } from 'some-sdk';").length, 1);
+});
+
+
+test('common and shared UI cannot regain hidden LLM dependencies', () => {
+    const common = pkg('common'), ui = pkg('ui-common'), session = pkg('llm-session');
+    for (const source of [common, ui]) {
+        assert.match(dependencyError(source.name, session.name), /capability packages|generic ports/);
+        for (const expression of ["import type { ISession } from '@itookit/llm-session'",
+            "export * from '@itookit/llm-session'", "type Submission = import('@itookit/llm-session').Signal"])
+            assert.equal(sourceErrors(source, source.dir + '/src/index.ts', expression, [common, ui, session]).length, 1);
+    }
+    assert.equal(dependencyError(ui.name, common.name), undefined);
+    assert.equal(dependencyError(ui.name, '@itookit/vfs-core'), undefined);
+});
+
+test('kernel adapters cannot depend on the task, flow or session implementations', () => {
+    for (const name of ['llm-tasks', 'llm-flow', 'llm-session'])
+        assert.match(dependencyError('@itookit/kernel-adapters', '@itookit/' + name), /execution or conversation layers/);
+    assert.equal(dependencyError('@itookit/kernel-adapters', '@itookit/tools'), undefined);
+});
+
+
+test('published driver dependencies stay empty while development message types remain permitted', () => {
+    assert.match(manifestDependencyError('@itookit/driver-llm', '@itookit/llm-context'), /no runtime dependencies/);
+    assert.equal(dependencyError('@itookit/driver-llm', '@itookit/llm-context'), undefined);
+});
+
+test('optional settings may only load through the explicit settings or compatibility entry', () => {
+    const ui = pkg('llm-ui');
+    for (const statement of ["import '@itookit/llm-settings-ui'", "import('./settings')", "export * from './settings'"]) {
+        assert.match(inspect(ui, statement, ui.dir + '/src/chat.ts')[0], /optional settings/);
+        assert.equal(inspect(ui, statement, ui.dir + '/src/settings.ts').length, 0);
+    }
 });

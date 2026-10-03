@@ -13,3 +13,5 @@
 验证：`pnpm --filter @itookit/llm-context test`、`pnpm --filter @itookit/llm-context typecheck`、`pnpm --filter @itookit/llm-context build`。
 
 接口与存储说明见 [Context API](../../doc/context-api.md)，设计依据见 [模块设计](../../doc/design/context-module.md)。
+
+- `ContextEngineOptions` 注入窗口默认值与完整请求计量；服务后续预算校验经 `IContextEngine.measure`，不得绕回固定估算器。摘要请求在宿主使用同一计量。

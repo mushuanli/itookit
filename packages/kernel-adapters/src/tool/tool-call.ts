@@ -1,7 +1,7 @@
 // @file: kernel-adapters/src/tool/tool-call.ts
 // Shared helpers for normalising ToolCall across Anthropic and OpenAI formats.
 
-import type { ToolCall } from '@itookit/common';
+import type { ToolCall } from '@itookit/llm-context';
 import { generateId } from '@itookit/common';
 
 /** Extract tool name (handles both Anthropic `name` and OpenAI `function.name`). */

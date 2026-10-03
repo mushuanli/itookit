@@ -2,7 +2,7 @@
 //
 // ProviderManager — manages LLMProvider catalog (built-in + user custom).
 
-import type { LLMProvider } from '@itookit/common';
+import type { LLMProvider } from '@itookit/driver-llm/contracts';
 import type { IFileSystem } from '@itookit/vfs-core';
 import { LLM_PROVIDERS, MODEL_PRICING } from '../constants';
 import { loadPricingConfig, writePricingConfig, applyPricingToModel } from '../constants/pricing';
@@ -130,15 +130,15 @@ export class ProviderManager {
         return LLM_PROVIDERS;
     }
 
-    getPricingConfig(): import('@itookit/common').ModelPricingConfig {
+    getPricingConfig(): import('@itookit/kernel-adapters/contracts').ModelPricingConfig {
         return this._pricingConfig ?? { model_pricing: [] };
     }
 
-    getPricingDefaults(): import('@itookit/common').ModelPricingConfig {
+    getPricingDefaults(): import('@itookit/kernel-adapters/contracts').ModelPricingConfig {
         return { model_pricing: MODEL_PRICING };
     }
 
-    async writePricing(config: import('@itookit/common').ModelPricingConfig): Promise<void> {
+    async writePricing(config: import('@itookit/kernel-adapters/contracts').ModelPricingConfig): Promise<void> {
         await writePricingConfig(this.engine, config);
         this._pricingConfig = config;
         this.reloadProvidersFrom([...this._providers.values()].filter(p => !p.isBuiltin));

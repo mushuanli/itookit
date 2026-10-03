@@ -1,8 +1,5 @@
 // packages/common/src/index.ts
 
-// Legacy LLM exports forward their capability-owned contracts.
-export * from './llm-compat';
-
 // ── UI 契约已迁移至 @itookit/ui-common（IEditor/ISessionUI/EditorFactory 及 UI 组件）──
 
 // ── 日志 ──

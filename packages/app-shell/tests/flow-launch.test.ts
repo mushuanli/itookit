@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ICommandBus } from '@itookit/common';
+import type { ICommandBus } from '@itookit/llm-session/contracts';
 import { FlowCommand, SessionCommand } from '@itookit/llm-session';
 import { FlowLauncher } from '../../llm-ui/src/flows/run-flow';
 import { createFlowContextMenuConfig } from '../../llm-ui/src/flows/context-menu';

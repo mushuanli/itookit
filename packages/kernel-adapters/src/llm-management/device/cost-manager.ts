@@ -2,7 +2,7 @@
 //
 // CostManager — wrapper around CostStore exposing recordCost / queryCosts.
 
-import type { ILLMManagementService } from '@itookit/common';
+import type { ILLMManagementService } from '@itookit/kernel-adapters/contracts';
 import { CostStore } from '../cost/cost-store';
 
 export class CostManager {
@@ -16,15 +16,15 @@ export class CostManager {
         dateFrom?: string;
         dateTo?: string;
         providerId?: string;
-    }): Promise<import('@itookit/common').CostRecord[]> {
+    }): Promise<import('@itookit/kernel-adapters/contracts').CostRecord[]> {
         return this.costStore.queryAll(filter);
     }
 
-    queryBySession(sessionId: string): Promise<import('@itookit/common').CostRecord[]> {
+    queryBySession(sessionId: string): Promise<import('@itookit/kernel-adapters/contracts').CostRecord[]> {
         return this.costStore.queryBySession(sessionId);
     }
 
-    queryAll(filter?: { providerId?: string; dateFrom?: string; dateTo?: string }): Promise<import('@itookit/common').CostRecord[]> {
+    queryAll(filter?: { providerId?: string; dateFrom?: string; dateTo?: string }): Promise<import('@itookit/kernel-adapters/contracts').CostRecord[]> {
         return this.costStore.queryAll(filter);
     }
 }

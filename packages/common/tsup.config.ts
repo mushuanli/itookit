@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  external: []  // Contract compatibility exports are bundled with common.
+  external: []  // Common has no runtime package dependencies.
 });

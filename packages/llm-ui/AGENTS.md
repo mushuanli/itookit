@@ -72,3 +72,6 @@ Skill 面板区分指令加载与 Agent 工具授权，配置入口通过 Agent 
 ChatInput 设置按对话、OCR、高级分组；高级项默认折叠。Skills 和授权管理不嵌入设置，显式 `/skills` 打开独立管理器。OCR 只选择连接并提供当前识别提示词编辑入口。
 
 项目新会话 UI 位于 `src/shell/drafts/`：编辑器只消费 ui-common 的 `SessionDraftControls`，输入序列化与保存队列独立。materialize 返回明确的编辑器/提交标识/恢复行为，不能修改宿主 options 传递状态；项目转正策略、持久化和接受判定不进入 UI。
+
+- `/chat` 是聊天/Flow 展示入口，`/settings` 承载可选设置编辑器；共享展示源码不得加载 llm-settings-ui。根入口仅为兼容聚合。
+- UI 经结构化 `SessionViewPort` 接收会话实例，默认工具列表由宿主注入，不从适配器读取产品默认值。Web/Tauri 不使用全局 SessionManager 装配聊天。

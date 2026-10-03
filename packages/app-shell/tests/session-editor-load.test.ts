@@ -10,7 +10,7 @@ import { Kernel } from '@itookit/durable-kernel';
 import { SessionRepository, createSessionManager, resetSessionManager, SessionCommand } from '@itookit/llm-session';
 import { SessionDirectoryStorageResolver } from '../../llm-session/src/persistence/session-directory-storage';
 import { LLMWorkspaceEditor } from '../../llm-ui/src/shell/LLMWorkspaceEditor';
-import type { ICommandBus } from '@itookit/common';
+import type { ICommandBus } from '@itookit/llm-session/contracts';
 
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => {

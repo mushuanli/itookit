@@ -1,8 +1,9 @@
 // @file: llm-settings-ui/editors/SystemPromptSettingsEditor.ts
 import { BaseSettingsEditor, Modal, Toast, SettingsValidationError, requestSettingsSave } from '@itookit/ui-common';
 import { editorResourceId } from '@itookit/ui-common';
-import { t, TOOLBOX_ICONS, escapeHTML, type SystemPromptDefinition, type PromptPreset } from '@itookit/common';
-import type { IAgentManagementService } from '@itookit/common';
+import { t, TOOLBOX_ICONS, escapeHTML } from '@itookit/common';
+import { type SystemPromptDefinition, type PromptPreset } from '@itookit/tools/contracts';
+import type { IAgentManagementService } from '@itookit/kernel-adapters/contracts';
 
 export class SystemPromptSettingsEditor extends BaseSettingsEditor<IAgentManagementService> {
     private prompts: SystemPromptDefinition[] = [];

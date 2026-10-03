@@ -7,7 +7,9 @@ import type {
     ExecutorOption, ConnectionOption,
     ChatOverrides, SkillInfo, FileSuggestion,
 } from '../../domain/types';
-import { t, randomUUID, type JsonValue, type ModelTier } from '@itookit/common';
+import { t, randomUUID } from '@itookit/common';
+import { type JsonValue } from '@itookit/llm-flow/contracts';
+import { type ModelTier } from '@itookit/driver-llm/contracts';
 import { ChatInputTemplates } from '../templates/ChatInputTemplates';
 import type { InputPlugin, InputPluginContext } from './plugins/InputPlugin';
 import { MentionPlugin } from './plugins/MentionPlugin';
@@ -1189,7 +1191,7 @@ export class ChatInput implements IChatInputPresenter {
     // ── Prompt Picker methods ─────────────────────────────────────────────────
 
     /** Current agent's preset prompts (empty when none configured). */
-    private getCurrentPrompts(): import('@itookit/common').PromptPreset[] {
+    private getCurrentPrompts(): import('@itookit/llm-tasks/contracts').PromptPreset[] {
         const agent = this.agents.find(a => a.id === this.config.agentId);
         return agent?.defaultPrompts ?? [];
     }

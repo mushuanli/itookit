@@ -1,4 +1,4 @@
-import type { IAgentConfigService } from '@itookit/llm-session/contracts';
+import type { IAgentConfigService } from '@itookit/kernel-adapters/contracts';
 import type { ConnectionOption } from '../domain/types';
 import { buildConnectionOptions } from './AgentProvider';
 

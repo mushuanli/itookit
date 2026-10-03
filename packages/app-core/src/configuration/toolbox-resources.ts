@@ -1,6 +1,12 @@
 import { saveToolGrant, type ToolGrantTarget } from './tool-grants';
 import { ToolboxDrawers, drawerKind, ungroupedId, type Drawer, type DrawerKind } from './toolbox-drawers';
-import { randomUUID, t, type SystemPromptDefinition, type MCPServer, type LLMProvider, type LLMConnection, type AgentDefinition, type LLMSkill, type FlowDraft, type ICommandBus } from '@itookit/common';
+import { randomUUID, t } from '@itookit/common';
+import { type SystemPromptDefinition } from '@itookit/llm-tasks/contracts';
+import { type MCPServer } from '@itookit/tools/mcp-contracts';
+import { type LLMProvider, type LLMConnection } from '@itookit/driver-llm/contracts';
+import { type AgentDefinition, type LLMSkill } from '@itookit/kernel-adapters/contracts';
+import { type ICommandBus } from '@itookit/llm-session/contracts';
+import { type FlowDraft } from '@itookit/llm-flow/contracts';
 import { FlowCommand, type VFSAgentService } from '@itookit/llm-session';
 import type { IFileSystem } from '@itookit/vfs-core';
 import { toolboxPath, type ToolboxKind } from './toolbox-identity';

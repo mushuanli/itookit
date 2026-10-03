@@ -4,11 +4,13 @@
 
 `src/` 分五组：`events/`（导航事件）、`i18n/`（`t()`/`setLocale`、zh-CN 与 en 资源、图标表）、`interfaces/`、`types/`、`utils/`。
 
-## LLM 兼容导出
+## 模块边界
 
-原 llm-common 已删除。本包通过 `src/llm-compat.ts` 直接转发原有 285 个具名导出，保留既有调用方兼容性。新代码从契约所属模块导入：driver-llm/contracts、llm-context、tools/contracts、tools/mcp-contracts、llm-tasks/contracts、llm-flow/contracts 或 llm-session/contracts。
+本包没有运行时包依赖，只提供通用工具、导航接口、日志、i18n 和图标元数据。llm-common 与原有 llm-compat.ts 已删除；LLM 类型和函数不再由本包导出。
 
-这仍是聚合兼容层，依赖上述能力包；删除 llm-common 不代表 common 已完全解除 LLM 依赖。不得在兼容文件增加新的协议定义或业务实现。
+调用方直接使用公开契约：driver-llm/contracts（通信）、llm-context（上下文）、tools/contracts 与 tools/mcp-contracts（工具、Prompt 与 MCP）、llm-tasks/contracts（执行）、llm-flow/contracts（编排）、llm-session/contracts（会话）、kernel-adapters/contracts（配置管理与定价）。不得通过重新转发引入这些能力包。
+
+通用哈希工具在本包独立实现；llm-context 为保持独立运行保留自身实现，算法兼容性由测试覆盖。
 
 ## VFS 核心协议（@itookit/vfs-core）
 

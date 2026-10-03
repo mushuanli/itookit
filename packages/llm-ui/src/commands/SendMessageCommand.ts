@@ -8,7 +8,7 @@ import { Toast } from '@itookit/ui-common';
 import { ErrorHandler } from '../utils/errorHandler';
 import type { ChatOverrides } from '../domain/types';
 
-import { createAgentSendIntent } from '@itookit/common';
+import { createAgentSendIntent } from '@itookit/llm-flow/contracts';
 
 export interface SendMessageParams {
     text: string;
@@ -17,7 +17,7 @@ export interface SendMessageParams {
     overrides?: ChatOverrides;
     origin?: SessionOrigin;
     historyPolicy?: HistoryPolicy;
-    submission?: import('@itookit/common').SendIntent['submission'];
+    submission?: import('@itookit/llm-flow/contracts').SendIntent['submission'];
 }
 
 export class SendMessageCommand extends Command<SendMessageParams, boolean> {

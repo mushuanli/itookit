@@ -224,7 +224,7 @@ export const ChatInputTemplates = {
      * 渲染单个 Skill 条目 — toggle switch 样式
      */
     renderSkillItem(skill: { id: string; name: string; description: string; loaded: boolean; enabled?: boolean; toolCount: number; authorizedToolCount?: number; capabilitiesManagedByFlow?: boolean; icon?: string;
-        drift?: import('@itookit/common').SkillVersionDrift; unversioned?: boolean }): string {
+        drift?: import('@itookit/tools/contracts').SkillVersionDrift; unversioned?: boolean }): string {
         const icon = skill.icon ? escapeHTML(skill.icon) : '⚡';
         const checked = skill.loaded ? 'checked' : '';
         const btnClass = skill.loaded ? 'llm-input__skill-btn--unload' : 'llm-input__skill-btn--load';

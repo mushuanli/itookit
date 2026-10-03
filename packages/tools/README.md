@@ -37,6 +37,6 @@ try {
 
 Node TTY 实现位于 `@itookit/device-tty`。其他环境可实现同一接口，无需继承 Node 驱动。
 
-本包依赖 Zod、vfs-core、llm-context 和 driver-llm，已移除 common/llm-common 依赖。历史 `common`、`llm-common` 入口仍转发 Tool/TTY、Skill 和子代理类型；新代码使用契约所属模块。
+本包依赖 Zod、vfs-core、llm-context 和 driver-llm，已移除 common/llm-common 依赖。`common` 不再转发 Tool/TTY、Skill 和子代理类型，原 `llm-common` 已删除；新代码使用契约所属模块。
 
 `tools/contracts` 也导出 `SkillDefinition`、`ISkillService`、Skill 版本/作用域契约及 `ISubAgentRouter`。`tools/mcp-contracts` 导出 MCPServer、MCPDiscovery、协议版本和 `mcpTimeoutMs`；不包含传输实现或 SDK。

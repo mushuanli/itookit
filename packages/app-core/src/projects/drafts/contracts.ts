@@ -15,7 +15,7 @@ export interface ProjectDraftComposer {
     readonly initialData: string;
     save(data: string): Promise<void>;
     clear(): Promise<void>;
-    prepare(): Promise<{ sessionId: string; resumeOnly: boolean; submission?: import('@itookit/common').SessionSubmission }>;
+    prepare(): Promise<{ sessionId: string; resumeOnly: boolean; submission?: import('@itookit/llm-flow/contracts').SessionSubmission }>;
 }
 
 /** Transaction adapter used by project policy; no VFS types cross this port. */

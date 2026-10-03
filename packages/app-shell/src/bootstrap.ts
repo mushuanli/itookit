@@ -1,3 +1,4 @@
+import { DEFAULT_HARNESS_TOOL_IDS } from '@itookit/kernel-adapters/contracts';
 import { RemoteFilesSettingsEditor } from './files/RemoteFilesSettingsEditor';
 import { createFileChatHandler } from './projects/file-chat';
 import { createOcrControls } from './configuration/ocr-controls';
@@ -136,7 +137,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const privilegedCommands = new PrivilegedCommandService(kernel.kernel, agentService);
     const sessionSkills = createSessionSkillControls(kernel.kernel, kernel.sessions);
     const llmFactory = options.ui.createChatEditor(agentService, {
-        sessionRepository, ocr, commandBus, kernel: kernel.kernel, privilegedCommands, sessionSkills,
+        defaultHarnessToolIds: DEFAULT_HARNESS_TOOL_IDS, sessionManager, sessionRepository, ocr, commandBus, kernel: kernel.kernel, privilegedCommands, sessionSkills,
     });
     const agentFactory = options.ui.createAgentEditor(agentService);
 

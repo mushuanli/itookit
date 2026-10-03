@@ -4,9 +4,7 @@
 
 import {generateShortUUID, t} from '@itookit/common';
 import { Modal } from '@itookit/ui-common';
-import type { LLMSkill,
-    IAgentManagementService
-} from '@itookit/common';
+import type { LLMSkill, IAgentManagementService } from '@itookit/kernel-adapters/contracts';
 import { Toast } from '@itookit/ui-common';
 import yaml from 'js-yaml';
 

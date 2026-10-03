@@ -5,7 +5,7 @@
 ## 定位与铁律
 
 - **平台无关**：`src/` 内不出现 `node:*`、DOM、`window`、`localStorage`；宿主差异一律通过注入传入（`ApplicationKernelPlatform`：`createSessionProcesses` / `skillSourceForSession` / `configureSession` / `configure`）。
-- **依赖只朝下**：只依赖 `llm-context`、`common`、`vfs-core`、`durable-kernel`、`kernel-adapters`、`llm-flow`、`llm-session`、`driver-llm`；不得依赖 `app-shell`、UI 包或任何 app。
+- **依赖只朝下**：只依赖 `llm-context`、`common`、`vfs-core`、`durable-kernel`、`kernel-adapters`、`llm-flow`、`llm-session`、`llm-tasks`、`tools`、`driver-llm`；不得依赖 `app-shell`、UI 包或任何 app。
 - **用例与装配分开**：应用策略放入 configuration/projects/session 等可单测服务；`runtime/` 负责接线与生命周期，不内联业务用例。宿主差异通过端口注入，DOM、导航与确认交互归 app-shell。
 - **显式公共出口**：`src/index.ts` 按需导出服务与契约，不使用 `export *`，内部实现与辅助函数不默认公开。`pnpm architecture:check` 检查生产源码与运行依赖的层次边界。
 - 无构建脚本：`main` 直接指向 `src/index.ts`，由宿主 app（web-app / tauri-app / cli）打包。
@@ -106,3 +106,6 @@ pnpm --filter @itookit/app-core typecheck
 - 项目收藏位于 `projects/favorites/`：contracts 定义存储/变更端口，policy 无 I/O，store 封装 SeqFile 事务，service 串行化同项目读写，lifecycle 适配 VFS 提交事件；UI 跳转展示策略留在 app-shell。
 
 - `browser-routes.ts` 是路由语义唯一来源；显式的 Session manifest `folder: null` 表示根目录，不回退到陈旧路由前缀。远程 provider 的实例方法必须保留 receiver，不能取出后无绑定调用。
+
+- 作文业务预设位于 `src/presets/essay-review.json`，以声明数据保存提示词与参数；`presets/default-flows.ts` 只负责复制和播种。产品文案不得混入通用 Session 机制。
+- `contextEngineOptions` 与 `agentResolution` 由应用装配透传；Conversation 系统的清理使用返回实例的 dispose，不重置进程单例。

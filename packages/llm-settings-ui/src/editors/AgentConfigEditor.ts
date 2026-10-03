@@ -9,7 +9,8 @@ import {
     Heading, t
 } from '@itookit/common';
 import { IEditor, EditorOptions, EditorEvent, EditorEventMap, EditorEventCallback, UnifiedSearchResult, CollapseExpandResult } from '@itookit/ui-common';
-import type { AgentType, AgentDefinition, IAgentManagementService, PromptPreset } from '@itookit/common';
+import type { AgentType, AgentDefinition, IAgentManagementService } from '@itookit/kernel-adapters/contracts';
+import type { PromptPreset } from '@itookit/tools/contracts';
 import { EventBus } from '@itookit/vfs-core';
 import { bindAgentCapabilities, readAgentCapabilities, renderAgentCapabilities } from './agent-capabilities';
 
@@ -20,7 +21,7 @@ import { bindAgentCapabilities, readAgentCapabilities, renderAgentCapabilities }
 export class AgentConfigEditor implements IEditor {
     private autoSave?: SettingsAutoSave;
     private rendering?: Promise<void>;
-    private promptLibrary: import('@itookit/common').SystemPromptDefinition[] = [];
+    private promptLibrary: import('@itookit/tools/contracts').SystemPromptDefinition[] = [];
     private container!: HTMLElement;
     private content: AgentDefinition | null = null;
     private _isDirty = false;

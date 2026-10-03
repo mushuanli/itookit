@@ -1,14 +1,4 @@
-import type {
-    FlowDraft,
-    FlowNodeId,
-    DagPluginManifest,
-    FlowEdgeDefinition,
-    FlowEdgeId,
-    FlowNodeDefinition,
-    FlowConnection,
-    FlowParameter,
-    FlowDefaults,
-} from '@itookit/common';
+import type { FlowDraft, FlowNodeId, DagPluginManifest, FlowEdgeDefinition, FlowEdgeId, FlowNodeDefinition, FlowConnection, FlowParameter, FlowDefaults } from '@itookit/llm-flow/contracts';
 
 export interface DeleteNodeResult {
     nodeId: FlowNodeId;
@@ -125,7 +115,7 @@ export class DagDraftController {
         parameters?: FlowParameter[];
         variables?: FlowDraft['variables'];
         defaults?: FlowDefaults;
-        runPolicy?: import('@itookit/common').FlowRunPolicy;
+        runPolicy?: import('@itookit/llm-flow/contracts').FlowRunPolicy;
     }): void {
         this.change(draft => {
             if (settings.outputs) { if (Object.keys(settings.outputs).length) draft.outputs = clone(settings.outputs); else delete draft.outputs; }

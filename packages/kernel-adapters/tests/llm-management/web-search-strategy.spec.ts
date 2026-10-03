@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveWebSearchStrategy } from '@itookit/common';
+import { resolveWebSearchStrategy } from '@itookit/kernel-adapters/contracts';
 
 describe('resolveWebSearchStrategy (web search 三态策略)', () => {
     it('uses builtin server-side search when provider supports it', () => {

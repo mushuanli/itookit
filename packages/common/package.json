@@ -11,21 +11,24 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
-    },
-    "./style.css": "./src/styles/index.css"
+    }
   },
   "publishConfig": {
     "access": "public",
-    "main": "./dist/index.js",
-    "module": "./dist/index.mjs",
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "exports": {
       ".": {
-        "types": "./dist/index.d.ts",
-        "import": "./dist/index.mjs",
-        "require": "./dist/index.js"
-      },
-      "./style.css": "./dist/index.css"
+        "import": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.js"
+        },
+        "require": {
+          "types": "./dist/index.d.cts",
+          "default": "./dist/index.cjs"
+        }
+      }
     }
   },
   "files": [
@@ -52,14 +55,7 @@
     "url": "https://github.com/mushuanli/itookit/issues"
   },
   "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/common#readme",
-  "dependencies": {
-    "@itookit/llm-context": "workspace:*",
-    "@itookit/tools": "workspace:*",
-    "@itookit/driver-llm": "workspace:*",
-    "@itookit/llm-session": "workspace:*",
-    "@itookit/llm-tasks": "workspace:*",
-    "@itookit/llm-flow": "workspace:*"
-  },
+  "dependencies": {},
   "devDependencies": {
     "cpx": "^1.5.0",
     "tsup": "^8.5.1",

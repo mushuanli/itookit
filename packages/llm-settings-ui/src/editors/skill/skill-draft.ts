@@ -1,5 +1,5 @@
 import { t } from '@itookit/common';
-import type { LLMSkill } from '@itookit/llm-session/contracts';
+import type { LLMSkill } from '@itookit/kernel-adapters/contracts';
 import type { SkillType } from '@itookit/tools/contracts';
 import { SettingsValidationError } from '@itookit/ui-common';
 import { readSkillSupportFields } from './SkillSupportFields';

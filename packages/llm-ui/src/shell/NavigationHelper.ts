@@ -7,7 +7,7 @@ import { SessionCommand, type SessionGroup } from '@itookit/llm-session';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { INavigationPresenter, NavPanelData } from '../domain/ports/INavigationPresenter';
 import type { IEditorEventBus } from '../domain/events';
-import type { ICommandBus } from '@itookit/common';
+import type { ICommandBus } from '@itookit/llm-session/contracts';
 
 import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { NavDataBuilder } from '../services/NavDataBuilder';

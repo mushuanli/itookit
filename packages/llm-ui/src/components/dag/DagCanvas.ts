@@ -1,4 +1,4 @@
-import type { DagPluginManifest, FlowDraft, FlowNodeId, FlowNodeDefinition } from '@itookit/common';
+import type { DagPluginManifest, FlowDraft, FlowNodeId, FlowNodeDefinition } from '@itookit/llm-flow/contracts';
 import { escapeHTML } from '@itookit/common';
 
 export interface DagCanvasOptions {

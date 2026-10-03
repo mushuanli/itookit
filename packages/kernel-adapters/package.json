@@ -16,6 +16,11 @@
       "types": "./src/llm-management/index.ts",
       "import": "./src/llm-management/index.ts",
       "default": "./src/llm-management/index.ts"
+    },
+    "./contracts": {
+      "types": "./src/contracts.ts",
+      "import": "./src/contracts.ts",
+      "default": "./src/contracts.ts"
     }
   },
   "publishConfig": {
@@ -33,6 +38,11 @@
         "types": "./dist/llm.d.ts",
         "import": "./dist/llm.js",
         "require": "./dist/llm.cjs"
+      },
+      "./contracts": {
+        "types": "./dist/contracts.d.ts",
+        "import": "./dist/contracts.js",
+        "require": "./dist/contracts.cjs"
       }
     },
     "imports": {

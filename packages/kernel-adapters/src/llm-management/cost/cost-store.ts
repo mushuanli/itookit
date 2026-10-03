@@ -4,7 +4,7 @@
 // 一个 session 切换 provider 产生独立记录（不同 key）。
 
 import type { IFileSystem } from '@itookit/vfs-core';
-import type { CostRecord } from '@itookit/common';
+import type { CostRecord } from '@itookit/kernel-adapters/contracts';
 import { COST_SEQ_PATH } from '../constants/pricing';
 
 const SEQ_FILE_NAME = 'cost.seq';

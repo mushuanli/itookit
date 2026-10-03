@@ -1,3 +1,4 @@
+import { seedDefaultFlows } from '../presets/default-flows';
 import { createRemoteExecutionProvider } from '../projects/execution/remote-provider';
 import { ProjectExecutionService } from '../projects/execution/service';
 import type { ProjectExecutionProvider } from '../projects/execution/contracts';
@@ -8,10 +9,11 @@ import { ModelConfigurationCommands } from '../configuration/model-commands';
 import { resumeSessionDeletions } from './resume-session-deletions';
 import type { IStorageBackend, MountOptions } from '@itookit/vfs-core';
 import { LLMDeviceDriver, type CodexAppServerTransport } from '@itookit/kernel-adapters/llm';
-import { t, traceBoot, type ILLMLogger } from '@itookit/common';
+import { t, traceBoot, createModuleLogger } from '@itookit/common';
+import { type ILLMLogger } from '@itookit/driver-llm/contracts';
 import {
     SessionRepository, SessionDirectoryStorageResolver,
-    VFSAgentService, FlowEngine, FlowDefinitionStore, seedDefaultFlows,
+    VFSAgentService, FlowEngine, FlowDefinitionStore,
 } from '@itookit/llm-session';
 import { createKernelRuntime, type HeadlessKernelRuntime, type CreateKernelRuntimeOptions } from './create-kernel-runtime';
 import { ProjectService } from '../projects/project-service';
@@ -24,7 +26,7 @@ import { acquireSessionProcessContext, type SessionProcessFactory } from '../vfs
 import { workspaceRoot } from '../session/workspace-paths';
 import { SessionLeaseStore, type SessionOwnerKind } from '../kernel/session-lease';
 import { recoverSessionsWithLeases } from './session-recovery';
-import { createConversationSystem, disposeConversationSystem } from './conversation-system';
+import { createConversationSystem } from './conversation-system';
 import { createInfrastructure } from './infrastructure';
 import { syncSkillsToKernel } from '../kernel/sync-skills';
 
@@ -73,6 +75,8 @@ export interface ApplicationRuntime {
 }
 
 export interface ApplicationRuntimeOptions {
+    contextEngineOptions?: CreateKernelRuntimeOptions['contextEngineOptions'];
+    agentResolution?: import('@itookit/llm-session').AgentResolutionPolicy;
     backend: IStorageBackend;
     additionalMounts?: Array<{ path: string; backend: IStorageBackend; options?: MountOptions }>;
     directorySourceProvider?: DirectorySourceProvider;
@@ -111,7 +115,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         // ── 3. Core services ───────────────────────────────────────────────────────
 
         logStep(t('boot.coreServices'));
-        const agentService   = new VFSAgentService(await vfs.openFileSystem(workspaceRoot('agents')), llmDriver);
+        const agentService   = new VFSAgentService(await vfs.openFileSystem(workspaceRoot('agents')), llmDriver, { translate: t, logger: createModuleLogger('llm-conversation'), traceBoot });
         const configuration = new ModelConfigurationCommands(agentService);
         cleanupFns.push(() => configuration.dispose());
         const sessionRepository     = new SessionRepository(await vfs.openFileSystem('/'), async id => {
@@ -174,6 +178,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         let mayCollectContext = (_id: string): boolean => false;
         const kernel: HeadlessKernelRuntime = await traceBoot('createKernelRuntime', () => createKernelRuntime({
             systemFS,
+            contextEngineOptions: options.contextEngineOptions,
             contextGc: { canCollectSession: id => mayCollectContext(id) },
             llmDriver,
             storageResolver: new SessionDirectoryStorageResolver(systemFS),
@@ -273,12 +278,12 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         logStep(t('boot.llmEngine'));
         // Writes are only allowed while this host holds the Session's single-writer lease; the
         // gate acquires a lease on demand so a freshly created Session is writable immediately.
-        const { sessionManager, commandBus } = await traceBoot('initializeConversationSystem',
-            () => createConversationSystem({ vfs, systemFS, agentService, sessionRepository, flowEngine, kernel,
+        const { sessionManager, commandBus, dispose: disposeConversations } = await traceBoot('initializeConversationSystem',
+            () => createConversationSystem({ vfs, systemFS, agentResolution: options.agentResolution, agentService, sessionRepository, flowEngine, kernel,
                 ensureWritable: async sessionId => !await sessionRepository.isSessionDeletionPending(sessionId) && await recovery.acquireLater(sessionId),
                 flowWorkspaceManager: options.kernelPlatform?.flowWorkspaceManager }));
 
-        cleanupFns.push(() => disposeConversationSystem());
+        cleanupFns.push(disposeConversations);
 
         const acquireSessionLease = (sessionId: string): Promise<boolean> => recovery.acquireLater(sessionId);
         const unsubscribeSessionLease = sessionManager.onGlobalEvent(event => {

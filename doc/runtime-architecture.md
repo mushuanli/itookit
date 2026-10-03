@@ -284,10 +284,21 @@ Web 与 Tauri 共用工作台导航、创建对话框和小屏幕列表／内容
 
 ## 公共通信与宿主适配
 
-`driver-llm` 发布产物不依赖内部包；消息声明从 llm-context 内联，通信类型和纯协议函数通过 `/contracts` 提供。`kernel-adapters/llm` 保留 LLMDeviceDriver、LLM_IOCTL、VFS 配置和 MCP/Skill 管理，app-core、CLI 与设置页通过该入口接入。旧 device-llm 已拆分；llm-tasks、llm-flow、llm-session 和 llm-ui 的整体重组尚未实施。
+`driver-llm` 发布产物不依赖内部包；消息声明从 llm-context 内联，通信类型和纯协议函数通过 `/contracts` 提供。`kernel-adapters/llm` 保留 LLMDeviceDriver、LLM_IOCTL、VFS 配置和 MCP/Skill 管理，app-core、CLI 与设置页通过该入口接入。旧 device-llm 已拆分；执行、编排、会话契约已按能力归属整理。
 
-Tool/TTY 执行契约已归 tools/contracts，ILLMService 归 driver-llm/contracts；common/llm-compat.ts 兼容转发这些契约。tools 不再依赖 common/llm-common，Skill 与子代理工具只接收最小操作端口。Agent 管理和 Conversation/Session 契约也已归 llm-session/contracts，原 llm-common 已删除，common/llm-compat.ts 直接保留具名兼容转发。
+Tool/TTY 执行契约归 tools/contracts，模型通信与流式事件归 driver-llm/contracts；Agent、连接管理、恢复和定价归 kernel-adapters/contracts，入口只包含契约与纯策略，不初始化适配器。适配层不依赖 Tasks、Flow 或 Session。Prompt 库 DTO 归 tools/contracts，任务配置保留类型转发。
 
-执行事件与节点配置现归 llm-tasks/contracts；Flow/DAG、委派、模板与 Hook 现归 llm-flow/contracts。两个实现包均已解除 common/llm-common 依赖，旧类型/函数入口由 common/llm-compat.ts 兼容转发。Skill、子代理和 MCP 的公共能力契约归 tools；传输和持久化实现仍留在宿主适配层。
+执行事件与节点配置归 llm-tasks/contracts；Flow/DAG、委派、模板与 Hook 归 llm-flow/contracts；会话、命令/扩展归 llm-session/contracts。各消费者从所属能力模块导入。原 llm-common 与 common/llm-compat.ts 已删除，common 不再导出 LLM 类型或函数，也不依赖任何能力包。通用哈希工具在 common 独立实现，保持与 Context 的持久指纹兼容。
 
-Session 实现现已解除 common/llm-common 依赖。进程级 `configureSessionHostPorts` 注入翻译、日志与启动追踪；app-core 在创建 Conversation 系统前接入已有公共实现，关闭时重置。独立调用默认英文提示、空日志与直接启动操作。会话、命令/扩展、配置管理和纯策略契约统一在 llm-session/contracts；原 llm-common 已删除，common/llm-compat.ts 保留原有 285 个具名导出。
+Session 实现不依赖 common。`ConversationSystemOptions.hostPorts` 注入实例级翻译、日志与启动追踪；工厂创建独立 SessionManager 和提示词历史，返回幂等异步 dispose。app-core 与 UI 传递返回的实例，关闭不修改其他运行时。独立调用默认英文提示、空日志与直接启动操作。通用 UI 使用 `EditorOptions<TSubmission>` 与 `SessionDraftControls<TSubmission>` 传递宿主提交数据，无 Flow 或 Session 依赖；LLM 编辑器适配层指定 SessionSubmission。
+
+Session 的发布构建内联 kernel-adapters/contracts 的纯配置函数和类型声明；适配器包只作为开发依赖，不新增发布运行时依赖。
+
+
+公共机制与产品策略：作文评审的提示词、评分阈值和默认流程位于 `packages/app-core/src/presets/essay-review.json`，播种位于 `packages/app-core/src/presets/default-flows.ts`。Session 不再持有或导出这些内容。`agentResolution.missingAgent` 可由宿主拒绝或提供回退；精确身份解析和授权约束保持严格。
+
+Context 的 `ContextEngineOptions` 注入默认窗口、输入预算和完整请求计量；服务与宿主摘要请求共同使用该计量。默认采用 UTF-8 字节估算；`IContextEngine` 可替换窗口选择和预算计量。应用通过 `contextEngineOptions` 接入。
+
+LLM UI 分为 `/chat` 与 `/settings` 子入口；设置包是可选 peer，聊天不加载设置实现。会话实例经 `SessionViewPort` 注入，模型配置经公共接口注入，默认工具展示由宿主列表驱动。当前仍消费 Session/Flow 契约及仓储；Kernel 仍以 VFS 存储为公共依赖，这些边界未宣称已消除。
+
+本轮验证：全仓类型检查、库/Web 构建、Driver tarball 独立 ESM/CJS 消费及无依赖安装通过；app-core 231 项、CLI 185 项通过，Context/Session/UI 包回归通过。app-shell 全量中 471 项通过，4 项原生恢复用例在正常权限下重跑通过；其余 4 项失败在提交前基线 `70f9947c` 的独立源码快照复现（提示词复制清理、外部草稿刷新两项、已删除 saveCurrent 的旧用例），不将其记为通过。

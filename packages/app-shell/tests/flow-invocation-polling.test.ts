@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import type { ICommandBus } from '@itookit/common';
+import type { ICommandBus } from '@itookit/llm-session/contracts';
 import { FlowCommand, FlowInvocationCommand } from '@itookit/llm-session';
 import { InvocationPanel } from '../../llm-ui/src/flows/InvocationPanel';
 

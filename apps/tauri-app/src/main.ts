@@ -289,18 +289,18 @@ async function bootstrap(): Promise<void> {
     // Session Bash runs through the platform directory-grant namespace.
     const ui: AppUI = {
         createChatEditor: (agents, deps) => lazyEditorFactory(async () =>
-            (await import('@itookit/llm-ui')).createLLMFactory(agents, {
+            (await import('@itookit/llm-ui/chat')).createLLMFactory(agents, {
                 ...deps, onLoadMetrics: metrics => { void recordDiagnostic('session.load.ready', metrics); },
             })),
         createAgentEditor: agents => lazyEditorFactory(async () =>
-            (await import('@itookit/llm-ui')).createAgentEditorFactory(agents)),
+            (await import('@itookit/llm-ui/settings')).createAgentEditorFactory(agents)),
         createFlowEditor: deps => lazyEditorFactory(async () =>
-            (await import('@itookit/llm-ui')).createFlowsEditorFactory(deps)),
+            (await import('@itookit/llm-ui/chat')).createFlowsEditorFactory(deps)),
         createFlowContextMenu: createFlowContextMenuConfig,
         installFlowLibrary,
         restoreFlowLibrary,
         createSkillEditor: agents => lazyEditorFactory(async () =>
-            (await import('@itookit/llm-ui')).createSkillsEditorFactory(agents)),
+            (await import('@itookit/llm-ui/settings')).createSkillsEditorFactory(agents)),
         createAIContextMenu: createAIContextMenuConfig,
         llmUiEditors: {
             ProviderSettingsEditor,

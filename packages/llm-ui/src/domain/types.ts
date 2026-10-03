@@ -1,10 +1,12 @@
 // @file: llm-ui/domain/types.ts
 
-import type { JsonValue, ModelTier, PromptPreset } from '@itookit/common';
+import type { JsonValue } from '@itookit/llm-flow/contracts';
+import type { ModelTier } from '@itookit/driver-llm/contracts';
+import type { PromptPreset } from '@itookit/llm-tasks/contracts';
 import type { SessionTokenUsage } from '@itookit/llm-session';
 import type { ChatExecutionMode } from '@itookit/llm-tasks/contracts';
 
-export type { PromptPreset } from '@itookit/common';
+export type { PromptPreset } from '@itookit/llm-tasks/contracts';
 
 // ============================================================
 // 节点操作
@@ -218,8 +220,8 @@ export interface SkillInvocation {
 export interface SkillInfo {
     versionDigest?: string;
     unversioned?: boolean;
-    versionPolicy?: import('@itookit/common').SkillVersionPolicy;
-    drift?: import('@itookit/common').SkillVersionDrift;
+    versionPolicy?: import('@itookit/tools/contracts').SkillVersionPolicy;
+    drift?: import('@itookit/tools/contracts').SkillVersionDrift;
     id: string;
     name: string;
     description: string;

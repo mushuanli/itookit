@@ -1,4 +1,3 @@
-import { t } from '../utils/host-ports';
 import { type Signal } from '../contracts';
 import { type ToolDefinition } from '@itookit/llm-context';
 import type { Kernel } from '@itookit/durable-kernel';
@@ -20,7 +19,7 @@ import { FlowDefinitionStore, type FlowStore } from '@itookit/llm-flow';
 import { RoundLog } from '../persistence/round-log';
 import { flowToDag, hasValidationErrors, validateFlowParameters } from '@itookit/llm-flow';
 import { formatErrorMessage } from '../utils/error-formatter';
-import { log } from '../utils/logger';
+import { createSessionHost, type SessionHost } from '../utils/host-ports';
 import { AgentResolver } from './agent-resolver';
 import { AttachmentProcessor } from './attachment-processor';
 import { ConversationRunCoordinator } from './conversation-run-coordinator';
@@ -71,8 +70,10 @@ export class SessionRunCoordinator {
         resolveSessionContext?: (sessionId: string, userMessage: string) => Promise<{ projectInstructions: string; skillInstructions: string; skillIndex: string }>,
         workspaceManager?: import('./conversation-run-coordinator').ConversationRunCoordinatorOptions['workspaceManager'],
         resolveHarnessToolIds?: (sessionId: string) => Promise<string[]>,
+        private readonly host: SessionHost = createSessionHost(),
     ) {
         this.runs = new ConversationRunCoordinator({
+            hostPorts: host,
             engine,
             eventBus,
             kernel,
@@ -96,7 +97,7 @@ export class SessionRunCoordinator {
         }
         if (status.phase === 'closed' || status.phase === 'closing') {
             throw new ConversationError(ConversationErrorCode.SESSION_INVALID,
-                t(status.phase === 'closed' ? 'flow.rerun.sessionClosed' : 'flow.rerun.sessionClosing'));
+                this.host.translate(status.phase === 'closed' ? 'flow.rerun.sessionClosed' : 'flow.rerun.sessionClosing'));
         }
     }
 
@@ -116,7 +117,7 @@ export class SessionRunCoordinator {
 
     respondToSignal(sessionId: string, signal: Signal): void {
         if (this.runs.signal(sessionId, signal)) return;
-        log.warn('No waiting run for signal', { sessionId, signalType: signal.type });
+        this.host.logger.warn('No waiting run for signal', { sessionId, signalType: signal.type });
     }
 
     abort(sessionId: string): void {
@@ -191,7 +192,7 @@ export class SessionRunCoordinator {
     }
 
     private async createTask(input: TaskInput): Promise<ExecutionTask> {
-        input = await resolveSessionExecutionMode(this.engine, input);
+        input = await resolveSessionExecutionMode(this.engine, input, this.host.translate);
         const roundLog = this.logs.get(input.sessionId)
             ?? new RoundLog(this.engine, input.sessionId);
         this.logs.set(input.sessionId, roundLog);
@@ -326,7 +327,7 @@ export class SessionRunCoordinator {
         this.active.delete(task.sessionId);
         runtime.currentTaskId = undefined;
         this.callbacks.onStatusChange(task.sessionId, 'failed');
-        log.error('Session context not found', { sessionId: task.sessionId });
+        this.host.logger.error('Session context not found', { sessionId: task.sessionId });
     }
 }
 

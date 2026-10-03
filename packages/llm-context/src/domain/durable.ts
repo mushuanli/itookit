@@ -68,7 +68,20 @@ export interface IContextService extends IContextReader {
     request(cursor: ContextCursor): Promise<ContextRequestSnapshot>;
     admitOutput(output: string, maxBytes?: number): Promise<{ output: string; contentRef?: ContentRef }>;
 }
+export interface ContextBudget {
+    inputTokens: number;
+    maxInputTokens: number;
+    estimated: boolean;
+}
+export interface ContextEngineOptions {
+    defaultPolicy?: ContextCompactionPolicy;
+    /** Count the complete provider request, including envelopes and tool schemas. */
+    estimateTokens?: (request: Record<string, unknown>) => number;
+    /** False only when the injected counter is exact for the selected provider. */
+    estimated?: boolean;
+}
 export interface IContextEngine {
+    measure?(request: Record<string, unknown>, policy?: ContextCompactionPolicy): ContextBudget;
     select(messages: ChatMessage[], request: Record<string, unknown>, policy?: ContextCompactionPolicy): WindowSelection;
 }
 export interface WindowSelection {
@@ -80,5 +93,6 @@ export interface ContextServicePorts {
     content: IContextContentStore;
     records: IContextRecordReader;
     engine?: IContextEngine;
+    engineOptions?: ContextEngineOptions;
     summarize?: (messages: ChatMessage[], maxTokens: number) => Promise<string>;
 }

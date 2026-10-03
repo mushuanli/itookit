@@ -1,4 +1,5 @@
-import { escapeHTML, t, type FlowActor } from '@itookit/common';
+import { escapeHTML, t } from '@itookit/common';
+import { type FlowActor } from '@itookit/llm-session/contracts';
 import type { ExecutionNode } from '@itookit/llm-session';
 
 /** Role is presentation; provenance identifies the actual executor or tool owner. */

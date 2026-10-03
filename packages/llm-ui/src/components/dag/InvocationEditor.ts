@@ -1,4 +1,5 @@
-import { escapeHTML, t, type FlowDraft, type FlowNodeDefinition } from '@itookit/common';
+import { escapeHTML, t } from '@itookit/common';
+import { type FlowDraft, type FlowNodeDefinition } from '@itookit/llm-flow/contracts';
 import { renderFlowTemplate } from '@itookit/llm-flow/contracts';
 
 /** Authoring helpers only; neither preview nor variable insertion invokes a model. */

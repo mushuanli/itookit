@@ -1,9 +1,9 @@
+import { createSessionHost, type SessionHost, type SessionHostPorts } from '../utils/host-ports';
 import { createContextAssembler, type IContextAssembler, type RetrievedMemoryEntry } from '@itookit/llm-context';
 import { FlowHistory } from './flow-history';
 import { CLIENT_WEB_SEARCH_TOOL, directExecutionMode, directToolIds } from './direct-execution-mode';
 import { DEFAULT_AGENT_MAX_EXCHANGES } from '@itookit/llm-tasks/contracts';
 import { formatFlowOutput } from '@itookit/llm-flow/contracts';
-import { t } from '../utils/host-ports';
 import type { AgentEvent, ToolCallInfo } from '@itookit/llm-tasks/contracts';
 import type { Artifact, DagPluginCatalog, DagRunSpec, DagNodeDefinition } from '@itookit/llm-flow/contracts';
 import type { ChatMessage, ContextSnapshot, ContextPlan, ToolDefinition } from '@itookit/llm-context';
@@ -50,6 +50,7 @@ export interface ConversationExecution {
 }
 
 export interface ConversationRunCoordinatorOptions {
+    hostPorts?: SessionHostPorts;
     engine: ISessionRepository;
     eventBus: SessionEventBus;
     kernel: Kernel;
@@ -89,7 +90,8 @@ export class ConversationRunCoordinator {
     /** Session id → live root + task membership; DAG nodes can be added after submit. */
     private readonly active = new Map<string, RunExecution>();
 
-    constructor(private readonly options: ConversationRunCoordinatorOptions) {}
+    private readonly host: SessionHost;
+    constructor(private readonly options: ConversationRunCoordinatorOptions) { this.host = createSessionHost(options.hostPorts); }
 
     async executeDirect(execution: ConversationExecution): Promise<void> {
         if (directExecutionMode(execution.task.input) === 'agent' && execution.config.capabilityPolicy?.toolIds === undefined) {
@@ -155,7 +157,7 @@ export class ConversationRunCoordinator {
         this.active.set(execution.task.sessionId, { root: handle, tasks: submission.tasks });
         let roundStarted = false;
         const streamedOutput: { output: boolean; history?: FlowHistory } = { output: false };
-        if (execution.task.input.sendIntent?.execution.kind === 'flow') streamedOutput.history = new FlowHistory(execution, this.options.eventBus);
+        if (execution.task.input.sendIntent?.execution.kind === 'flow') streamedOutput.history = new FlowHistory(execution, this.options.eventBus, this.host);
         const toolCalls: CapturedToolCall[] = [];
         try {
             await this.startRound(execution, location, handle.id);
@@ -266,7 +268,7 @@ export class ConversationRunCoordinator {
             ?? { definitions: [], externalIds: [] };
         const spec = directTaskSpec(execution, snapshot, catalog, skills);
         if (directExecutionMode(execution.task.input) === 'agent' && !spec.input.tools?.length) {
-            throw new Error(t('chatInput.executionMode.noTools'));
+            throw new Error(this.host.translate('chatInput.executionMode.noTools'));
         }
         if (this.options.kernel.programs.has(spec.program.kind, '2')) spec.program.version = '2';
         const run = await submitRun({

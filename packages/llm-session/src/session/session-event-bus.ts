@@ -2,7 +2,7 @@
 
 import { EventBus } from '@itookit/vfs-core';
 import { SessionEvent, SessionEventEnvelope, RegistryEvent } from '../core/types';
-import { log } from '../utils/logger';
+import { createSessionHost, type SessionHost } from '../utils/host-ports';
 
 // ── Type maps for the two tracks ─────────────────────────────────────────────
 
@@ -32,6 +32,7 @@ type RegistryEventMap = {
  *   removeSession → channel closed (subsequent emits silently dropped)
  */
 export class SessionEventBus {
+    constructor(readonly host: SessionHost = createSessionHost()) {}
     private readonly sessionBus = new EventBus<SessionEventMap>();
     private readonly globalBus  = new EventBus<RegistryEventMap>();
 
@@ -43,7 +44,7 @@ export class SessionEventBus {
 
     removeSession(sessionId: string): void {
         this.sessionBus.closeChannel(sessionId);
-        log.debug('Session removed from event bus', { sessionId });
+        this.host.logger.debug('Session removed from event bus', { sessionId });
     }
 
     hasSession(sessionId: string): boolean {
@@ -64,7 +65,7 @@ export class SessionEventBus {
                 // so the handler always receives the SessionEventEnvelope shape.
                 handler({ type: meta.type, payload } as SessionEventEnvelope);
             } catch (err) {
-                log.error('Session event listener error', { sessionId, eventType: meta.type, err });
+                this.host.logger.error('Session event listener error', { sessionId, eventType: meta.type, err });
             }
         });
     }
@@ -77,7 +78,7 @@ export class SessionEventBus {
      */
     emitSession(sessionId: string, event: SessionEvent): void {
         if (!this.sessionBus.hasChannel(sessionId)) {
-            log.debug('Event dropped (session not registered)', { sessionId, eventType: event.type });
+            this.host.logger.debug('Event dropped (session not registered)', { sessionId, eventType: event.type });
             return;
         }
 
@@ -116,7 +117,7 @@ export class SessionEventBus {
             try {
                 handler({ type: meta.type, payload } as RegistryEvent);
             } catch (err) {
-                log.error('Global event listener error', { eventType: meta.type, err });
+                this.host.logger.error('Global event listener error', { eventType: meta.type, err });
             }
         });
     }

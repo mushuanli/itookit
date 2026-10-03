@@ -79,7 +79,7 @@ pnpm --filter @itookit/<pkg> typecheck
 LLMProvider (云厂商) → LLMConnection (tier→model) → AgentDefinition (system prompt)
 ```
 
-- 关键类型: `llm-session/src/contracts/` + `llm-session/src/contracts/`（common re-export）
+- 关键类型: `driver-llm/src/types/`（通信）、`llm-context/src/domain/`（消息）、`kernel-adapters/src/llm-management/contracts/`（配置）、`llm-session/src/contracts/`（会话）；从各包公开入口导入
 - Provider 实现: `driver-llm/src/providers/`
 - 联网搜索: `resolveWebSearchStrategy` → `WebSearchMode`（详见 [联网搜索](./doc/web-search.md)）
 - 详见 [架构设计](./doc/architecture.md)

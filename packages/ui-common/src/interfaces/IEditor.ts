@@ -13,7 +13,7 @@ export type EditorTarget =
     | { kind: 'entity'; entityType: 'agent' | 'skill' | 'flow' | 'mcp' | 'tool' | 'provider' | 'connection' | 'system-prompt'; id: string };
 
 /** Validate an explicitly supplied target against its granted file context. */
-export function normalizeEditorOptions(options: EditorOptions): EditorOptions {
+export function normalizeEditorOptions<TSubmission>(options: EditorOptions<TSubmission>): EditorOptions<TSubmission> {
     const fs = options.files?.fs;
     if (options.target?.kind === 'file' && options.target.namespaceId && fs && options.target.namespaceId !== fs.viewId) throw new Error('Editor namespace does not match its file context');
     if (options.target && 'sessionId' in options.target && options.target.sessionId && options.files?.sessionId && options.target.sessionId !== options.files.sessionId) throw new Error('Editor Session does not match its file context');
@@ -99,11 +99,11 @@ export interface EditorHostContext {
 }
 
 // ✨ [重构] 提升 fs 和 nodeId 为核心配置
-export interface EditorOptions {
+export interface EditorOptions<TSubmission = unknown> {
     /** A project draft is separate from Session history until first submission. */
-    sessionDraft?: import('./SessionDraftControls').SessionDraftControls;
+    sessionDraft?: import('./SessionDraftControls').SessionDraftControls<TSubmission>;
     /** Resolve optional host correlation for a user-initiated submission. */
-    resolveSubmission?(): Promise<import('@itookit/common').SessionSubmission | undefined>;
+    resolveSubmission?(): Promise<TSubmission | undefined>;
 
     /** Cancels view construction and preview work, never persistence. */
     signal?: AbortSignal;

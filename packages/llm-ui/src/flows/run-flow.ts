@@ -1,5 +1,7 @@
 import { flowConnectionSelection } from './connection-selection';
-import { t, type FlowDraft, type FlowRevision, type ICommandBus, type JsonValue } from '@itookit/common';
+import { t } from '@itookit/common';
+import { type FlowDraft, type FlowRevision, type JsonValue } from '@itookit/llm-flow/contracts';
+import { type ICommandBus } from '@itookit/llm-session/contracts';
 import { FlowCommand, SessionCommand } from '@itookit/llm-session';
 import { promptFlowParameters } from '../components/FlowParameterForm';
 

@@ -1,4 +1,6 @@
-import { t, resolveModelId, type ModelTier, type LLMProvider, type IAgentManagementService, type ILLMService, type ConnectionMeta } from '@itookit/common';
+import { t } from '@itookit/common';
+import { resolveModelId, type IAgentManagementService } from '@itookit/kernel-adapters/contracts';
+import { type ModelTier, type LLMProvider, type ILLMService, type ConnectionMeta } from '@itookit/driver-llm/contracts';
 import type { IFileSystem } from '@itookit/vfs-core';
 
 export interface OcrSettings { connectionId?: string; systemPromptId: string }

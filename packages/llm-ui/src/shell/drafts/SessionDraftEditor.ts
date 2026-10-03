@@ -27,7 +27,7 @@ export class SessionDraftEditor extends IEditor {
         if (!this.saves.dirty) return;
         event.preventDefault(); event.returnValue = '';
     };
-    constructor(private container: HTMLElement, private service: Parameters<typeof buildExecutorOptions>[0], private options: EditorOptions,
+    constructor(private container: HTMLElement, private service: Parameters<typeof buildExecutorOptions>[0], private options: EditorOptions<import('@itookit/llm-flow/contracts').SessionSubmission>,
         private readonly ocr?: OcrControls) { super(); this.initialData = options.sessionDraft?.initialData; this.codec = new DraftDataCodec(options.sessionDraft?.attachments); }
     async init(container: HTMLElement): Promise<void> { this.container = container; await this.render(); }
     async render(): Promise<void> {
