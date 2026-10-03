@@ -1,7 +1,7 @@
 // @file: llm-ui/services/BranchService.ts
 
 
-import { SessionCommand, type SessionGroup } from '@itookit/llm-session';
+import { SessionCommand, type SessionGroup } from '@itookit/llm-session/contracts';
 import type { BranchItem } from '../domain/types';
 import type { IBranchStore } from '../domain/ports/IBranchStore';
 import type { ICommandBus } from '@itookit/llm-session/contracts';

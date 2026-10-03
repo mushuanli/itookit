@@ -2,7 +2,7 @@
 
 import { t } from '@itookit/common';
 import type { IStatusPresenter } from '../../domain/ports/IStatusPresenter';
-import type { SessionSnapshot } from '@itookit/llm-session';
+import type { SessionSnapshot } from '@itookit/llm-session/contracts';
 import type { DOMCache } from '../common';
 
 interface StatusInfo {

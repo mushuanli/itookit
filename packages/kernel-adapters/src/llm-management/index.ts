@@ -193,7 +193,8 @@ export { NoopLLMLogger } from '@itookit/driver-llm';
 // 设备插件 (IDeviceDriver 实现)
 // ============================================
 
-export { LLMDeviceDriver, LLM_IOCTL } from './device/llm-device-driver';
+export { LLMDeviceDriver } from './legacy-device-driver';
+export { LLM_IOCTL } from './contracts/device';
 export type { LLMIoctlCommand, LLMDeviceOpenOptions, IShellRunner, LLMDeviceDriverOptions } from './device/llm-device-driver';
 // ILLMManagementService 统一从 @itookit/common 导入
 

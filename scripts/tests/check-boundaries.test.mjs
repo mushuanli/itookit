@@ -109,3 +109,12 @@ test('optional settings may only load through the explicit settings or compatibi
         assert.equal(inspect(ui, statement, ui.dir + '/src/settings.ts').length, 0);
     }
 });
+
+test('chat uses session contracts and isolates singleton compatibility', () => {
+    const ui = pkg('llm-ui');
+    const session = { ...pkg('llm-session'), exports: { '.': './src/index.ts', './contracts': './src/contracts.ts' } };
+    const check = (file, expression) => sourceErrors(ui, ui.dir + '/src/' + file, expression, [ui, session]);
+    assert.match(check('chat.ts', "import { getSessionManager } from '@itookit/llm-session'")[0], /compatibility entry/);
+    assert.equal(check('chat.ts', "import { SessionCommand } from '@itookit/llm-session/contracts'").length, 0);
+    assert.equal(check('index.ts', "import { getSessionManager } from '@itookit/llm-session'").length, 0);
+});

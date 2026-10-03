@@ -4,4 +4,4 @@ export type {
     IPrivilegedCommandService,
     PlanCommandRequest,
     ExecCommandRequest,
-} from '@itookit/llm-session';
+} from '@itookit/llm-session/contracts';

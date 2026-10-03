@@ -3,7 +3,7 @@
 import type { JsonValue } from '@itookit/llm-flow/contracts';
 import type { ModelTier } from '@itookit/driver-llm/contracts';
 import type { PromptPreset } from '@itookit/llm-tasks/contracts';
-import type { SessionTokenUsage } from '@itookit/llm-session';
+import type { SessionTokenUsage } from '@itookit/llm-session/contracts';
 import type { ChatExecutionMode } from '@itookit/llm-tasks/contracts';
 
 export type { PromptPreset } from '@itookit/llm-tasks/contracts';

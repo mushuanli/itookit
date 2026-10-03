@@ -1,6 +1,6 @@
 // @file: llm-ui/components/history/SessionRenderer.ts
 
-import { SessionGroup, ExecutionNode } from '@itookit/llm-session';
+import { SessionGroup, ExecutionNode } from '@itookit/llm-session/contracts';
 import { MDxController } from '../mdx/MDxController';
 import { NodeRenderer } from './NodeRenderer';
 import { NodeTemplates } from '../templates/NodeTemplates';

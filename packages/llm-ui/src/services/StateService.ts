@@ -1,9 +1,6 @@
 // @file: llm-ui/services/StateService.ts
 
-import type {
-    ConversationUIState,
-    ISessionRepository,
-} from '@itookit/llm-session';
+import type { ConversationUIState, ISessionRepository } from '@itookit/llm-session/contracts';
 import type { ChatInputSettings } from '../domain/ports/IChatInputPresenter';
 import type { UIState } from '../domain/types';
 import { ErrorHandler } from '../utils/errorHandler';

@@ -3,7 +3,7 @@
 // Handles: viewport-aware session finding, scroll-to navigation, and the floating nav panel.
 
 
-import { SessionCommand, type SessionGroup } from '@itookit/llm-session';
+import { SessionCommand, type SessionGroup } from '@itookit/llm-session/contracts';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { INavigationPresenter, NavPanelData } from '../domain/ports/INavigationPresenter';
 import type { IEditorEventBus } from '../domain/events';

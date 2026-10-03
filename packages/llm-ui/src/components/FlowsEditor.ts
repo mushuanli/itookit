@@ -8,7 +8,7 @@ import { IEditor, type EditorFactory, type EditorOptions } from '@itookit/ui-com
 import { NAVIGATION_EVENTS } from '@itookit/common';
 import { type FlowDraft } from '@itookit/llm-flow/contracts';
 import { type ICommandBus } from '@itookit/llm-session/contracts';
-import { FlowCommand } from '@itookit/llm-session';
+import { FlowCommand } from '@itookit/llm-flow/contracts';
 import { DagWorkbench } from './DagWorkbench';
 import { FlowLauncher, flowIdFromNodeId } from '../flows/run-flow';
 import { Toast } from '@itookit/ui-common';

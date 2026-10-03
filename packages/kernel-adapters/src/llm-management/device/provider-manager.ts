@@ -4,7 +4,7 @@
 
 import type { LLMProvider } from '@itookit/driver-llm/contracts';
 import type { IFileSystem } from '@itookit/vfs-core';
-import { LLM_PROVIDERS, MODEL_PRICING } from '../constants';
+import { snapshotLlmPresets, type LlmManagementPresets } from '../contracts/presets';
 import { loadPricingConfig, writePricingConfig, applyPricingToModel } from '../constants/pricing';
 import type { ModelPricingConfig } from '../constants/pricing';
 import { VFSHelpers } from './vfs-helpers';
@@ -13,17 +13,18 @@ const PROVIDERS_DIR = '/llm/.providers';
 
 export class ProviderManager {
     private _providers: Map<string, LLMProvider> =
-        new Map(Object.entries(LLM_PROVIDERS).map(([k, v]) => [k, { ...v, id: k }]));
+        new Map<string, LLMProvider>();
     private _pricingConfig!: ModelPricingConfig;
 
     constructor(
         private readonly engine: IFileSystem,
         private readonly helpers: VFSHelpers,
         private readonly onChanged: () => void,
+        private readonly presets: LlmManagementPresets = snapshotLlmPresets(),
     ) {}
 
     async loadPricing(): Promise<void> {
-        this._pricingConfig = await loadPricingConfig(this.engine);
+        this._pricingConfig = await loadPricingConfig(this.engine, this.presets.pricing);
     }
 
     /**
@@ -33,7 +34,7 @@ export class ProviderManager {
     async syncDefaultProviders(preLoaded?: LLMProvider[]): Promise<void> {
         const existing = preLoaded ?? await this.helpers.loadJsonFilesFromDir<LLMProvider>(PROVIDERS_DIR);
         const existingIds = new Set(existing.map(p => p.id));
-        for (const [key, def] of Object.entries(LLM_PROVIDERS)) {
+        for (const [key, def] of Object.entries(this.presets.providers)) {
             if (!existingIds.has(key)) {
                 await this.writeProviderToDisk({ ...def, id: key, isBuiltin: true });
             } else {
@@ -63,10 +64,10 @@ export class ProviderManager {
     }
 
     reloadProvidersFrom(fromVFS: LLMProvider[]): void {
-        const merged = new Map(Object.entries(LLM_PROVIDERS).map(([k, v]) => [k, { ...v, id: k }]));
+        const merged = new Map(Object.entries(this.presets.providers).map(([k, v]) => [k, { ...v, id: k }]));
         for (const p of fromVFS) {
             if ((p as any).__deleted) { merged.delete(p.id); continue; }
-            const def = LLM_PROVIDERS[p.id];
+            const def = this.presets.providers[p.id];
             // 内置 Provider：VFS 用户数据优先，但合并内置定义的结构性能力字段
             // （capabilities.serverSideWebSearch / thinking 等），否则旧数据在
             // 保存时丢过 capabilities 会导致内置联网搜索能力永久失效。
@@ -127,7 +128,7 @@ export class ProviderManager {
     }
 
     getProviderDefaults(): Record<string, LLMProvider> {
-        return LLM_PROVIDERS;
+        return structuredClone(this.presets.providers);
     }
 
     getPricingConfig(): import('@itookit/kernel-adapters/contracts').ModelPricingConfig {
@@ -135,7 +136,7 @@ export class ProviderManager {
     }
 
     getPricingDefaults(): import('@itookit/kernel-adapters/contracts').ModelPricingConfig {
-        return { model_pricing: MODEL_PRICING };
+        return structuredClone(this.presets.pricing);
     }
 
     async writePricing(config: import('@itookit/kernel-adapters/contracts').ModelPricingConfig): Promise<void> {

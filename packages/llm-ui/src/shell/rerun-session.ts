@@ -1,7 +1,7 @@
 import { t } from '@itookit/common';
 import { type ChatExecutionMode } from '@itookit/llm-tasks/contracts';
 import { type ICommandBus } from '@itookit/llm-session/contracts';
-import { SessionCommand, type SessionGroup } from '@itookit/llm-session';
+import { SessionCommand, type SessionGroup } from '@itookit/llm-session/contracts';
 import { rerunSessionFlow, type FlowRerunContext } from '../flows/rerun-flow';
 import { dispatchDirectCommand } from '../commands/direct-command';
 

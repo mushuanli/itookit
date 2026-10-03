@@ -8,7 +8,7 @@ it('checks defaults in one transaction and preserves existing user prompts on wa
     const { manager } = await createVFS({ rootBackend: backend });
     try {
         const fs = await manager.openFileSystem('/etc');
-        const store = new SystemPromptStore(fs); await store.ensureFile();
+        const store = new SystemPromptStore(fs, DEFAULT_AGENTS); await store.ensureFile();
         const custom = JSON.stringify({ id: DEFAULT_AGENTS[0].id, content: ['User edited prompt'] });
         await fs.meta.seq!.setEntry('/llm/systemprompt', DEFAULT_AGENTS[0].id, custom);
         const transaction = vi.spyOn(backend.records, 'transaction');

@@ -5,7 +5,7 @@ import { normalizeEditorOptions } from '@itookit/ui-common';
 import './styles/index.css';
 
 import { LLMWorkspaceEditor, LLMEditorOptions } from './shell/LLMWorkspaceEditor';
-import type { ISessionRepository } from '@itookit/llm-session';
+import type { ISessionRepository } from '@itookit/llm-session/contracts';
 import type { IAgentConfigService } from '@itookit/kernel-adapters/contracts';
 import { IEditor } from '@itookit/ui-common';
 import type { ICommandBus } from '@itookit/llm-session/contracts';
@@ -48,6 +48,7 @@ export const createLLMFactory = (
     deps: {
         defaultHarnessToolIds?: readonly string[];
         sessionManager?: import('./domain/ports/SessionViewPort').SessionViewPort;
+        resolveSessionView?: () => import('./domain/ports/SessionViewPort').SessionViewPort;
         sessionRepository: ISessionRepository;
         ocr?: import('@itookit/ui-common').OcrControls;
         commandBus?: ICommandBus;
@@ -91,7 +92,7 @@ export const createLLMFactory = (
             agentService,
             sessionId,
             sessionRepository: engine,
-            sessionManager: deps.sessionManager,
+            sessionManager: deps.sessionManager ?? deps.resolveSessionView?.(),
             defaultHarnessToolIds: deps.defaultHarnessToolIds,
             isNewSession,
             ocr: deps.ocr,

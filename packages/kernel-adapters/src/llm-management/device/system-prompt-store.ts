@@ -4,14 +4,14 @@
 
 import type { IFileSystem, ISeqFileTransaction } from '@itookit/vfs-core';
 import type { SystemPromptDefinition } from '@itookit/tools/contracts';
-import { DEFAULT_AGENTS } from '../constants/agents';
+import type { InitialAgentDef } from '../contracts/agent';
 
 const SYSTEM_PROMPT_PATH = '/llm/systemprompt';
 const SYSTEM_PROMPT_NAME = 'systemprompt';
 const SYSTEM_PROMPT_PARENT = '/llm';
 
 export class SystemPromptStore {
-    constructor(private readonly engine: IFileSystem) {}
+    constructor(private readonly engine: IFileSystem, private readonly agents: readonly InitialAgentDef[] = []) {}
 
     /** Ensure /llm/systemprompt seqfile exists (init-time, mirrors CostStore). */
     async ensureFile(): Promise<void> {
@@ -41,7 +41,7 @@ export class SystemPromptStore {
     }
 
     private async seedMissing(seq: Pick<ISeqFileTransaction, 'getEntry' | 'setEntry'>): Promise<void> {
-        for (const def of DEFAULT_AGENTS) {
+        for (const def of this.agents) {
             const existing = await seq.getEntry(SYSTEM_PROMPT_PATH, def.id);
             if (existing) continue;
             const entry: SystemPromptDefinition = {

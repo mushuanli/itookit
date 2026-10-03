@@ -1,7 +1,7 @@
 // @file: llm-ui/commands/SendMessageCommand.ts
 
 
-import { SessionCommand, type SessionOrigin, type HistoryPolicy } from '@itookit/llm-session';
+import { SessionCommand, type SessionOrigin, type HistoryPolicy } from '@itookit/llm-session/contracts';
 import { Command } from './Command';
 import { dispatchDirectCommand } from './direct-command';
 import { Toast } from '@itookit/ui-common';

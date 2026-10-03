@@ -1,7 +1,7 @@
 // @file: llm-ui/commands/WorkspaceCommands.ts
 
 
-import { SessionCommand } from '@itookit/llm-session';
+import { SessionCommand } from '@itookit/llm-session/contracts';
 import { Command } from './Command';
 import { LLMPrintService, type PrintService } from '@itookit/mdx-adapter';
 import type { ErrorSeverity } from '../utils/errorHandler';

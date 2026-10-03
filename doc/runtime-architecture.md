@@ -302,3 +302,7 @@ Context 的 `ContextEngineOptions` 注入默认窗口、输入预算和完整请
 LLM UI 分为 `/chat` 与 `/settings` 子入口；设置包是可选 peer，聊天不加载设置实现。会话实例经 `SessionViewPort` 注入，模型配置经公共接口注入，默认工具展示由宿主列表驱动。当前仍消费 Session/Flow 契约及仓储；Kernel 仍以 VFS 存储为公共依赖，这些边界未宣称已消除。
 
 本轮验证：全仓类型检查、库/Web 构建、Driver tarball 独立 ESM/CJS 消费及无依赖安装通过；app-core 231 项、CLI 185 项通过，Context/Session/UI 包回归通过。app-shell 全量中 471 项通过，4 项原生恢复用例在正常权限下重跑通过；其余 4 项失败在提交前基线 `70f9947c` 的独立源码快照复现（提示词复制清理、外部草稿刷新两项、已删除 saveCurrent 的旧用例），不将其记为通过。
+
+模型管理由 app-core 显式组合 `kernel-adapters/llm/core` 与可选 `kernel-adapters/llm/presets`。机制默认空目录，Provider/连接/Agent/定价通过实例预设快照注入，自动连接由宿主策略决定。聊天 `/chat` 只消费 Session/Flow 契约与实例端口；缺少正式会话视图时拒绝创建，旧单例回退留在 UI 兼容根入口。
+
+本轮边界补全验收：全仓 typecheck、架构守卫与 docs:check 通过；Kernel adapters 199、Session 208、LLM UI 64、app-core 231 项测试通过。Session/UI/Flow/Adapters 与 Web 构建通过，构建后的 `/llm/core` 导入图不含产品目录，`/chat` 导入图不含 Session 单例或设置实现。宿主定向回归 25 项中 23 项通过，2 项仍为此前确认的外部草稿刷新问题；这不代表完整 app-shell 矩阵通过。

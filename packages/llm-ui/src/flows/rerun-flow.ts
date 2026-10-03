@@ -2,7 +2,7 @@ import { flowConnectionSelection } from './connection-selection';
 import { t } from '@itookit/common';
 import { type FlowRevision, type JsonValue } from '@itookit/llm-flow/contracts';
 import { type ICommandBus } from '@itookit/llm-session/contracts';
-import { SessionCommand } from '@itookit/llm-session';
+import { SessionCommand } from '@itookit/llm-session/contracts';
 import { promptFlowParameters } from '../components/FlowParameterForm';
 
 export interface FlowRerunContext {

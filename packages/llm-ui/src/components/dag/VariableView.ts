@@ -1,5 +1,5 @@
 import { escapeHTML, t } from '@itookit/common';
-import type { DurableFlowSnapshot } from '@itookit/llm-session';
+import type { DurableFlowSnapshot } from '@itookit/llm-flow/contracts';
 
 /** Show persisted outer variables and the live state of isolated dispatch scopes. */
 export function renderVariables(snapshot: DurableFlowSnapshot): string {

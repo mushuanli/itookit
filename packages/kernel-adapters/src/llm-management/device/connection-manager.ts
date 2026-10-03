@@ -5,7 +5,7 @@
 import type { LLMConnection, ConnectionMeta, LLMProvider } from '@itookit/driver-llm/contracts';
 import type { IVFSManager, IFileSystem } from '@itookit/vfs-core';
 import { toConnectionMeta, aggregateProviderCosts } from '@itookit/kernel-adapters/contracts';
-import { DEFAULT_CONNECTIONS, CONST_CONFIG_VERSION } from '../constants';
+import { snapshotLlmPresets, type LlmManagementPresets, type ProviderConnectionPolicy } from '../contracts/presets';
 import { VFSHelpers } from './vfs-helpers';
 import type { ProviderManager } from './provider-manager';
 
@@ -22,6 +22,8 @@ export class ConnectionManager {
         private readonly vfs: IVFSManager,
         private readonly providerManager: ProviderManager,
         private readonly onChanged: () => void,
+        private readonly presets: LlmManagementPresets = snapshotLlmPresets(),
+        private readonly providerConnectionPolicy?: ProviderConnectionPolicy,
     ) {}
 
     // ─── Public read accessors ─────────────────────────────────────────────
@@ -82,13 +84,11 @@ export class ConnectionManager {
     // ─── Mutations ─────────────────────────────────────────────────────────
 
     async ensureProviderConnection(provider: LLMProvider, systemFS?: IFileSystem): Promise<void> {
-        const model = provider.models.find(model => (model.category ?? 'chat') === 'chat');
-        if (provider.enabled === false || !model) return;
-        if (this._connections.some(connection => connection.providerId === provider.id)) return;
-        const base = `provider-${provider.id}`;
-        let id = base, suffix = 1;
-        while (this.findConn(id)) id = `${base}-${suffix++}`;
-        await this.saveConnection({ id, name: provider.name, providerId: provider.id, enabled: true, tiers: { optimal: model.id } }, systemFS);
+        if (provider.enabled === false || this._connections.some(connection => connection.providerId === provider.id)) return;
+        const connection = this.providerConnectionPolicy?.(structuredClone(provider), structuredClone(this._connections));
+        if (!connection) return;
+        if (connection.providerId !== provider.id || this.findConn(connection.id)) throw new Error('Invalid provider connection policy result');
+        await this.saveConnection(connection, systemFS);
     }
 
     async saveConnection(conn: LLMConnection, systemFS?: IFileSystem): Promise<void> {
@@ -118,11 +118,12 @@ export class ConnectionManager {
     // ─── Init helpers ──────────────────────────────────────────────────────
 
     async ensureDefaultsWith(preLoaded: LLMConnection[]): Promise<LLMConnection[]> {
+        if (!this.presets.connections.length) return preLoaded;
         try {
             const ver = await this.helpers.readJson<{ version: number }>(DEFAULTS_VERSION);
-            if (ver && ver.version >= CONST_CONFIG_VERSION) return preLoaded;
+            if (ver && ver.version >= this.presets.version) return preLoaded;
             const updated = await this.syncDefaultConnectionsFrom(preLoaded);
-            await this.helpers.writeJson(DEFAULTS_VERSION, { version: CONST_CONFIG_VERSION, updatedAt: Date.now() });
+            await this.helpers.writeJson(DEFAULTS_VERSION, { version: this.presets.version, updatedAt: Date.now() });
             return updated;
         } catch (e) {
             console.error('[ConnectionManager] ensureDefaults failed', e);
@@ -147,7 +148,7 @@ export class ConnectionManager {
         const byId = new Map(current.map(c => [c.id, c]));
         const result = [...current];
 
-        for (const def of DEFAULT_CONNECTIONS) {
+        for (const def of this.presets.connections) {
             const existing = byId.get(def.id);
             if (!existing) {
                 const newConn: LLMConnection = {

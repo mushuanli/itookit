@@ -21,6 +21,16 @@
       "types": "./src/contracts.ts",
       "import": "./src/contracts.ts",
       "default": "./src/contracts.ts"
+    },
+    "./llm/core": {
+      "types": "./src/llm-management/core.ts",
+      "import": "./src/llm-management/core.ts",
+      "default": "./src/llm-management/core.ts"
+    },
+    "./llm/presets": {
+      "types": "./src/llm-management/presets.ts",
+      "import": "./src/llm-management/presets.ts",
+      "default": "./src/llm-management/presets.ts"
     }
   },
   "publishConfig": {
@@ -43,6 +53,16 @@
         "types": "./dist/contracts.d.ts",
         "import": "./dist/contracts.js",
         "require": "./dist/contracts.cjs"
+      },
+      "./llm/core": {
+        "types": "./dist/llm-core.d.ts",
+        "import": "./dist/llm-core.js",
+        "require": "./dist/llm-core.cjs"
+      },
+      "./llm/presets": {
+        "types": "./dist/llm-presets.d.ts",
+        "import": "./dist/llm-presets.js",
+        "require": "./dist/llm-presets.cjs"
       }
     },
     "imports": {

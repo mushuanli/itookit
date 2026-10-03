@@ -1,6 +1,7 @@
 import { escapeHTML, t } from '@itookit/common';
 import { type ICommandBus } from '@itookit/llm-session/contracts';
-import { FlowCommand, SessionCommand } from '@itookit/llm-session';
+import { SessionCommand } from '@itookit/llm-session/contracts';
+import { FlowCommand } from '@itookit/llm-flow/contracts';
 import { DagWorkbench } from '../components/DagWorkbench';
 
 interface Branches { currentBranch: string; branches: Array<{ name: string; taskIds: string[]; runs?: Array<{ taskId: string; flowId: string; revision: number }> }> }

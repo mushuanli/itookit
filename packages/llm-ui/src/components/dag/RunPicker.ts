@@ -1,6 +1,6 @@
 import { escapeHTML, t } from '@itookit/common';
 import { type ICommandBus } from '@itookit/llm-session/contracts';
-import { FlowCommand } from '@itookit/llm-session';
+import { FlowCommand } from '@itookit/llm-flow/contracts';
 
 interface RunSummary { taskId: string; sessionId: string; name: string; status: string; createdAt: number }
 

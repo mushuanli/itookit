@@ -18,6 +18,13 @@ afterEach(async () => {
     vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.replaceChildren();
 });
 
+it('requires an injected view even when a legacy session singleton exists', async () => {
+    const f = await fixture();
+    expect(() => new LLMWorkspaceEditor(document.createElement('div'), {
+        sessionId: f.id, sessionRepository: f.repository, agentService: f.agents as never,
+    })).toThrow('Chat editor requires an injected session view');
+});
+
 async function fixture(backend: IStorageBackend = new MemoryBackend()) {
     vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
     vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
@@ -50,7 +57,7 @@ async function fixture(backend: IStorageBackend = new MemoryBackend()) {
     const getLoadState = vi.spyOn(repository, 'getLoadState');
     const loadView = vi.spyOn(repository, 'loadView');
     const bind = vi.spyOn(sessions, 'bindSession');
-    return { repository, agents, id, getUIState, getLoadState, loadView, bind, commandBus, execute, fs, kernel };
+    return { sessions, repository, agents, id, getUIState, getLoadState, loadView, bind, commandBus, execute, fs, kernel };
 }
 
 it.each(['main', 'review'])('initializes %s once and restores the selected branch draft and settings', async branch => {
@@ -64,7 +71,7 @@ it.each(['main', 'review'])('initializes %s once and restores the selected branc
     const uiWrite = vi.spyOn(f.repository, 'updateUIState');
     const onLoadMetrics = vi.fn();
     const container = document.createElement('div'); document.body.append(container);
-    const editor = new LLMWorkspaceEditor(container, { sessionId: f.id, target: { kind: 'session', sessionId: f.id, branch },
+    const editor = new LLMWorkspaceEditor(container, { sessionManager: f.sessions, sessionId: f.id, target: { kind: 'session', sessionId: f.id, branch },
         sessionRepository: f.repository, commandBus: f.commandBus, agentService: f.agents as never, onLoadMetrics });
     cleanup.push(() => editor.destroy());
     await editor.init(container);
@@ -131,7 +138,7 @@ it('measures A → B → A with retained session state and fresh editor preferen
         Object.values(fileCalls).forEach(spy => spy.mockClear());
         const container = document.createElement('div'); document.body.append(container);
         let metrics: unknown;
-        const editor = new LLMWorkspaceEditor(container, { sessionId: id, sessionRepository: f.repository,
+        const editor = new LLMWorkspaceEditor(container, { sessionManager: f.sessions, sessionId: id, sessionRepository: f.repository,
             commandBus: f.commandBus, agentService: f.agents as never, onLoadMetrics: value => { metrics = value; } });
         try {
             await editor.init(container);
@@ -167,7 +174,7 @@ it('restores the persisted branch draft when navigation does not specify a branc
         main: { inputText: 'main draft' }, review: { inputText: 'selected draft' },
     } });
     const container = document.createElement('div'); document.body.append(container);
-    const editor = new LLMWorkspaceEditor(container, { sessionId: f.id, sessionRepository: f.repository,
+    const editor = new LLMWorkspaceEditor(container, { sessionManager: f.sessions, sessionId: f.id, sessionRepository: f.repository,
         commandBus: f.commandBus, agentService: f.agents as never });
     cleanup.push(() => editor.destroy());
     await editor.init(container);
@@ -191,7 +198,7 @@ it('profiles complete editor initialization with LocalFS history and preserves s
     await f.repository.updateManifest(f.id, { rootRoundId: 'r0', currentHead: 'r99', branches: { main: 'r99' } });
     const before = await f.repository.getManifest(f.id), settings = await f.repository.getSessionSettings(f.id);
     const container = document.createElement('div'); document.body.append(container);
-    const editor = new LLMWorkspaceEditor(container, { sessionId: f.id, sessionRepository: f.repository,
+    const editor = new LLMWorkspaceEditor(container, { sessionManager: f.sessions, sessionId: f.id, sessionRepository: f.repository,
         commandBus: f.commandBus, agentService: f.agents as never,
         onLoadMetrics: metrics => console.info('editor-load-localfs', JSON.stringify({ ...metrics, sidecar: backend.sidecarStats })),
     });
@@ -208,7 +215,7 @@ it('persists Agent and Connection changes to the original Session before disposa
     const f = await fixture();
     vi.spyOn(f.agents, 'findAgent').mockReturnValue({ id: 'chosen', name: 'Chosen' } as never);
     const container = document.createElement('div'); document.body.append(container);
-    const editor = new LLMWorkspaceEditor(container, { sessionId: f.id, sessionRepository: f.repository,
+    const editor = new LLMWorkspaceEditor(container, { sessionManager: f.sessions, sessionId: f.id, sessionRepository: f.repository,
         commandBus: f.commandBus, agentService: f.agents as never });
     cleanup.push(() => editor.destroy()); await editor.init(container);
     const input = (editor as unknown as { chatInput: {

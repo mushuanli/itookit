@@ -3,7 +3,7 @@ import type { PromptHistoryPort } from '../../../domain/ports/SessionViewPort';
 
 import type { InputPlugin, InputPluginContext } from './InputPlugin';
 import { PopupPanel, PopupItem } from './PopupPanel';
-import type { PromptHistoryEntry } from '@itookit/llm-session';
+import type { PromptHistoryEntry } from '@itookit/llm-session/contracts';
 import { truncateText } from '../../../utils/textUtils';
 import { formatTimeAgo } from '../../../utils/timeUtils';
 

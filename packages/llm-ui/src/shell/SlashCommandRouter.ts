@@ -5,7 +5,7 @@ import { parseDirectoryCommand } from './directory-command';
 // Frequently modified: each new slash command or behavior change touches this file.
 
 
-import { SessionCommand, type SessionGroup, type ISessionRepository } from '@itookit/llm-session';
+import { SessionCommand, type SessionGroup, type ISessionRepository } from '@itookit/llm-session/contracts';
 import { formatDefaultFileTitle, t } from '@itookit/common';
 import { showConfirmDialog } from '@itookit/ui-common';
 import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter'

@@ -1,6 +1,6 @@
 // @file: llm-ui/utils/iconResolver.ts
 
-import { ExecutionNode } from '@itookit/llm-session';
+import { ExecutionNode } from '@itookit/llm-session/contracts';
 import { EXECUTOR_TYPE_ICONS, ENTITY_ICONS } from '@itookit/common';
 
 /**

@@ -1,20 +1,11 @@
-import type { FlowRevision, JsonValue, DagRunSpec } from '@itookit/llm-flow/contracts';
+import type { JsonValue, DagRunSpec } from '@itookit/llm-flow/contracts';
 import type { ICommandBus } from '../contracts';
 import type { Kernel, TaskRecord, SessionHandle } from '@itookit/durable-kernel';
 import { FlowCommand, FlowDefinitionStore, validateFlowParameters } from '@itookit/llm-flow';
 import type { FlowInvocationSessions } from '../persistence/flow-invocation-sessions';
 
-export const FlowInvocationCommand = { Invoke: 'session.flow.invoke', List: 'session.flow.invocations' } as const;
-export interface FlowInvocationInput { connectionId?: string; sessionId: string; requestId: string; flowId: string; revision: number; parameters: Record<string, JsonValue> }
-export interface FlowInvocationRecord extends FlowInvocationInput {
-    flow: FlowRevision;
-    resolvedConnectionId?: string | null;
-    createdAt: number;
-    rootTaskId?: string;
-    error?: string;
-    branch?: string;
-    head?: string | null;
-}
+import { FlowInvocationCommand, type FlowInvocationInput, type FlowInvocationRecord } from '../contracts/flow-invocations';
+export { FlowInvocationCommand, type FlowInvocationInput, type FlowInvocationRecord } from '../contracts/flow-invocations';
 const PREFIX = 'flow.invocation.';
 /** Shared records already read by a caller, so recovery does not list them twice. */
 type StoredInvocations = Awaited<ReturnType<Kernel['listShared']>>;

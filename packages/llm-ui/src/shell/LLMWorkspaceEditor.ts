@@ -13,10 +13,7 @@ import { EventBus } from '@itookit/vfs-core';
 import type { ICommandBus } from '@itookit/llm-session/contracts';
 import type { EventEnvelope, Kernel, InteractionRequest, JsonValue } from '@itookit/durable-kernel';
 
-import {
-    ISessionRepository, IAgentConfigService, getSessionManager,
-    type ConversationManifest, SessionCommand,
-} from '@itookit/llm-session';
+import { ISessionRepository, IAgentConfigService, type ConversationManifest, SessionCommand } from '@itookit/llm-session/contracts';
 
 // Domain — 只依赖接口和类型
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
@@ -75,7 +72,6 @@ import { LayoutTemplates } from '../components/templates/LayoutTemplates';
 
 import { HistoryPlugin } from '../components/input/plugins/HistoryPlugin';
 import { SlashCommandPlugin } from '../components/input/plugins/SlashCommandPlugin';
-import { getPromptHistory } from '@itookit/llm-session';
 import { AssetManagerUI } from '@itookit/mdx-adapter';
 
 interface InitialSessionData {
@@ -216,7 +212,8 @@ export class LLMWorkspaceEditor implements IEditor {
 
     constructor(_container: HTMLElement, options: LLMEditorOptions) {
         this.options = options;
-        this.sessionManager = options.sessionManager ?? getSessionManager();
+        if (!options.sessionManager) throw new Error('Chat editor requires an injected session view');
+        this.sessionManager = options.sessionManager;
         if (options.title) this.currentTitle = options.title;
     }
 
@@ -1007,7 +1004,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private registerInputPlugins(): void {
         const chatInput = this.chatInput as ChatInput;
 
-        const promptHistory = this.sessionManager.promptHistory ?? (this.options.sessionManager ? undefined : getPromptHistory());
+        const promptHistory = this.sessionManager.promptHistory;
         if (promptHistory) {
             this.historyPlugin = new HistoryPlugin(promptHistory);
             chatInput.registerPlugin(this.historyPlugin);

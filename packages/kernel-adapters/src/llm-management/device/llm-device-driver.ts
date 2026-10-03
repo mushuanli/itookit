@@ -25,7 +25,7 @@ import type {
 import { LLMDriver } from '@itookit/driver-llm';
 import { testLLMConnection } from '@itookit/driver-llm';
 import type { CodexAppServerTransport, CodexCLIConfig, CodexCommandRunner } from '@itookit/driver-llm';
-import { CONST_CONFIG_VERSION, DEFAULT_AGENTS, DEFAULT_CONNECTIONS } from '../constants';
+import { snapshotLlmPresets, type LlmManagementPresets, type ProviderConnectionPolicy } from '../contracts/presets';
 import { CostStore } from '../cost/cost-store';
 import { SystemPromptStore } from './system-prompt-store';
 import type { MCPToolInfo } from '../skills/mcp-client';
@@ -44,89 +44,9 @@ const MCP_DIR          = '/llm/.mcp';               // MCP 服务器配置（新
 
 // ─── ioctl 命令 ───────────────────────────────────────────────────────────────
 
-export const LLM_IOCTL = {
-    // ── 连接管理（无需 sessionId）────────────────────────────────────────────
-    /** → ConnectionMeta[]（无 apiKey） */
-    LIST_CONNECTIONS:         'list-connections',
-    /** arg: id → ConnectionMeta | null */
-    GET_CONNECTION_META:      'get-connection',
-    /** → ConnectionMeta | null（第一个或 id='default'） */
-    GET_DEFAULT_CONNECTION:   'get-default-connection',
-    /** arg: id → LLMConnection | null（含 apiKey，仅供 Settings UI 编辑使用） */
-    GET_FULL_CONNECTION:      'get-full-connection',
-    /** arg: LLMConnection → void（保存连接，含 apiKey） */
-    SAVE_CONNECTION:          'save-connection',
-    /** arg: id → void */
-    DELETE_CONNECTION:        'delete-connection',
-    /** arg: { provider, apiKey, baseURL?, model? } → ConnectionTestResult */
-    TEST_CONNECTION_PARAMS:   'test-connection-params',
+import { LLM_IOCTL } from '../contracts/device';
+export { LLM_IOCTL, type LLMIoctlCommand } from '../contracts/device';
 
-    // ── MCP 服务器管理（无需 sessionId）─────────────────────────────────────
-    /** → MCPServer[] */
-    LIST_MCP_SERVERS:         'list-mcp-servers',
-    /** arg: MCPServer → void */
-    SAVE_MCP_SERVER:          'save-mcp-server',
-    /** arg: id → void */
-    DELETE_MCP_SERVER:        'delete-mcp-server',
-    /** arg: id → void — 连接指定 MCP 服务器 */
-    CONNECT_MCP_SERVER:       'connect-mcp-server',
-    /** arg: id → void — 断开指定 MCP 服务器 */
-    DISCONNECT_MCP_SERVER:    'disconnect-mcp-server',
-
-    // ── Chat 会话（需要 sessionId）───────────────────────────────────────────
-    CHAT:             'chat',
-    CHAT_SYNC:        'chat-sync',
-    GET_HISTORY:      'get-history',
-    CLEAR_HISTORY:    'clear-history',
-    GET_MODELS:       'get-models',
-    ABORT:            'abort',
-    SET_SYSTEM_PROMPT:'set-system-prompt',
-
-    // ── MCP 会话（需要 sessionId，由 /dev/llm/mcp/<id> 打开）────────────────
-    /** → ToolDefinition[] */
-    MCP_LIST_TOOLS:   'list-tools',
-    /** arg: { tool: string; args: Record<string,any>; timeout?: number } → any */
-    MCP_CALL_TOOL:    'call-tool',
-    MCP_DISCOVER:     'mcp-discover',
-    MCP_READ_RESOURCE: 'mcp-read-resource',
-    MCP_GET_PROMPT:    'mcp-get-prompt',
-
-    // ── Provider 管理（无需 sessionId）──────────────────────────────────────
-    /** → LLMProvider[]（不含 apiKey） */
-    LIST_PROVIDERS:       'list-providers',
-    /** arg: id → LLMProvider | null（不含 apiKey，含模型定价） */
-    GET_PROVIDER:         'get-provider',
-    /** arg: id → LLMProvider | null（含 apiKey，仅供 Settings UI） */
-    GET_FULL_PROVIDER:    'get-full-provider',
-    /** arg: LLMProvider → void（保存，含 apiKey） */
-    SAVE_PROVIDER:        'save-provider',
-    /** arg: id → void */
-    DELETE_PROVIDER:      'delete-provider',
-
-    // ── Skill 管理（无需 sessionId）──────────────────────────────────────────
-    /** → LLMSkill[] */
-    LIST_SKILLS:      'list-skills',
-    /** arg: LLMSkill → void */
-    SAVE_SKILL:       'save-skill',
-    /** arg: id → void */
-    DELETE_SKILL:     'delete-skill',
-
-    // ── Cost 查询（无需 sessionId）───────────────────────────────────────────
-    /** arg: sessionId → CostRecord[] */
-    QUERY_COSTS_BY_SESSION:  'query-costs-by-session',
-    /** arg: { providerId, dateFrom?, dateTo? } → CostRecord[] */
-    QUERY_COSTS_BY_PROVIDER: 'query-costs-by-provider',
-    /** arg: { dateFrom?, dateTo?, providerId? } → CostRecord[] */
-    QUERY_COSTS_ALL:         'query-costs-all',
-
-    // ── Skill 会话（需要 sessionId，由 /dev/llm/skills/<id> 打开）────────────
-    /** arg: { args: Record<string,unknown> } → unknown — 调用 HTTP 端点 */
-    SKILL_INVOKE:     'invoke',
-    /** → LLMSkill — 读取当前 skill 配置 */
-    SKILL_GET_DEF:    'get-definition',
-} as const;
-
-export type LLMIoctlCommand = typeof LLM_IOCTL[keyof typeof LLM_IOCTL];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -207,6 +127,8 @@ export interface IShellRunner {
 // ─── LLMDeviceDriver ─────────────────────────────────────────────────────────
 
 export interface LLMDeviceDriverOptions {
+    presets?: Partial<LlmManagementPresets>;
+    providerConnectionPolicy?: ProviderConnectionPolicy;
     /**
      * Shell 命令执行器（可选）。
      * 未注入时 shell 类型 Skill 返回"环境不支持"提示。
@@ -226,6 +148,8 @@ export interface LLMDeviceDriverOptions {
 }
 
 export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
+    private readonly presets: LlmManagementPresets;
+    private readonly providerConnectionPolicy?: ProviderConnectionPolicy;
     readonly handlerId = 'llm';
     readonly description = 'LLM streaming chat, connection management, MCP, and skills device';
     readonly writable = true;
@@ -266,6 +190,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     }
 
     constructor(private readonly vfs: IVFSManager, options?: LLMDeviceDriverOptions) {
+        this.presets = snapshotLlmPresets(options?.presets);
+        this.providerConnectionPolicy = options?.providerConnectionPolicy;
         this.shellRunner = options?.shellRunner;
         this.codexRunner = options?.codexRunner;
         this.codexTransport = options?.codexTransport;
@@ -289,8 +215,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
         // Initialise helpers first (no async deps)
         this.vfsHelpers = new VFSHelpers(this.engine);
-        this.providerManager = new ProviderManager(this.engine, this.vfsHelpers, () => this.notify());
-        this.connectionManager = new ConnectionManager(this.vfsHelpers, this.vfs, this.providerManager, () => this.notify());
+        this.providerManager = new ProviderManager(this.engine, this.vfsHelpers, () => this.notify(), this.presets);
+        this.connectionManager = new ConnectionManager(this.vfsHelpers, this.vfs, this.providerManager, () => this.notify(), this.presets, this.providerConnectionPolicy);
         this.mcpManager = new MCPManager(this.vfsHelpers, this.vfs, () => this.notify());
         this.skillManager = new SkillManager(this.vfsHelpers, this.vfs, this.mcpManager, this.shellRunner, () => this.notify());
 
@@ -311,8 +237,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         this.costManager = new CostManager(costStore);
         _log('initCostStore');
 
-        // System prompt seqfile: /llm/systemprompt (key = agent id), seeded from DEFAULT_AGENTS.
-        const systemPromptStore = new SystemPromptStore(this.engine);
+        // System prompt seqfile: /llm/systemprompt (key = agent id), seeded from the injected host catalog.
+        const systemPromptStore = new SystemPromptStore(this.engine, this.presets.agents);
         await systemPromptStore.ensureFile();
         await systemPromptStore.seedDefaults();
         _log('initSystemPromptStore');
@@ -808,15 +734,15 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     // ─── ILLMManagementService — Defaults metadata ────────────────────────────
 
     getConfigVersion(): number {
-        return CONST_CONFIG_VERSION;
+        return this.presets.version;
     }
 
     getDefaultAgents(): InitialAgentDef[] {
-        return DEFAULT_AGENTS;
+        return structuredClone(this.presets.agents);
     }
 
     getDefaultConnections() {
-        return DEFAULT_CONNECTIONS;
+        return structuredClone(this.presets.connections);
     }
 
     // ─── IConnectionService — Provider metadata & testing ─────────────────────

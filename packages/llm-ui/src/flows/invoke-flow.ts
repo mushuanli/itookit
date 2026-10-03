@@ -2,7 +2,8 @@ import { flowConnectionSelection } from './connection-selection';
 import { escapeHTML, randomUUID, t } from '@itookit/common';
 import { type FlowDraft, type FlowRevision, type JsonValue } from '@itookit/llm-flow/contracts';
 import { type ICommandBus } from '@itookit/llm-session/contracts';
-import { FlowCommand, FlowInvocationCommand } from '@itookit/llm-session';
+import { FlowInvocationCommand } from '@itookit/llm-session/contracts';
+import { FlowCommand } from '@itookit/llm-flow/contracts';
 import { promptFlowParameters } from '../components/FlowParameterForm';
 
 /** Slash calls leave the Session's ordinary chat execution mode untouched. */

@@ -1,7 +1,7 @@
 // @file: llm-ui/services/SessionService.ts
 
 
-import { SessionCommand, ISessionRepository, SessionSnapshot, type ConversationManifest, type SessionRepositoryChange } from '@itookit/llm-session';
+import { SessionCommand, ISessionRepository, SessionSnapshot, type ConversationManifest, type SessionRepositoryChange } from '@itookit/llm-session/contracts';
 import type { ICommandBus } from '@itookit/llm-session/contracts';
 import type { ChatInputSettings } from '../domain/ports/IChatInputPresenter';
 

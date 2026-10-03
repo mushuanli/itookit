@@ -1,7 +1,7 @@
 // @file: llm-ui/services/NavDataBuilder.ts
 
 
-import { SessionCommand, SessionGroup, type BranchTreeNode } from '@itookit/llm-session';
+import { SessionCommand, SessionGroup, type BranchTreeNode } from '@itookit/llm-session/contracts';
 import type { ICommandBus } from '@itookit/llm-session/contracts';
 import { ChatNavItem, NavPanelData } from '../domain/ports/INavigationPresenter';
 import { BranchItem, CollapseStateMap } from '../domain/types';

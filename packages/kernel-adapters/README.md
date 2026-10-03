@@ -27,13 +27,17 @@ src/
 `@itookit/kernel-adapters/llm` 提供 `LLMDeviceDriver`、`LLM_IOCTL`、Provider/Connection 配置、费用、默认 Agent、Skill、MCP 和 `.llm` 导入导出，承接旧 device-llm 的宿主集成功能。它是本包的公开子入口，不是额外 npm 包。
 
 ```ts
-import { LLMDeviceDriver } from '@itookit/kernel-adapters/llm';
+import { LLMDeviceDriver } from '@itookit/kernel-adapters/llm/core';
 
-const driver = new LLMDeviceDriver(vfs, { llmLogger });
+const driver = new LLMDeviceDriver(vfs, { llmLogger, presets: hostPresets });
 await driver.init();
 // Existing device and management APIs are available after initialization.
 await driver.dispose();
 ```
+
+`/llm/core` 默认使用空目录，不加载内置 Provider、连接、Agent 或价格，也不自动创建连接。`presets` 接受 `Partial<LlmManagementPresets>`，构造时深拷贝隔离；持久配置和用户修改按原有规则保留。宿主通过 `providerConnectionPolicy` 决定启用 Provider 后是否自动创建连接；不传时不创建。预设连接的更新由宿主递增 `version` 控制。
+
+需要 MindOS 默认行为时，从 `/llm/presets` 导入 `createMindosLlmPresets`、`firstChatModelConnection`，显式传入这两个选项。旧 `/llm` 入口继续自动选择这套预设和策略，仅作兼容。契约入口 `/contracts` 不加载 VFS、YAML、MCP 或产品目录。
 
 只需要模型通信时使用独立的 `@itookit/driver-llm`；它没有运行时依赖，不需要本包。模型集成详情见 [管理接口](./doc/llm-management/README.md)。
 

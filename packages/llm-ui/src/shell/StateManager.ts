@@ -4,7 +4,7 @@ import type { SessionViewPort } from '../domain/ports/SessionViewPort';
 import type { UIState, CollapseStateMap } from '../domain/types';
 import type { IChatInputPresenter, IChatInputConfig, ChatInputSettings } from '../domain/ports/IChatInputPresenter';
 import { fromConversationState, type StateService } from '../services/StateService';
-import type { ConversationManifest } from '@itookit/llm-session';
+import type { ConversationManifest } from '@itookit/llm-session/contracts';
 import { createDebouncedSave, DebouncedFn } from '../utils/debounce';
 import { ErrorHandler } from '../utils/errorHandler';
 /**

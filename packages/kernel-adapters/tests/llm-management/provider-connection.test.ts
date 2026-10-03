@@ -1,3 +1,4 @@
+import { firstChatModelConnection } from '../../src/llm-management/presets';
 import { expect, it, vi } from 'vitest';
 import { ConnectionManager } from '../../src/llm-management/device/connection-manager';
 import type { LLMProvider } from '@itookit/driver-llm/contracts';
@@ -7,7 +8,7 @@ it('creates one usable connection for an enabled Provider and preserves manual d
     const changed = vi.fn(), engineUpsert = vi.fn().mockResolvedValue(undefined);
     const manager = new ConnectionManager({ engineUpsert } as never,
         { createDeviceNode: vi.fn().mockResolvedValue(undefined) } as never,
-        { getFullProviderMap: () => new Map([['p', provider]]) } as never, changed);
+        { getFullProviderMap: () => new Map([['p', provider]]) } as never, changed, undefined, firstChatModelConnection);
     await manager.ensureProviderConnection(provider); expect(manager.getConnections()).toEqual([]);
     provider.enabled = true; await manager.ensureProviderConnection(provider);
     expect(manager.getConnections()).toMatchObject([{ providerId: 'p', enabled: true, model: 'm' }]);

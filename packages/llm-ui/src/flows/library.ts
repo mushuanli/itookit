@@ -1,7 +1,7 @@
 /// <reference path="./flow-files.d.ts" />
 import type { FlowDraft } from '@itookit/llm-flow/contracts';
 import type { ICommandBus } from '@itookit/llm-session/contracts';
-import { FlowCommand } from '@itookit/llm-session';
+import { FlowCommand } from '@itookit/llm-flow/contracts';
 import essayReview from './library/essay-review-isolated.flow?raw';
 
 /** Bundled definitions are copied once into the editable host Flow directory. */

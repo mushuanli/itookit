@@ -6,18 +6,16 @@ import type { IFileSystem } from '@itookit/vfs-core';
 import type { LLMModel } from '@itookit/driver-llm/contracts';
 import type { ModelPricingConfig, ModelPricingEntry } from '@itookit/kernel-adapters/contracts';
 import { lookupPricingEntry, extractPrices } from '@itookit/kernel-adapters/contracts';
-import { MODEL_PRICING } from './providers';
 
 export const PRICING_FILE_PATH = '/llm/pricing.json';
 export const COST_SEQ_PATH     = '/llm/cost.seq';
 
 /**
- * 从 VFS engine 加载 pricing.json。
- * 文件不存在时写入内置默认值（MODEL_PRICING）再返回。
- * 解析失败时 console.warn 并返回内置默认值。
+ * Load persisted pricing, seeding missing data from the supplied host defaults.
+ * Invalid persisted data falls back to a fresh copy of those defaults.
  */
-export async function loadPricingConfig(engine: IFileSystem): Promise<ModelPricingConfig> {
-    const defaultConfig: ModelPricingConfig = { model_pricing: MODEL_PRICING };
+export async function loadPricingConfig(engine: IFileSystem, defaults: ModelPricingConfig = { model_pricing: [] }): Promise<ModelPricingConfig> {
+    const defaultConfig = structuredClone(defaults);
 
     try {
         const exists = await engine.driver.exists(PRICING_FILE_PATH);
@@ -31,7 +29,7 @@ export async function loadPricingConfig(engine: IFileSystem): Promise<ModelPrici
         const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
         return JSON.parse(text) as ModelPricingConfig;
     } catch (e) {
-        console.warn('[LLMDeviceDriver] pricing.json load failed, using built-in prices:', e);
+        console.warn('[LLMDeviceDriver] pricing.json load failed, using supplied defaults:', e);
         return defaultConfig;
     }
 }

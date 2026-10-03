@@ -9,3 +9,6 @@ export * from './contracts/flow-templates';
 export * from './contracts/flow-output';
 export * from './contracts/control-flow';
 export type { FlowCommandRegistrar } from './contracts/command-registrar';
+export { FlowCommand } from './flow/command-names';
+export type { DurableFlowSnapshot } from './flow/commands';
+export type { FlowTaskTranscript } from './flow/transcript';
