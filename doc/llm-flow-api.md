@@ -227,12 +227,20 @@ flowchart LR
     Scheduler --> Delegation[DelegationController]
     Delegation -->|成员 / 等待 / 取消| State
     Delegation -->|spawned 回调| Scheduler
+    Scheduler --> Preparation[prepareNodeTask]
+    Preparation -->|依赖 / 变量快照 / 插件任务| Factory[FlowTaskFactory]
+    Factory -->|TaskSpec| Scheduler
+    Scheduler -->|submit 后绑定能力| Tasks[Kernel Tasks]
     Scheduler --> Readiness[readyFlowNodes]
     Readiness --> State
     Scheduler -->|保存 checkpoint / 租约条件| Store[Kernel Session shared]
 ```
 
 `delegation-runtime.ts` 保留委派声明解析和成员图构造；`DelegationController` 管理绑定继承、all/any/first-success/quorum 等待、剩余成员取消、失败与超时。它只执行已固定的运行声明，通过 spawned 回调通知调度器，不选择产品策略或安装全局回调。节点轮次身份统一在 `node-instance.ts`，恢复仍使用原有编码。
+
+`prepareNodeTask` 选择上游轮次并校验数据边，解析参数、模板、变量快照和连接，再调用插件生成任务定义。`FlowTaskFactory` 使用显式宿主工具/Skill/身份端口构造 Kernel TaskSpec，包括嵌套 dispatch 目标；整个 Run 使用固定 Context Program 版本。两者不提交 Kernel 任务或写 checkpoint，未新增公共根导出。
+
+执行器仍按 task.started → submit → 记住变量快照与运行成员 → 绑定能力 → checkpoint 的顺序协调提交。LLM 任务及控制组保持 deferStart，图重试 generation 与恢复 requestId 保持原格式；输入装配拆分不改变启动或幂等边界。
 
 checkpoint、恢复、任务提交和工作区清理由执行器协调；图修改组件不自行写存储或取得租约。循环 back-edge 的派发顺序约束，以及 join 只能取消已观察依赖的约束保持原行为。
 
@@ -262,6 +270,8 @@ packages/llm-flow/src/
     ├── graph-mutations.ts     GraphMutationRuntime（包内图状态修改与节点身份绑定端口）
     ├── delegation-controller.ts DelegationController（包内委派组生命周期）
     ├── node-instance.ts       instanceKey/parseInstanceKey（包内轮次身份）
+    ├── node-task-preparation.ts prepareNodeTask（包内输入与上游轮次装配）
+    ├── task-factory.ts        FlowTaskFactory（包内 Kernel 请求构造）
     ├── commands.ts            DagCommandService + DagCommandServiceOptions/DurableFlowSnapshot
     ├── programs.ts            FlowValueProgram/FlowHumanProgram/FlowAggregateProgram + 输入类型
     ├── operations.ts          transformOutcome/spawnOutcome/reduceOutcome/routeOutcome（纯操作，未根导出）

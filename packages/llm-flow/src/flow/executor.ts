@@ -1,18 +1,18 @@
+import { FlowTaskFactory } from './task-factory';
+import { prepareNodeTask } from './node-task-preparation';
 import { DelegationController } from './delegation-controller';
 import { instanceKey, parseInstanceKey } from './node-instance';
 import { GraphMutationRuntime } from './graph-mutations';
 import { readyFlowNodes } from './scheduler-readiness';
-import { FlowVariableStore, validateVariableGraph, variableDefinitions, variableCurrent } from './variables';
+import { FlowVariableStore, validateVariableGraph, variableCurrent } from './variables';
 import { rememberSchedulerLease } from './control-session';
 import { fenceSchedulerSession } from './fenced-session';
 import type { SchedulerCheckpoint } from './scheduler-checkpoint';
-import { prepareDispatch } from './structured/prepare';
-import { compileReferenceGraph, invocationReferenceContext, resolveExecutionNode, scopedParameters } from './structured/references';
+import { compileReferenceGraph, scopedParameters } from './structured/references';
 import { compileDispatchGraph } from './structured/graph';
 import { compileControlGraph } from './control/graph';
 import { memberGroup, startReservedWorkers } from './control/scheduling';
 import { reconcileDispatchChildren } from './structured/reconcile';
-import type { DispatchInput } from './structured/types';
 import { validateDispatchCapacity, withDispatchWorkspace } from './structured/limits';
 import { restoreFlowHandle } from './restore-handle';
 import { acquireSchedulerLease, isSchedulerOwnershipLost, type SchedulerLease } from './scheduler-lease';
@@ -26,7 +26,6 @@ import {
     type JsonValue,
     type SessionHandle,
     type TaskHandle,
-    type TaskSpec,
 } from '@itookit/durable-kernel';
 import type { FlowWorkspacePolicy, HarnessHookEvent, HarnessHookRunner } from '../contracts';
 import type { SkillContext } from '@itookit/llm-tasks';
@@ -57,14 +56,10 @@ export interface FlowWorkspaceRestoreOptions {
 /** Session shared key holding the durable workspace lease record of a Run. */
 export const workspaceLeaseKey = (rootTaskId: string): string => `flow.run.${rootTaskId}.workspace-lease`;
 import { findCycles } from './graph';
-import { assertNodeOutputs, dataEdgeSchemaIssue, validateDataEdgeValue } from './port-contract';
-import { resolveNodeConnection } from './connections';
+import { assertNodeOutputs, dataEdgeSchemaIssue } from './port-contract';
 import { bindFlowTaskCapabilities } from './task-capabilities';
 import { resolveFlowParameters, prepareFlowParameters } from './parameters';
 import {
-    subtaskToolDef,
-    subtaskToolDescription,
-    subtaskToolName,
     type DelegationGroup,
     type EdgeState,
 } from './delegation-runtime';
@@ -117,11 +112,6 @@ export interface DurableFlowExecutorOptions {
 }
 
 const MAX_LOOP_ITERATIONS = 100;
-
-/** Node Skill ids are configured as strings; anything else is ignored, never coerced. */
-function stringIds(value: unknown): string[] {
-    return Array.isArray(value) ? [...new Set(value.filter((id): id is string => typeof id === 'string' && id.trim().length > 0))] : [];
-}
 
 export class DurableFlowExecutor {
     private readonly active = new Set<Promise<unknown>>();
@@ -343,11 +333,6 @@ export class DurableFlowExecutor {
                 if (!handles?.length) return false;
                 return completed.has(instanceKey(nodeId, handles.length));
             };
-            const handleAt = (nodeId: string, iteration: number): TaskHandle => {
-                const handle = instances.get(nodeId)?.[iteration - 1];
-                if (!handle) throw new Error(`Flow node has no instance ${iteration}: ${nodeId}`);
-                return handle;
-            };
             const doneAt = (nodeId: string, iteration: number): boolean =>
                 completed.has(instanceKey(nodeId, iteration));
             // 环上的节点共享同一个迭代上限（任一环上节点声明即可），非环节点单次执行。
@@ -371,72 +356,25 @@ export class DurableFlowExecutor {
             const readyNodes = () => readyFlowNodes({ spec, nodes, edges, callInputs, instances, skipped,
                 detachedNodes, loopNodes, backEdges, routeEdgeIds, edgeState, dispatchOrder, maxIterations, doneAt, latestDone });
 
-            const submitNode = async (node: DagNodeDefinition, historyGroup?: string): Promise<void> => {
-                const iteration = (instances.get(node.id)?.length ?? 0) + 1;
-                const incoming = incomingOf(edges, node.id)
-                    .filter(edge => (edgeState.get(edge.id) ?? 'active') === 'active')
-                    .filter(edge => !backEdges.has(edge.id) || iteration > 1)
-                    // 回边绑定每个来源的最新已完成实例：普通 Loop 恰好等于上一轮，
-                    // supervisor 循环则累积所有已派发 worker 的结果；环内前向边绑定同一轮上游。
-                    .filter(edge => !backEdges.has(edge.id) || latestDone(edge.from))
-                    .filter(edge => instances.has(edge.from) && !skipped.has(edge.from));
-                const upstreamHandle = (edge: DagEdgeDefinition): TaskHandle => {
-                    const upstreamIteration = backEdges.has(edge.id)
-                        ? instances.get(edge.from)?.length ?? 0
-                        : loopNodes.has(node.id) && loopNodes.has(edge.from)
-                            ? iteration
-                            : instances.get(edge.from)?.length ?? 1;
-                    return handleAt(edge.from, upstreamIteration);
-                };
-                for (const edge of incoming) {
-                    const upstream = (await upstreamHandle(edge).status()).task;
-                    if (upstream.status === 'succeeded') validateDataEdgeValue(edge, node, plugins, upstream.output);
-                }
-                const dependencies = incoming.map(edge => ({
-                    taskId: upstreamHandle(edge).id,
-                    nodeId: edge.from,
-                    input: edge.input,
-                    output: edge.output,
-                    edgeId: edge.id,
-                    onFailure: edge.onFailure,
-                    injectOutput: edge.kind !== 'control',
-                }));
-                const localParameters = scopedParameters(spec, node.id, parameters ?? {}, callInputs);
-                const referenceOutputs: Record<string, unknown> = {};
-                for (const edge of incoming) referenceOutputs[edge.from] = (await upstreamHandle(edge).status()).task.output;
-                variableStore.prune(new Set([...instances.values()].flat().map(handle => handle.id)));
-                const context = variableStore.snapshot(node, invocationReferenceContext(nodes, referenceOutputs, localParameters, iteration, node.id));
-                if (spec.templateVersion === 1) node = resolveExecutionNode(node, context);
-                if (node.plugin === 'builtin.route' && node.pluginVersion === '2.0.0' && context.vars) {
-                    node = { ...node, config: { ...record(node.config), variables: variableDefinitions(spec, node.id) } };
-                }
-                const runtime = await plugins.loadRuntime(node.plugin, node.pluginVersion);
-                const task = runtime.createTask({
-                    sessionId,
-                    nodeRunId: iteration === 1 ? node.id : `${node.id}#${iteration}`,
-                    config: node.plugin === 'builtin.agent' && sessionContext
-                        ? { ...record(node.config), sessionContext } : node.config,
-                    inputs: node.inputs,
-                    dependencies,
-                });
-                if (task.programKind === 'flow.dispatch') {
-                    const input = task.input as DispatchInput;
-                    input.maxConcurrency = Math.min(input.maxConcurrency ?? maxConcurrency, maxConcurrency);
-                    const scope = nodeConnections.get(node.id);
-                    const defaults = (task.input as DispatchInput).invocationDefaults;
-                    if (scope && defaults) resolveNodeConnection(defaults as unknown as CommonJsonValue, scope.connections, scope.defaultConnection, scope.fallbackConnectionId, scope.runConnectionId);
-                    if (scope) for (const branch of [...(task.input as DispatchInput).branches, ...((task.input as DispatchInput).revision?.invocation ? [(task.input as DispatchInput).revision!.invocation!] : [])]) {
-                        if (defaults?.connectionId && !record(branch.target.config).connectionId) branch.target.config = { ...record(branch.target.config), connectionId: defaults.connectionId } as CommonJsonValue;
-                        resolveNodeConnection(branch.target.config, scope.connections, scope.defaultConnection, scope.fallbackConnectionId, scope.runConnectionId);
-                    }
-                }
+            const taskFactory = new FlowTaskFactory({
+                sessionId, plugins: this.options.plugins, contextProgramVersion,
+                resolveTools: this.options.resolveTools ? (id, allowed) => this.options.resolveTools!(id, allowed) : undefined,
+                resolveSkillContexts: this.options.resolveSkillContexts
+                    ? (id, skills, allowed) => this.options.resolveSkillContexts!(id, skills, allowed) : undefined,
+                bindPatchNode: this.options.bindPatchNode
+                    ? (id, node, defaults) => this.options.bindPatchNode!(id, node, defaults) : undefined,
+            });
+            const preparation = { sessionId, spec, nodes, edges, instances, skipped, backEdges, loopNodes,
+                edgeState, plugins, parameters, callInputs, variableStore, nodeConnections, sessionContext, maxConcurrency, latestDone };
+            const submitNode = async (source: DagNodeDefinition, historyGroup?: string): Promise<void> => {
+                const { node, iteration, task, dependencies, parameters: localParameters, context } = await prepareNodeTask(preparation, source);
                 await this.emitHook('task.started', sessionId, { nodeId: node.id, iteration });
                 // The generation keeps re-submissions after a graph retry distinct, while a
                 // crash-recovery re-submission (same generation) still deduplicates.
                 const requestId = published
                     ? `flow:${published.root.id}:${node.id}#${iteration}@${nodeGenerations.get(node.id) ?? 0}`
                     : undefined;
-                const taskSpec = await this.taskSpec(sessionId, node, task, dependencies, localParameters, requestId, contextProgramVersion);
+                const taskSpec = await taskFactory.create(node, task, dependencies, localParameters, requestId);
                 if (memberGroup(nodes, node.id)) taskSpec.deferStart = true;
                 if (historyGroup) taskSpec.labels = { ...taskSpec.labels, flowHistoryGroup: historyGroup };
                 const handle = await session.submit(taskSpec);
@@ -859,73 +797,6 @@ export class DurableFlowExecutor {
         };
     }
 
-    private async taskSpec(
-        sessionId: string,
-        node: DagNodeDefinition,
-        task: import('../contracts').DagTaskDefinition,
-        dependencies: import('../contracts').DagTaskDependencyBinding[],
-        parameters?: Record<string, CommonJsonValue>,
-        requestId?: string,
-        contextProgramVersion: '1' | '2' = '1',
-    ): Promise<TaskSpec<unknown>> {
-        const allowed = node.capabilities ?? [];
-        const catalog = await this.options.resolveTools?.(sessionId, allowed)
-            ?? { definitions: [], externalIds: [] };
-        const subtaskTool = subtaskToolName(node.config);
-        const subtaskDescription = subtaskToolDescription(node.config);
-        const skillIds = task.programKind === 'llm.agent' ? stringIds(record(node.config).skillIds) : [];
-        const skillContexts = skillIds.length && this.options.resolveSkillContexts
-            ? await this.options.resolveSkillContexts(sessionId, skillIds, allowed)
-            : [];
-        const input = task.programKind === 'flow.dispatch'
-            ? await this.prepareDispatchTask(sessionId, { ...task.input as DispatchInput, invocationNamespace: requestId! }, contextProgramVersion)
-            : task.programKind === 'flow.input'
-                ? { ...record(task.input), values: { ...parameters, ...record(record(task.input).values) } }
-            : task.programKind === 'llm.agent'
-            ? {
-                ...record(task.input),
-                tools: [...catalog.definitions, ...(subtaskTool ? [subtaskToolDef(subtaskTool, subtaskDescription)] : [])],
-                externalToolIds: catalog.externalIds,
-                allowedToolIds: allowed,
-                ...(skillContexts.length ? { skillContexts } : {}),
-            }
-            : task.programKind === 'flow.value'
-                ? { ...record(task.input), parameters, iteration: Number(/#(\d+)(?:@|$)/.exec(requestId ?? '')?.[1] ?? 1) }
-                : task.input;
-        return {
-            ...(requestId ? { requestId } : {}),
-            program: { kind: task.programKind, version: task.programVersion === '1' && ['llm.agent', 'llm.chat'].includes(task.programKind)
-                ? contextProgramVersion : task.programVersion },
-            input: jsonValue(input),
-            dependsOn: dependencies.filter(binding => task.programKind !== 'flow.join' || binding.injectOutput === false).map(binding => ({
-                task: binding.taskId,
-                ...(binding.onFailure ? { onFailure: binding.onFailure } : {}),
-            })),
-            retry: node.retry,
-            priority: node.priority ?? task.priority,
-            labels: { flowNodeId: node.id, flowNodeName: node.name, plugin: node.plugin,
-                ...(typeof (node.config as Record<string, unknown> | undefined)?.agentId === 'string' ? { agentId: (node.config as Record<string, string>).agentId } : {}),
-                ...(node.outputPolicy?.publishToHistory === false ? { flowHistory: 'omit' } : {}) },
-            deferStart: task.programKind === 'llm.agent' || task.programKind === 'llm.chat',
-        };
-    }
-
-    private async prepareDispatchTask(sessionId: string, input: DispatchInput, contextProgramVersion: '1' | '2'): Promise<DispatchInput> {
-        return prepareDispatch(input, {
-            plugins: this.options.plugins,
-            bind: async target => {
-                const patch = await this.options.bindPatchNode?.(sessionId, target, undefined);
-                return { ...target, ...patch };
-            },
-            task: async target => {
-                const runtime = await this.options.plugins.loadRuntime(target.plugin, target.pluginVersion);
-                const task = runtime.createTask({ sessionId, nodeRunId: target.id, config: target.config,
-                    inputs: target.inputs, dependencies: [] });
-                return this.taskSpec(sessionId, target, task, [], undefined, undefined, contextProgramVersion);
-            },
-        });
-    }
-
     private async emitHook(
         event: HarnessHookEvent,
         sessionId: string,
@@ -1020,10 +891,6 @@ function collectRouteEdgeIds(spec: DagRunSpec): Set<string> {
         }
     }
     return ids;
-}
-
-function incomingOf(edges: DagEdgeDefinition[], nodeId: string): DagEdgeDefinition[] {
-    return edges.filter(edge => edge.to === nodeId);
 }
 
 /** 反向 BFS：返回 nodeId 的所有祖先（入边可达），距离近的在前。 */

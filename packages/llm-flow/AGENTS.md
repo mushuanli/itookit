@@ -18,6 +18,8 @@ src/
     ├── executor.ts           DurableFlowExecutor（调度 / checkpoint / 工作区生命周期）
     ├── scheduler-readiness.ts 循环、路由、join 与 return 就绪判定
     ├── graph-mutations.ts    动态图 patch、边状态及 join 取消约束
+    ├── node-task-preparation.ts 上游轮次、模板、变量与连接解析
+    ├── task-factory.ts       插件任务 → Kernel 请求、工具/Skill/Context 装配
     ├── builtin-plugins.ts    内置插件 transform/reduce/route/spawn/flow/human/agent
     ├── structured/           输入补全、route@2 独立 Task 派发、隔离上下文、按键汇总
     ├── programs.ts           FlowValue / FlowHuman / FlowAggregate Program
@@ -64,3 +66,5 @@ Scheduler 就绪判定在 flow/scheduler-readiness.ts，以显式运行状态消
 GraphMutationRuntime 只持有单次运行的显式图状态；宿主通过 bindNode 解析动态节点身份。整批绑定和校验完成后才发布节点、边与幂等记录，checkpoint 和租约仍由 executor 管理，不在此模块新增持久化或产品策略。
 
 DelegationController 消费单次运行的显式状态，执行已声明的 wait/failure 策略；agent.spawned 通过宿主回调发出。它不提交任务、不写 checkpoint、不取得租约。detached 工作的持久恢复、所有权保持与工作区收尾继续由 executor 协调。
+
+prepareNodeTask 只准备节点输入与变量快照；FlowTaskFactory 只构造 Kernel TaskSpec，保留嵌套 dispatch 的宿主绑定与 Context Program 版本。executor 按原顺序执行 task.started、submit、运行成员更新、能力绑定与 checkpoint。上述组件保持包内，不增加 npm 包或根导出。
