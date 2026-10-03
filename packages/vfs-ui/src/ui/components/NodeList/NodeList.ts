@@ -53,6 +53,7 @@ interface NodeListOptions extends BaseComponentDeps, VFSRowActionOptions {
   engine?: any;
   directoryAction?: DirectoryAction;
   activateDirectories?: boolean;
+  doubleClickActivation?: (node: VFSNodeUI) => boolean;
   primaryAction?: { label: string; run(): Promise<void> };
   exportDirectories?: boolean;
 }
@@ -89,6 +90,7 @@ export class NodeList extends BaseComponent<NodeListState> {
   private readonly fileCreation?: FileCreationConfig;
   private readonly directoryActions?: DirectoryActions;
   private readonly activateDirectories: boolean;
+  private readonly doubleClickActivation?: NodeListOptions['doubleClickActivation'];
   private readonly exportDirectories: boolean;
 
   constructor(options: NodeListOptions) {
@@ -100,6 +102,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     this.fileCreation = options.fileCreation; this.toolbarOptions = options.toolbarOptions ?? {}; this.cardDirectory = options.cardDirectory;
     this.rootPath = options.rootPath; this.toolbar = options.toolbar;
     this.activateDirectories = options.activateDirectories ?? false;
+    this.doubleClickActivation = options.doubleClickActivation;
     this.exportDirectories = options.exportDirectories ?? false;
 
     this.stateTransformer = new NodeListStateTransformer(
@@ -272,6 +275,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     document.addEventListener('click', this.handleGlobalClick, true);
 
     this.bodyEl.addEventListener('click', this.handleItemClick);
+    this.bodyEl.addEventListener('dblclick', this.handleItemDoubleClick);
 
     // Bound unconditionally: permissions and view roots can change at runtime, so
     // every entry point re-checks the row policy instead of changing its listeners.
@@ -416,13 +420,23 @@ export class NodeList extends BaseComponent<NodeListState> {
       );
     }
 
-    if (result.shouldNavigate) {
+    if (result.shouldNavigate && !(node && this.doubleClickActivation?.(node))) {
       if (itemType === 'file' || this.activateDirectories) {
         this.commandBus.execute('nav:selectSession', { sessionId: itemId });
       } else if (itemType === 'directory') {
         this.commandBus.execute('nav:selectSession', { sessionId: null });
       }
     }
+  };
+
+  private handleItemDoubleClick = (event: MouseEvent): void => {
+    const target = event.target as Element;
+    const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
+    if (event.ctrlKey || event.metaKey || event.shiftKey || target.closest('button, input') || (action && action !== 'select-item')) return;
+    const row = target.closest<HTMLElement>('[data-item-id]');
+    const node = row?.dataset.itemId ? this.findItemById(row.dataset.itemId) : null;
+    if (node && this.doubleClickActivation?.(node) && (node.type === 'file' || this.activateDirectories))
+      this.commandBus.execute('nav:selectSession', { sessionId: node.id });
   };
 
   private handleContextMenu = (event: MouseEvent): void => {
@@ -437,6 +451,11 @@ export class NodeList extends BaseComponent<NodeListState> {
   private handleKeyDown = (event: KeyboardEvent): void => {
     const target = event.target as HTMLElement;
     if (target.classList.contains('vfs-directory-item__header') && ['Enter', ' '].includes(event.key)) {
+      const row = target.closest<HTMLElement>('[data-item-id]');
+      const node = row?.dataset.itemId ? this.findItemById(row.dataset.itemId) : null;
+      if (event.key === 'Enter' && node && this.doubleClickActivation?.(node)) {
+        event.preventDefault(); this.commandBus.execute('nav:selectSession', { sessionId: node.id }); return;
+      }
       event.preventDefault(); target.click(); return;
     }
     if (target.dataset.action === 'create-input') {

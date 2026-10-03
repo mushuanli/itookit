@@ -141,7 +141,7 @@ export class VFSService implements IDataOperationPort {
 
   renameItem = async (nodeId: string, newName: string): Promise<void> => {
     const node = await this.engine.driver.getNode(nodeId);
-    const oldTitle = typeof node?.metadata?.title === 'string'
+    const oldTitle = node?.type === 'file' && typeof node.metadata?.title === 'string'
       ? node.metadata.title
       : null;
     const title = node

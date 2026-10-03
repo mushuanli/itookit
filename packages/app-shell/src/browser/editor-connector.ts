@@ -13,7 +13,7 @@ import { MediaViewerEditor, isBinaryViewable } from './MediaViewerEditor';
 import { LatestViewLoad, type ViewLoad } from '../lifecycle/view-load';
 import { WorkbenchTabs, type WorkbenchTab } from '../workbench/tabs';
 import { WorkbenchSidebar } from '../workbench/sidebar';
-import { createDirectoryList, refreshDirectoryList } from '../workbench/directory-list';
+import { createDirectoryList, refreshDirectoryList, watchDirectorySelection } from '../workbench/directory-list';
 import type { WorkbenchStatePort } from '../workbench/state';
 
 export interface ConnectOptions<Node extends VFSNodeUI = VFSNodeUI> {
@@ -101,6 +101,7 @@ export function connectEditorLifecycle(vfs: VFSUIShell, engine: IFileSystem, con
         tab.panel.replaceChildren(createDirectoryList({ title: item.metadata.title, path: item.id,
             entries: nodes.map(node => ({ id: node.path, name: node.name, type: node.type, icon: vfs.getResourceIcon(node), created: node.createdAt, modified: node.modifiedAt, size: node.type === 'file' ? node.size : undefined })),
             contextMenu: (event, id) => { void vfs.showItemMenu(event, id).catch(report); }, select: ids => vfs.setSelection(ids),
+            selectedIds: () => vfs.getSnapshot().selectedIds,
             bulkActions: directoryBulkActions(vfs),
             actions: readOnly ? undefined : [{ label: t('project.createFile'), icon: FILE_BROWSER_ICONS.addFile, run: () => { void createEntry(item.id, 'file').catch(report); } },
                 { label: t('project.createFolder'), icon: FILE_BROWSER_ICONS.addFolder, run: () => { void createEntry(item.id, 'directory').catch(report); } }],
@@ -108,6 +109,7 @@ export function connectEditorLifecycle(vfs: VFSUIShell, engine: IFileSystem, con
             parent: item.id === '/' ? undefined : () => { void (parent === '/' ? openDirectory(parent) : vfs.selectPath(parent)).catch(report); },
             refresh: () => directoryEntries(item.id).catch(error => { report(error); throw error; }) }));
         tab.subscriptions.push(watchDirectoryList(engine, tab.panel, report));
+        tab.subscriptions.push(watchDirectorySelection(tab.panel, vfs));
     }
     async function create(tab: WorkbenchTab<OpenView>, item: VFSNodeUI, load: ViewLoad): Promise<void> {
         if (item.icon) tabs.setIcon(tab.id, item.icon);

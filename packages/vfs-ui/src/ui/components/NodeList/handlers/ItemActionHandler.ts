@@ -86,7 +86,7 @@ export class ItemActionHandler {
         return { handled: true, shouldSelect: false, shouldNavigate: false };
       }
       event.stopPropagation();
-      return { handled: false, shouldSelect: true, shouldNavigate: false };
+      return { handled: true, shouldSelect: true, shouldNavigate: false };
     }
 
     const isModifierClick = event.metaKey || event.ctrlKey || event.shiftKey;

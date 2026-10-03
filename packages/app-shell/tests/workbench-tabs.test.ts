@@ -2,7 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { WorkbenchTabs } from '../src/workbench/tabs';
 import { WorkbenchSidebar } from '../src/workbench/sidebar';
-import { createDirectoryList, refreshDirectoryList } from '../src/workbench/directory-list';
+import { createDirectoryList, refreshDirectoryList, refreshDirectorySelection } from '../src/workbench/directory-list';
 import { readWorkbenchSnapshot, type WorkbenchSnapshot } from '../src/workbench/state';
 import { connectEditorLifecycle } from '../src/browser/editor-connector';
 import { LatestViewLoad } from '../src/lifecycle/view-load';
@@ -11,6 +11,23 @@ import { FILE_ICONS } from '@itookit/common';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks(); });
+
+it('shares selection with its owner across select-all, sidebar changes and list recreation', () => {
+    let ids: readonly string[] = ['/docs/a.md'];
+    const options = { title: 'Docs', path: '/docs', entries: [
+        { id: '/docs/a.md', name: 'a.md', type: 'file' }, { id: '/docs/b.md', name: 'b.md', type: 'file' },
+    ], open() {}, select: (next: string[]) => { ids = next; }, selectedIds: () => ids };
+    const list = createDirectoryList(options);
+    document.body.append(list);
+    const checked = () => [...list.querySelectorAll<HTMLInputElement>('[data-selection-id]')].filter(c => c.checked).map(c => c.dataset.selectionId);
+    expect(checked()).toEqual(['/docs/a.md']);
+    list.querySelector<HTMLInputElement>('thead input')!.click();
+    expect(ids).toEqual(['/docs/a.md', '/docs/b.md']); expect(checked()).toEqual(ids);
+    ids = ['/docs/b.md', '/other/file']; refreshDirectorySelection(list);
+    expect(checked()).toEqual(['/docs/b.md']); expect(ids).toContain('/other/file');
+    const restored = createDirectoryList(options);
+    expect(restored.querySelector<HTMLInputElement>('[data-selection-id="/docs/b.md"]')!.checked).toBe(true);
+});
 
 function tabsFixture() {
     const container = document.createElement('div'); document.body.append(container);
@@ -197,7 +214,8 @@ it('moves a pinned open file through the shared picker and saves to its new path
         main.querySelector<HTMLButtonElement>('[data-tab-id="/source.md"] .workbench-tabs__pin')!.click();
         main.querySelector<HTMLButtonElement>('[data-tab-id="/"] .workbench-tabs__label')!.click();
         await vi.waitFor(() => expect(main.querySelector('.workbench-tabs__panel:not([hidden]) [data-selection-id="/source.md"]')).not.toBeNull());
-        main.querySelector<HTMLInputElement>('[data-selection-id="/source.md"]')!.click();
+        const sourceSelection = main.querySelector<HTMLInputElement>('[data-selection-id="/source.md"]')!;
+        if (!sourceSelection.checked) sourceSelection.click();
         main.querySelector<HTMLButtonElement>('[data-action="bulk-move"]')!.click();
         await vi.waitFor(() => expect(document.querySelector('.vfs-move-modal [data-folder-id="/destination"]')).not.toBeNull());
         document.querySelector<HTMLElement>('.vfs-move-modal [data-folder-id="/destination"]')!.click();

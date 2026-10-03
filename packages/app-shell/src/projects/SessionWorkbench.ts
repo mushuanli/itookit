@@ -1,7 +1,7 @@
 import { createMindOSVFSUI as createVFSUI } from '../browser/vfs-presentation';
 import { WorkbenchTabs, type WorkbenchTab } from '../workbench/tabs';
 import { WorkbenchSidebar } from '../workbench/sidebar';
-import { createDirectoryList, refreshDirectoryList } from '../workbench/directory-list';
+import { createDirectoryList, refreshDirectoryList, watchDirectorySelection } from '../workbench/directory-list';
 import { directoryBulkActions } from '../workbench/vfs-actions';
 import { ENTITY_ICONS, FILE_BROWSER_ICONS, FILE_ICONS } from '@itookit/common';
 import { watchDirectoryList } from '../workbench/directory-watch';
@@ -215,6 +215,7 @@ export class SessionWorkbench implements WorkspaceController {
             toolbar: 'full', hideGitignored: false,
             searchPlaceholder: t(this.projects ? 'project.searchContents' : 'project.search'), showFileExtensions: true,
             readOnly: false, activateDirectories: true, autoSelectFirst: !this.projects, defaultUiSettings: { sortBy: 'lastModified' },
+            doubleClickActivation: this.projects ? item => resolveBrowserTarget(item.id).kind === 'folder' && !!item.metadata.custom.projectId : undefined,
             compareItems: compareSessionEntries,
             restoreExpandedDirectory: isExpandableDirectory,
             exportDirectories: true,
@@ -756,6 +757,7 @@ export class SessionWorkbench implements WorkspaceController {
             refresh: () => this.directoryEntries(path),
             contextMenu: (event, id) => { void this.sidebarUI?.showItemMenu(event, id).catch(error => this.report(error)); },
             select: ids => this.sidebarUI?.setSelection(ids),
+            selectedIds: () => this.sidebarUI?.getSnapshot().selectedIds ?? [],
             bulkActions: this.sidebarUI && (target.kind === 'project-files' || target.kind === 'files') ? directoryBulkActions(this.sidebarUI) : undefined,
             favorite: this.projects ? this.directoryFavorites() : undefined,
             actions: writable ? [
@@ -763,6 +765,7 @@ export class SessionWorkbench implements WorkspaceController {
                 { label: t('project.createFolder'), icon: FILE_BROWSER_ICONS.addFolder, run: () => { void this.createDirectoryEntry(path, 'directory').catch(error => this.report(error)); } },
             ] : undefined });
         heading.remove(); panel.append(list); this.tabs.title(this.tabs.current!.id, list.querySelector('h2')!.textContent!);
+        if (this.sidebarUI) this.tabs.current!.subscriptions.push(watchDirectorySelection(panel, this.sidebarUI));
         this.tabs.setIcon(this.tabs.current!.id, this.sidebarUI?.getNode(path)?.icon ?? FILE_ICONS.folder);
         if (!this.closed) this.tabs.content.replaceChildren(panel);
         if (this.navigationFiles?.on) this.tabs.current!.subscriptions.push(watchDirectoryList(this.navigationFiles, panel, error => this.report(error)));

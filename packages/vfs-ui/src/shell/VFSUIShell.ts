@@ -81,6 +81,8 @@ export interface VFSUIShellOptions extends BrowserBaseOptions, VFSRowActionOptio
   fileTypes?: FileTypeDefinition[];
   directoryAction?: DirectoryAction;
   activateDirectories?: boolean;
+  /** Require double-click activation for host-selected rows; controls remain independent. */
+  doubleClickActivation?: (node: VFSNodeUI) => boolean;
   /** Restore saved selection, but optionally keep a new tree unselected. */
   autoSelectFirst?: boolean;
   restoreExpandedDirectory?: (path: string) => boolean;
@@ -509,6 +511,7 @@ export class VFSUIShell {
       title: this.options.title,
       toolbar: this.options.toolbar, toolbarOptions: this.options.toolbarOptions,
       activateDirectories: this.options.activateDirectories,
+      doubleClickActivation: this.options.doubleClickActivation,
       directoryAction: this.options.directoryAction,
       onQuickDelete: this.options.onQuickDelete,
       rowCreation: this.options.rowCreation,

@@ -1005,6 +1005,12 @@
   font-size: var(--font-size-base);
 }
 
+.vfs-context-menu button svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
 .vfs-context-menu button:hover {
   background-color: var(--color-gray-100);
 }

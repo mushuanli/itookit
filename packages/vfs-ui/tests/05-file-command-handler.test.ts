@@ -195,6 +195,16 @@ describe('FileCommandHandler — command → engine wiring', () => {
             .toBeLessThan(vi.mocked(engine.driver.rename).mock.invocationCallOrder[0]);
     });
 
+    it('renames directories without attempting to write their derived title metadata', async () => {
+        const path = '/project';
+        engine.nodes.set(path, makeEngineNode({ path, name: 'project', type: 'directory', metadata: { title: 'project' } }));
+        engine.driver.updateMetadata = vi.fn(async () => { throw new Error('EROFS'); });
+        engine.driver.rename = vi.fn(async () => {});
+        await service.renameItem(path, 'renamed');
+        expect(engine.driver.rename).toHaveBeenCalledWith(path, 'renamed');
+        expect(engine.driver.updateMetadata).not.toHaveBeenCalled();
+    });
+
     it('file:rename rolls the title back when the path rename fails', async () => {
         const oldPath = '/old-name.prj';
         engine.nodes.set(oldPath, makeEngineNode({

@@ -18,9 +18,26 @@ export class DirectoryItem extends BaseNodeItem {
 
   update(nextProps: DirectoryItemProps): void {
     if (JSON.stringify(this.props) !== JSON.stringify(nextProps)) {
+      const selectionKeys = new Set(['dirSelectionState', 'isSelected', 'isSelectionMode']);
+      const onlySelection = Object.keys({ ...this.props, ...nextProps }).every(key => selectionKeys.has(key)
+        || JSON.stringify(this.props[key as keyof DirectoryItemProps]) === JSON.stringify(nextProps[key as keyof DirectoryItemProps]));
       this.props = nextProps;
-      this.render();
+      if (onlySelection) this.updateSelection(); else this.render();
     }
+  }
+
+  /** Preserve the click target while selection changes so native double-click still fires. */
+  private updateSelection(): void {
+    const template = document.createElement('template');
+    template.innerHTML = createDirectoryItemHTML(this.item, this.props, this.policy);
+    const row = this.element.querySelector<HTMLElement>('.vfs-node-item__main-row')!;
+    row.classList.toggle('is-selection-mode', this.props.isSelectionMode);
+    this.element.querySelector('.vfs-directory-item__header')!.classList.toggle('is-selected', this.props.isSelected);
+    row.querySelector(':scope > .vfs-node-item__checkbox-wrapper')?.remove();
+    const checkbox = template.content.querySelector('.vfs-node-item__checkbox-wrapper');
+    if (checkbox) row.prepend(checkbox);
+    const input = row.querySelector<HTMLInputElement>('input[data-indeterminate]');
+    if (input) input.indeterminate = true;
   }
 
   protected render(): void {

@@ -30,6 +30,10 @@ export class DirectorySelection {
         checkbox.setAttribute('aria-label', `${t('workbench.select')} ${name}`); checkbox.dataset.selectionId = id;
         checkbox.onchange = () => { checkbox.checked ? this.ids.add(id) : this.ids.delete(id); this.commit(); }; return checkbox;
     }
+    restore(ids: readonly string[], available: string[]): void {
+        const known = new Set(available); this.ids.clear();
+        for (const id of ids) if (known.has(id)) this.ids.add(id);
+    }
     show(ids: string[], available: string[]): void {
         const size = this.ids.size, known = new Set(available); for (const id of this.ids) if (!known.has(id)) this.ids.delete(id);
         if (size !== this.ids.size) this.changed([...this.ids]);

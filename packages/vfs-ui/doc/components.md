@@ -143,6 +143,10 @@ VFSNodeUI 是高级文件视图的展示模型，保留原 metadata/content 字�
 
 `VFSUIShell.showItemMenu(event, path)` 允许宿主在宽目录详情行上打开原有节点菜单。节点尚未加载时先展开父目录，再交给 NodeList；节点查找可回退到原始浏览状态，因此导航投影隐藏文件不会丢失文件行操作。权限判定与执行仍经过原有 row-policy、ContextMenuHandler 与命令管线。
 
+`doubleClickActivation(node)` 可指定仅双击打开的条目：单击仍更新选择，折叠箭头、勾选框和菜单独立处理；目录标题按 Enter 也可打开。未配置时保持原有单击行为。项目工作台对项目目录开启此策略。目录改名只调用 `driver.rename`，目录标题由名称派生；文件仍保留标题元数据同步与失败回滚。
+
+宿主目录详情以 `getSnapshot().selectedIds` 为选择来源，通过 `setSelection(ids)` 回写，并订阅 `stateChanged` 更新勾选与全选状态。页面刷新、筛选及重新打开列表仍从同一来源恢复，避免正文和侧栏各自持有选择状态。
+
 宿主可用 `titleHeader` 替换标题行，通过 `toolbarContainer` 将原有工具栏控件挂到宿主标题区（保留事件、上下文和权限检查），使用 `rowCreation` 在可写目录行提供创建图标；执行前重新检查同一 row-policy。`allowsBulkAction` / `runBulkAction` 复用 ContextMenuHandler 的批量菜单过滤、删除确认与移动选择器，宿主不直接操作 store 或复制授权逻辑。
 
 宿主目录详情与已打开列表通过 `getResourceIcon(node)` 复用节点显式图标、已注册文件类型图标及默认图标；图标容器使用 `file-type-icon` 复用资源浏览的浅色/深色主题配色。公共 `formatFileSize(bytes)` 提供 B、KiB、MiB 等易读大小，未知大小显示破折号。

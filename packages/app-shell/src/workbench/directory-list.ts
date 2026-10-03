@@ -1,7 +1,7 @@
 import { installColumnResize } from './column-resize';
 import { t, getLocale, FILE_BROWSER_ICONS, ACTION_ICONS, fileTypeIcon } from '@itookit/common';
 import { decorateButton } from './controls';
-import { formatFileSize } from '@itookit/vfs-ui';
+import { formatFileSize, type VFSUIShell } from '@itookit/vfs-ui';
 import { DirectorySelection, type DirectoryBulkAction } from './directory-selection';
 
 export interface DirectoryEntry {
@@ -15,9 +15,22 @@ export interface DirectoryListOptions {
     contextMenu?: (event: MouseEvent, id: string) => void;
     favorite?: { state(id: string): boolean | undefined; toggle(id: string): Promise<void> };
     select?: (ids: string[]) => void;
+    selectedIds?: () => readonly string[];
     bulkActions?: DirectoryBulkAction[];
 }
 const refreshers = new WeakMap<HTMLElement, () => Promise<void>>();
+const selectionRefreshers = new WeakMap<HTMLElement, () => void>();
+export function refreshDirectorySelection(panel: HTMLElement): void {
+    const list = panel.matches('.workbench-directory') ? panel : panel.querySelector<HTMLElement>('.workbench-directory');
+    if (list) selectionRefreshers.get(list)?.();
+}
+export function watchDirectorySelection(panel: HTMLElement, source: Pick<VFSUIShell, 'on' | 'getSnapshot'>): () => void {
+    let selected = source.getSnapshot().selectedIds.join('\0');
+    return source.on('stateChanged', ({ state }) => {
+        const next = [...state.selectedItemIds].join('\0');
+        if (next !== selected) { selected = next; refreshDirectorySelection(panel); }
+    });
+}
 export async function refreshDirectoryList(panel: HTMLElement): Promise<void> {
     const list = panel.matches('.workbench-directory') ? panel : panel.querySelector<HTMLElement>('.workbench-directory');
     if (list) await refreshers.get(list)?.();
@@ -43,7 +56,11 @@ export function createDirectoryList(options: DirectoryListOptions): HTMLElement 
     let sort: keyof DirectoryEntry = 'name', ascending = true;
     const selection = options.select ? new DirectorySelection(options.select, () => render(), options.bulkActions ?? [], refresh, fail) : undefined;
     addHeaders(head, selection, key => { ascending = sort === key ? !ascending : true; sort = key; render(); });
-    const render = () => renderEntries(body, options, search.value, sort, ascending, selection);
+    const render = () => {
+        if (options.selectedIds) selection?.restore(options.selectedIds(), options.entries.map(entry => entry.id));
+        renderEntries(body, options, search.value, sort, ascending, selection);
+    };
+    selectionRefreshers.set(panel, render);
     search.oninput = render; panel.append(header, path, toolbar); if (selection) panel.append(selection.bar); panel.append(table);
     render(); return panel;
 }
