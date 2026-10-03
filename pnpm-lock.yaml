@@ -480,12 +480,24 @@ importers:
 
   packages/common:
     dependencies:
-      '@itookit/llm-common':
+      '@itookit/driver-llm':
         specifier: workspace:*
-        version: link:../llm-common
+        version: link:../driver-llm
       '@itookit/llm-context':
         specifier: workspace:*
         version: link:../llm-context
+      '@itookit/llm-flow':
+        specifier: workspace:*
+        version: link:../llm-flow
+      '@itookit/llm-session':
+        specifier: workspace:*
+        version: link:../llm-session
+      '@itookit/llm-tasks':
+        specifier: workspace:*
+        version: link:../llm-tasks
+      '@itookit/tools':
+        specifier: workspace:*
+        version: link:../tools
     devDependencies:
       cpx:
         specifier: ^1.5.0
@@ -581,10 +593,11 @@ importers:
         version: 3.2.4(@types/debug@4.1.13)(@types/node@20.19.25)(jiti@1.21.7)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.2)
 
   packages/driver-llm:
-    devDependencies:
+    dependencies:
       '@itookit/llm-context':
         specifier: workspace:*
         version: link:../llm-context
+    devDependencies:
       '@types/node':
         specifier: ^20.19.25
         version: 20.19.43
@@ -628,9 +641,6 @@ importers:
       '@itookit/durable-kernel':
         specifier: workspace:*
         version: link:../durable-kernel
-      '@itookit/llm-common':
-        specifier: workspace:*
-        version: link:../llm-common
       '@itookit/llm-context':
         specifier: workspace:*
         version: link:../llm-context
@@ -671,31 +681,6 @@ importers:
       vitest:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
-
-  packages/llm-common:
-    dependencies:
-      '@itookit/driver-llm':
-        specifier: workspace:*
-        version: link:../driver-llm
-      '@itookit/llm-context':
-        specifier: workspace:*
-        version: link:../llm-context
-      '@itookit/llm-flow':
-        specifier: workspace:*
-        version: link:../llm-flow
-      '@itookit/llm-tasks':
-        specifier: workspace:*
-        version: link:../llm-tasks
-      '@itookit/tools':
-        specifier: workspace:*
-        version: link:../tools
-    devDependencies:
-      tsup:
-        specifier: ^8.5.1
-        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@25.2.3))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
 
   packages/llm-context:
     devDependencies:
@@ -745,15 +730,12 @@ importers:
 
   packages/llm-session:
     dependencies:
-      '@itookit/common':
+      '@itookit/driver-llm':
         specifier: workspace:*
-        version: link:../common
+        version: link:../driver-llm
       '@itookit/durable-kernel':
         specifier: workspace:*
         version: link:../durable-kernel
-      '@itookit/llm-common':
-        specifier: workspace:*
-        version: link:../llm-common
       '@itookit/llm-context':
         specifier: workspace:*
         version: link:../llm-context
@@ -763,6 +745,9 @@ importers:
       '@itookit/llm-tasks':
         specifier: workspace:*
         version: link:../llm-tasks
+      '@itookit/tools':
+        specifier: workspace:*
+        version: link:../tools
       '@itookit/vfs-core':
         specifier: workspace:*
         version: link:../vfs-core
@@ -794,9 +779,12 @@ importers:
       '@itookit/kernel-adapters':
         specifier: workspace:*
         version: link:../kernel-adapters
-      '@itookit/llm-common':
+      '@itookit/llm-session':
         specifier: workspace:*
-        version: link:../llm-common
+        version: link:../llm-session
+      '@itookit/tools':
+        specifier: workspace:*
+        version: link:../tools
       '@itookit/ui-common':
         specifier: workspace:*
         version: link:../ui-common
@@ -874,15 +862,18 @@ importers:
       '@itookit/durable-kernel':
         specifier: workspace:*
         version: link:../durable-kernel
-      '@itookit/llm-common':
+      '@itookit/llm-flow':
         specifier: workspace:*
-        version: link:../llm-common
+        version: link:../llm-flow
       '@itookit/llm-session':
         specifier: workspace:*
         version: link:../llm-session
       '@itookit/llm-settings-ui':
         specifier: workspace:*
         version: link:../llm-settings-ui
+      '@itookit/llm-tasks':
+        specifier: workspace:*
+        version: link:../llm-tasks
       '@itookit/ui-common':
         specifier: workspace:*
         version: link:../ui-common

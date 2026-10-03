@@ -9,7 +9,7 @@
 2026-09-21 补充：编码工具执行与 Agent 错误修正链路已补齐第一批实现，见本文末尾「Coding harness 第一批实现」。这一批不改变 Flow 的编排职责与文件写入的并发保证。
 
 > 核查日期：2026-09-15。依据当前工作树源码与包内测试；这是现状分析，不是新增功能承诺。
-> 范围：`packages/llm-flow`，以及它使用的 `llm-common` 类型。规范依据为 [Harness Core](durable-harness-core.md)、[Protocol](durable-harness-protocol.md)、[Storage](durable-harness-storage.md)、[Resources](durable-harness-resources.md)、[Cache](durable-harness-cache.md)；跨包验收边界见 [Durable 证据映射](durable-harness-evidence.md)。
+> 范围：`packages/llm-flow`，以及它公开的 `llm-flow/contracts` 类型。规范依据为 [Harness Core](durable-harness-core.md)、[Protocol](durable-harness-protocol.md)、[Storage](durable-harness-storage.md)、[Resources](durable-harness-resources.md)、[Cache](durable-harness-cache.md)；跨包验收边界见 [Durable 证据映射](durable-harness-evidence.md)。
 
 ## 1. 结论
 
@@ -31,7 +31,7 @@
 
 | 表示 | 内容与用途 | 源码 |
 |---|---|---|
-| `FlowDraft` | 可编辑定义：nodes/edges/layout、参数、连接槽、Agent 默认值、runPolicy、draftVersion | [flow-definition.ts](../../packages/llm-common/src/agent/flow-definition.ts) |
+| `FlowDraft` | 可编辑定义：nodes/edges/layout、参数、连接槽、Agent 默认值、runPolicy、draftVersion | [flow-definition.ts](../../packages/llm-flow/src/contracts/flow-definition.ts) |
 | `FlowRevision` | 发布版本：revision/digest，冻结节点、边及默认配置；不含编辑布局 | 同上；[flow-definition-store.ts](../../packages/llm-flow/src/flow-definition-store.ts) |
 | `WorkflowTaskSpec[]` | 声明式工作流 DSL，字段兼容 CLI 的 snake_case；编译出 nodes/edges | [types.ts](../../packages/llm-flow/src/flow/workflow/types.ts)、[compile.ts](../../packages/llm-flow/src/flow/workflow/compile.ts) |
 | `DagRunSpec` | 执行输入，包含展开后的图及运行策略；不是新增业务 Flow 类型 | [to-dag.ts](../../packages/llm-flow/src/flow/to-dag.ts)、[executor.ts](../../packages/llm-flow/src/flow/executor.ts) |

@@ -2,12 +2,7 @@
 // Seed a runnable default workflow (essay auto-review) into the flows module so
 // users have a working example out of the box.
 
-import type {
-    FlowDraft,
-    FlowEdgeDefinition,
-    FlowNodeDefinition,
-    FlowParameter,
-} from '@itookit/common';
+import type { FlowDraft, FlowEdgeDefinition, FlowNodeDefinition, FlowParameter } from '@itookit/llm-flow/contracts';
 import type { FlowDefinitionStore } from '@itookit/llm-flow';
 
 export const ESSAY_REVIEW_FLOW_ID = 'essay-review';

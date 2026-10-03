@@ -3,7 +3,7 @@
 // `assistantBlocks` + `toolResults` persistence shape (RoundResult) and the
 // ExecutionNode tree shape (tool children) in one place.
 
-import type { Round, RoundResult } from '@itookit/common';
+import type { Round, RoundResult } from '../contracts';
 import type { ExecutionNode, NodeStatus } from '../core/types';
 import type { RoundProjection, ToolCallProjection } from './round-types';
 
@@ -72,7 +72,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Rebuild display-only workflow interactions without adding model history messages. */
-export function flowInteractionNode(entry: import('@itookit/common').FlowInteraction, parentId: string): ExecutionNode {
+export function flowInteractionNode(entry: import('../contracts').FlowInteraction, parentId: string): ExecutionNode {
     return { id: entry.id, parentId, messageRole: entry.role, executorId: entry.taskId, executorType: 'composite',
         name: entry.name, status: entry.status, startTime: entry.createdAt,
         data: { input: entry.input, output: entry.content, thought: entry.thinking, error: entry.error, metaInfo: { flowInteraction: true, actor: entry.actor, parallelGroup: entry.parallelGroup, requests: entry.requests } }, children: [] };

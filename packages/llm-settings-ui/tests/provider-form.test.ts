@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it } from 'vitest';
-import type { LLMProvider } from '@itookit/llm-common';
+import type { LLMProvider } from '@itookit/driver-llm/contracts';
 import { readProviderForm, renderProtocolOptions, renderProviderAdvanced, syncProtocolControls } from '../src/editors/provider-form';
 
 const provider: LLMProvider = { id: 'gateway', name: 'Gateway', implementation: 'openai-compatible',

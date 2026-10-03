@@ -1,7 +1,7 @@
 // Conversation log contracts. Runtime execution is owned by @itookit/durable-kernel.
 
-import type { ChatMessage, Attachment } from '../llm/message';
-import type { TokenUsage } from '../llm/completion';
+import type { ChatMessage, Attachment } from '@itookit/llm-context';
+import type { TokenUsage } from '@itookit/driver-llm/contracts';
 
 // ─── Conversation Round ──────────────────────────────────────────────
 
@@ -26,9 +26,9 @@ export interface ConversationRound {
 }
 
 export interface Round extends ConversationRound {
-    submission?: import('./flow').SessionSubmission;
+    submission?: import('@itookit/llm-flow/contracts').SessionSubmission;
     /** Frozen workflow invocation owned by this branch round. */
-    flow?: { flowId: import('./flow-definition').FlowId; connectionId?: string; revision: number; parameters?: Record<string, import('./flow-definition').JsonValue> };
+    flow?: { flowId: import('@itookit/llm-flow/contracts').FlowId; connectionId?: string; revision: number; parameters?: Record<string, import('@itookit/llm-flow/contracts').JsonValue> };
     exposure?: 'public' | 'internal' | 'artifact';
     origin: 'merge' | 'rebase' | 'edit' | 'user';
     agentId?: string;
@@ -90,7 +90,7 @@ export interface FlowActor {
 
 export interface FlowInteraction {
     parallelGroup?: string;
-    requests?: Array<Omit<import('./agent-event').AgentEventLlmRequest, 'type'>>;
+    requests?: Array<Omit<import('@itookit/llm-tasks/contracts').AgentEventLlmRequest, 'type'>>;
     actor?: FlowActor;
     input?: unknown;
     id: string;

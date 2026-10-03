@@ -1,2 +1,0 @@
-// Compatibility exports; context owns model input contracts.
-export type { Role, MessageContentText, MessageContentImage, MessageContentAudio, MessageContentVideo, FileData, MessageContentFile, MessageContentToolResult, MessageContentCodeExecution, MessageContentCitation, MessageContentThinking, MessageContentToolUse, MessageContentPart, MessageContent, ToolDefinition, ToolCall, MCPToolCall, ComputerUseAction, AttachmentType, Attachment, ChatMessage } from '@itookit/llm-context';

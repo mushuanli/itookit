@@ -11,6 +11,11 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./contracts": {
+      "types": "./src/contracts.ts",
+      "import": "./src/contracts.ts",
+      "default": "./src/contracts.ts"
     }
   },
   "publishConfig": {
@@ -20,9 +25,24 @@
     "types": "./dist/index.d.ts",
     "exports": {
       ".": {
-        "types": "./dist/index.d.ts",
-        "import": "./dist/index.js",
-        "require": "./dist/index.cjs"
+        "import": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.js"
+        },
+        "require": {
+          "types": "./dist/index.d.cts",
+          "default": "./dist/index.cjs"
+        }
+      },
+      "./contracts": {
+        "import": {
+          "types": "./dist/contracts.d.ts",
+          "default": "./dist/contracts.js"
+        },
+        "require": {
+          "types": "./dist/contracts.d.cts",
+          "default": "./dist/contracts.cjs"
+        }
       }
     }
   },
@@ -37,14 +57,14 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
-    "@itookit/llm-common": "workspace:*",
     "@itookit/durable-kernel": "workspace:*",
-    "@itookit/common": "workspace:*",
     "@itookit/llm-tasks": "workspace:*",
     "@itookit/llm-flow": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
     "yaml": "^2.8.2",
-    "@itookit/llm-context": "workspace:*"
+    "@itookit/llm-context": "workspace:*",
+    "@itookit/driver-llm": "workspace:*",
+    "@itookit/tools": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.19.25",

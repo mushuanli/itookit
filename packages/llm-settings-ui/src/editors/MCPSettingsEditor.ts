@@ -12,7 +12,7 @@ import { BaseSettingsEditor, Toast, Modal } from '@itookit/ui-common';
 import type { MCPServer, IAgentManagementService } from '@itookit/common';
 import { bindMCPContent, renderMCPPrompts, parseMCPStringMap } from './mcp-content';
 import { hasMCPStdioHost } from '@itookit/kernel-adapters/llm';
-import { mcpTimeoutMs } from '@itookit/llm-common';
+import { mcpTimeoutMs } from '@itookit/tools/mcp-contracts';
 
 
 

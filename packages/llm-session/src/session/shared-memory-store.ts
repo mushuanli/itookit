@@ -1,4 +1,5 @@
-import { sha256HexSync, type MemoryPolicy } from '@itookit/common';
+import { sha256HexSync } from '@itookit/llm-context';
+import { type MemoryPolicy } from '@itookit/llm-tasks/contracts';
 import { FSError, type IFileSystem, type ISeqFileTransaction } from '@itookit/vfs-core';
 
 type Reference = NonNullable<MemoryPolicy['sharedMemory']>;

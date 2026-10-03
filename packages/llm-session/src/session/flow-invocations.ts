@@ -1,4 +1,5 @@
-import type { FlowRevision, ICommandBus, JsonValue, DagRunSpec } from '@itookit/common';
+import type { FlowRevision, JsonValue, DagRunSpec } from '@itookit/llm-flow/contracts';
+import type { ICommandBus } from '../contracts';
 import type { Kernel, TaskRecord, SessionHandle } from '@itookit/durable-kernel';
 import { FlowCommand, FlowDefinitionStore, validateFlowParameters } from '@itookit/llm-flow';
 import type { FlowInvocationSessions } from '../persistence/flow-invocation-sessions';

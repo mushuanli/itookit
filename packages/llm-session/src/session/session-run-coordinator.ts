@@ -1,8 +1,6 @@
-import {
-    t,
-    type Signal,
-    type ToolDefinition,
-} from '@itookit/common';
+import { t } from '../utils/host-ports';
+import { type Signal } from '../contracts';
+import { type ToolDefinition } from '@itookit/llm-context';
 import type { Kernel } from '@itookit/durable-kernel';
 import { ulid } from '../persistence/ulid';
 import type {
@@ -63,7 +61,7 @@ export class SessionRunCoordinator {
         private readonly attachments: AttachmentProcessor,
         private readonly callbacks: SessionRunCallbacks,
         private readonly kernel: Kernel,
-        dagPlugins: import('@itookit/common').DagPluginCatalog,
+        dagPlugins: import('@itookit/llm-flow/contracts').DagPluginCatalog,
         private readonly flowStore: FlowStore,
         resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
             definitions: ToolDefinition[];

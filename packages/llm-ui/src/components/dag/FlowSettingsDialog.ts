@@ -6,7 +6,7 @@ import type { FlowConnection, FlowVariables, FlowDefaults, FlowParameter, FlowRu
 import { escapeHTML, t } from '@itookit/common';
 
 export interface FlowSettingsOptions {
-    outputs?: import('@itookit/llm-common').FlowDraft['outputs'];
+    outputs?: import('@itookit/llm-flow/contracts').FlowDraft['outputs'];
     connections: FlowConnection[];
     defaultConnection?: string;
     parameters: FlowParameter[];
@@ -24,7 +24,7 @@ export interface FlowSettingsOptions {
 export interface EntityOption { id: string; name: string; description?: string }
 
 export interface FlowSettingsResult {
-    outputs?: import('@itookit/llm-common').FlowDraft['outputs'];
+    outputs?: import('@itookit/llm-flow/contracts').FlowDraft['outputs'];
     connections: FlowConnection[];
     defaultConnection?: string;
     parameters: FlowParameter[];

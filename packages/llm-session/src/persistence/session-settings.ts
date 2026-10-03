@@ -1,5 +1,5 @@
 import { mergeExecutionMode } from '../session/execution-mode-policy';
-import { DEFAULT_SESSION_SETTINGS, type ChatSessionSettings } from '@itookit/common';
+import { DEFAULT_SESSION_SETTINGS, type ChatSessionSettings } from '../contracts';
 import type { ConversationManifest } from './types';
 
 /** Older conversations with history retain their saved mode on upgrade. */

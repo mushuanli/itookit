@@ -2,7 +2,7 @@
 
 import type { JsonValue, ModelTier, PromptPreset } from '@itookit/common';
 import type { SessionTokenUsage } from '@itookit/llm-session';
-import type { ChatExecutionMode } from '@itookit/llm-common';
+import type { ChatExecutionMode } from '@itookit/llm-tasks/contracts';
 
 export type { PromptPreset } from '@itookit/common';
 

@@ -54,7 +54,7 @@ System Prompt 由独立的 `systemPromptPolicy` 控制：
 | # | 问题 | 证据 |
 |---|------|------|
 | P1 | Agent 与 Flow 节点配置**不同构** | Agent 是结构化字段（`AgentDefinition.config.systemPrompt` + `capabilityPolicy.toolIds`）；Flow 节点是扁平 `JsonValue`（`config.prompt` + `config.toolIds` + `capabilities[]` 混在一起） |
-| P2 | systemPrompt 单字符串 | `AgentDefinition.systemPrompt: string`（`llm-common/src/llm/agent.ts:24`）；`ContextAssembler.assemble(systemPrompt: string, skillsPrompt: string)`（`llm-tasks/src/core/context-assembler.ts:60-61`） |
+| P2 | systemPrompt 单字符串 | `AgentDefinition.systemPrompt: string`（`llm-session/src/contracts/agent.ts:24`）；`ContextAssembler.assemble(systemPrompt: string, skillsPrompt: string)`（`llm-tasks/src/core/context-assembler.ts:60-61`） |
 | P3 | 节点 prompt / capabilities 被覆盖成死代码 | `bindNode` 里 `prompt: task.input.text` + `capabilities: setup.config.capabilityPolicy?.toolIds`（`llm-session/src/session/session-run-coordinator.ts:304`） |
 | P4 | 无动态委派 | `spawn` 仅静态 patch-graph，无法由 Agent 产生 bounded child tasks |
 | P5 | 无节点级 history 控制 | 所有 agent 节点 `messages: snapshot.canonicalMessages`（`session-run-coordinator.ts:305`） |
@@ -93,7 +93,7 @@ flowchart TB
 
 **核心：Agent 与 Flow 节点共享同一 `LlmNodeConfig`，且 systemPrompt / tools / skill / connection 都是「配置实体 + id 引用」，改实体处处生效。**
 
-### 3.1 `LlmNodeConfig`（llm-common 定义，两侧共用）
+### 3.1 `LlmNodeConfig`（llm-tasks/contracts 定义，两侧共用）
 
 ```ts
 export type HistoryPolicy = 'inherit' | 'none' | 'upstream';
@@ -275,11 +275,11 @@ C4Component
 
 | 接口 | 位置 | 说明 |
 |------|------|------|
-| `LlmNodeConfig` | `llm-common` | 统一节点配置（引用 + 内联增量；Agent 与 Flow 节点共享） |
-| `SystemPromptDefinition` | `llm-common` | SystemPrompt 库实体（`id/name/content: string[]`，settings 管理） |
-| `HistoryPolicy` | `llm-common` | `'inherit' \| 'none' \| 'upstream'` |
-| `FlowAgentNodeConfig` | `llm-common/flow-definition` | Flow 节点 config（extends Partial<LlmNodeConfig> + agentId/instruction/delegation） |
-| `FlowDraft.systemPrompt?/toolIds?` | `llm-common/flow-definition` | flow 级公共引用（作为未指定 agentId 时的默认基座） |
+| `LlmNodeConfig` | `llm-tasks/contracts` | 统一节点配置（引用 + 内联增量；Agent 与 Flow 节点共享） |
+| `SystemPromptDefinition` | `llm-tasks/contracts` | SystemPrompt 库实体（`id/name/content: string[]`，settings 管理） |
+| `HistoryPolicy` | `llm-tasks/contracts` | `'inherit' \| 'none' \| 'upstream'` |
+| `FlowAgentNodeConfig` | `llm-flow/contracts` | Flow 节点 config（extends Partial<LlmNodeConfig> + agentId/instruction/delegation） |
+| `FlowDraft.systemPrompt?/toolIds?` | `llm-flow/contracts` | flow 级公共引用（作为未指定 agentId 时的默认基座） |
 
 **systemPrompt 合成（引用 + 内联增量，数组 concat）**：
 
@@ -570,7 +570,7 @@ type SpawnDependencyTarget =
 
 > 2026-09-05：下列 TaskGroup 策略的内核生命周期、持久传播和暂停确认以 [Durable Harness 协议 §12](durable-harness-protocol.md#12-监管session-与-taskgroup) 为目标规范。该协议仍待实现；Flow 应编译到其 Task/Wait/control 原语，不维护另一套执行事实。
 
-旧 `join.mode` 同时承载“是否收集结果”和“是否等待”，兼容字段的 `all/none` 都等待已启动 child。当前 delegation 已拆分 execution/wait/result；下面展示策略模型，准确字段以 `llm-common` 类型和 `delegation-runtime.ts` 为准：
+旧 `join.mode` 同时承载“是否收集结果”和“是否等待”，兼容字段的 `all/none` 都等待已启动 child。当前 delegation 已拆分 execution/wait/result；下面展示策略模型，准确字段以 `llm-flow/contracts` 类型和 `delegation-runtime.ts` 为准：
 
 ```ts
 interface TaskGroupPolicy {
@@ -744,7 +744,7 @@ Goal 支持进度摘要、追加约束、pause/resume 和完成标准验证，�
 
 | 阶段 | 内容 | 包 | 验证 |
 |---|---|---|---|
-| **P1 数据模型** | `LlmNodeConfig`（引用 + 内联）+ `SystemPromptDefinition` + `HistoryPolicy`；`capabilityPolicy.skillIds`；`FlowDraft/Revision.systemPrompt/toolIds`；`FlowAgentNodeConfig` | llm-common | typecheck |
+| **P1 数据模型** | `LlmNodeConfig`（引用 + 内联）+ `SystemPromptDefinition` + `HistoryPolicy`；`capabilityPolicy.skillIds`；`FlowDraft/Revision.systemPrompt/toolIds`；`FlowAgentNodeConfig` | llm-tasks/contracts、llm-flow/contracts | typecheck |
 | **P2 运行时（配置统一）** | 固定五层继承；`bindFlowNode` 分阶段 resolve 引用；Node 显式值优先；System Prompt 与 History 解耦 | llm-session / llm-tasks | typecheck + test |
 | **P3 三能力** | 节点级 `historyPolicy` / `persistOutput` / `delegation`（结构化 payload + history 隔离） | llm-flow / llm-tasks | test |
 | **P4 UI/seed** | Flow defaults + 参数运行表单 + builtin.agent 专用 inspector + 实体选择器；default-flows 改「引用 + 节点增量」 | llm-ui / llm-session | typecheck + UI test |

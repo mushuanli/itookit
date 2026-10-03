@@ -1,4 +1,4 @@
-import type { FlowActor, FlowInteraction } from '@itookit/common';
+import type { FlowActor, FlowInteraction } from '../contracts';
 import type { TaskRecord } from '@itookit/durable-kernel';
 
 export function record(value: unknown): Record<string, any> {

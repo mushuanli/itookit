@@ -1,6 +1,7 @@
 import { SettingsValidationError } from '@itookit/ui-common';
 import { renderProtocolOptions } from './provider-form';
-import { getProviderProtocols, resolveModelForTier } from '@itookit/llm-common';
+import { getProviderProtocols } from '@itookit/driver-llm/contracts';
+import { resolveModelForTier } from '@itookit/llm-session/contracts';
 import { showConfigurationForm, addConfigurationAction, addConfigurationEnabled } from './configuration-form';
 import { t } from '@itookit/common';
 // @file: llm-ui/editors/ConnectionSettingsEditor.ts

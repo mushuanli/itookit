@@ -1,8 +1,11 @@
 // @file: llm-conversation/session/agent-resolver.ts
 
 import { ExecutorConfig } from '../core/types';
-import { resolveModelForTier, ModelTier, resolveWebSearchStrategy, sha256Hex } from '@itookit/common';
-import type { ConnectionMeta, WebSearchMode } from '@itookit/common';
+import { resolveModelForTier, resolveWebSearchStrategy } from '../contracts';
+import { ModelTier } from '@itookit/driver-llm/contracts';
+import { sha256Hex } from '@itookit/llm-context';
+import type { ConnectionMeta } from '@itookit/driver-llm/contracts';
+import type { WebSearchMode } from '../contracts';
 import { IAgentConfigService } from '../services/agent-service';
 import { ConversationError, ConversationErrorCode } from '../core/errors';
 import { log } from '../utils/logger';
@@ -40,7 +43,7 @@ function describeError(error: unknown): string {
  */
 export class AgentResolver {
     constructor(private agentService: IAgentConfigService,
-        private readonly resolveSessionSkills?: (sessionId: string, ids: string[]) => Promise<import('@itookit/common').LLMSkill[]>,
+        private readonly resolveSessionSkills?: (sessionId: string, ids: string[]) => Promise<import('../contracts').LLMSkill[]>,
         private readonly resolveMCPProfiles?: (sessionId: string, ids: string[]) => Promise<string[]>) {}
 
     async getMCPToolIds(ids: string[], sessionId: string): Promise<string[]> {
@@ -131,20 +134,20 @@ export class AgentResolver {
     }
 
     /** Resolve a System Prompt library entry by id. */
-    async getSystemPrompt(id: string): Promise<import('@itookit/common').SystemPromptDefinition | null> {
+    async getSystemPrompt(id: string): Promise<import('@itookit/llm-tasks/contracts').SystemPromptDefinition | null> {
         return this.agentService.getSystemPrompt(id);
     }
 
     /** Resolve enabled static Skills in declaration order. */
-    async getSkills(ids: string[], sessionId?: string): Promise<import('@itookit/common').LLMSkill[]> {
+    async getSkills(ids: string[], sessionId?: string): Promise<import('../contracts').LLMSkill[]> {
         if (!ids.length) return [];
         if (sessionId && this.resolveSessionSkills) return this.resolveSessionSkills(sessionId, ids);
         const byId = new Map((await this.agentService.getSkills()).map(skill => [skill.id, skill]));
-        return ids.map(id => byId.get(id)).filter((skill): skill is import('@itookit/common').LLMSkill => Boolean(skill?.enabled));
+        return ids.map(id => byId.get(id)).filter((skill): skill is import('../contracts').LLMSkill => Boolean(skill?.enabled));
     }
 
     /** Build ExecutorConfig from an AgentDefinition. */
-    private async buildConfig(agentDef: import('@itookit/common').AgentDefinition): Promise<ExecutorConfig> {
+    private async buildConfig(agentDef: import('../contracts').AgentDefinition): Promise<ExecutorConfig> {
         const systemPromptSegments: string[] = [];
         if (agentDef.config.systemPromptId) {
             const prompt = await this.agentService.getSystemPrompt(agentDef.config.systemPromptId);
@@ -170,7 +173,7 @@ export class AgentResolver {
         } as ExecutorConfig;
     }
 
-    private async hashDefinition(agentDef: import('@itookit/common').AgentDefinition): Promise<string> {
+    private async hashDefinition(agentDef: import('../contracts').AgentDefinition): Promise<string> {
         const canonical = this.canonicalize({
             ...agentDef,
             version: undefined,

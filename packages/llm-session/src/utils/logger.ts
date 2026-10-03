@@ -1,6 +1,6 @@
 // @file: llm-conversation/utils/logger.ts
 
-import { createModuleLogger } from '@itookit/common';
+import { createModuleLogger } from './host-ports';
 
 /**
  * llm-driver 模块的统一日志实例

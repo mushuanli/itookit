@@ -13,7 +13,7 @@ const browserGlobals = new Set(['window', 'document', 'localStorage', 'sessionSt
 
 export function dependencyError(source, target) {
     if (source === target) return;
-    if (['@itookit/tools', '@itookit/device-tty', '@itookit/llm-tasks', '@itookit/llm-flow'].includes(source) &&
+    if (['@itookit/tools', '@itookit/device-tty', '@itookit/llm-tasks', '@itookit/llm-flow', '@itookit/llm-session'].includes(source) &&
         ['@itookit/common', '@itookit/llm-common'].includes(target)) return 'execution capabilities must use owned contracts and injected ports';
     if (source === '@itookit/driver-llm' && target !== '@itookit/llm-context') return 'driver-llm must receive host capabilities through its public ports';
     if (source === '@itookit/llm-context') return 'llm-context must receive I/O through its public ports';

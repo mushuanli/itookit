@@ -1,7 +1,7 @@
 // packages/common/src/index.ts
 
-// ── LLM: 已分离至 @itookit/llm-common；保持 re-export 向后兼容 ──
-export * from '@itookit/llm-common';
+// Legacy LLM exports forward their capability-owned contracts.
+export * from './llm-compat';
 
 // ── UI 契约已迁移至 @itookit/ui-common（IEditor/ISessionUI/EditorFactory 及 UI 组件）──
 

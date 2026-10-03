@@ -30,7 +30,7 @@ pnpm --filter @itookit/<pkg> typecheck
 
 | 类型 | 工具 |
 |---|---|
-| 逻辑包 (`common`, `llm-context`, `llm-common`, `vfs-core`, `driver-llm`, `device-tty`, `tools`, `kernel-adapters`, `durable-kernel`, `llm-tasks`, `llm-flow`, `llm-session`, `llm-settings-ui`, `ui-common`, vfsdrivers) | **tsup** (CJS+ESM+.d.ts) |
+| 逻辑包 (`common`, `llm-context`, `vfs-core`, `driver-llm`, `device-tty`, `tools`, `kernel-adapters`, `durable-kernel`, `llm-tasks`, `llm-flow`, `llm-session`, `llm-settings-ui`, `ui-common`, vfsdrivers) | **tsup** (CJS+ESM+.d.ts) |
 | UI 包 (`llm-ui`, `vfs-ui`, `mdx`, `app-settings`) | **vite build** |
 | 无构建脚本 (`app-core`, `app-shell`) | 由宿主 app（web-app / tauri-app / cli）打包 |
 
@@ -79,7 +79,7 @@ pnpm --filter @itookit/<pkg> typecheck
 LLMProvider (云厂商) → LLMConnection (tier→model) → AgentDefinition (system prompt)
 ```
 
-- 关键类型: `llm-common/src/agent/` + `llm-common/src/llm/`（common re-export）
+- 关键类型: `llm-session/src/contracts/` + `llm-session/src/contracts/`（common re-export）
 - Provider 实现: `driver-llm/src/providers/`
 - 联网搜索: `resolveWebSearchStrategy` → `WebSearchMode`（详见 [联网搜索](./doc/web-search.md)）
 - 详见 [架构设计](./doc/architecture.md)

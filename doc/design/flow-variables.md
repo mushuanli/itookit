@@ -53,7 +53,7 @@ Prompt 使用 `${vars.essay}` 读取当前稿件；`${param.essay}` 保留最初
 - [公共变量语义与调度检查点](../../packages/llm-flow/src/flow/variables.ts)
 - [普通 DAG 调度器](../../packages/llm-flow/src/flow/executor.ts)
 - [结构化路由提交](../../packages/llm-flow/src/flow/structured/dispatch.ts)
-- [模板引用](../../packages/llm-common/src/agent/flow-templates.ts)
+- [模板引用](../../packages/llm-flow/src/contracts/flow-templates.ts)
 - [变量运行验证](../../packages/llm-flow/__tests__/variables.test.ts)：普通节点、原参数保留、运行隔离、补全后初始化、重启恢复、原子校验、重试清理、组合流程隔离、纯文本/JSON 输出。
 - [作文与子节点验证](../../packages/llm-flow/__tests__/structured-flow.test.ts)：修改后评审读取新稿，外层节点读取新变量，普通 check 写回与重启恢复。
 

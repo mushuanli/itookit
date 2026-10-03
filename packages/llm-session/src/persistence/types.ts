@@ -1,10 +1,8 @@
-import type {
-    JsonValue,
-} from '@itookit/common';
+import type { JsonValue } from '@itookit/llm-flow/contracts';
 import type { RoundManifest } from './round-types';
 
-export type { ChatSessionSettings } from '@itookit/common';
-export { DEFAULT_SESSION_SETTINGS } from '@itookit/common';
+export type { ChatSessionSettings } from '../contracts';
+export { DEFAULT_SESSION_SETTINGS } from '../contracts';
 
 export interface ConversationUIState {
     branchDrafts?: Record<string, { inputText?: string; inputAgentId?: string }>;
@@ -64,7 +62,7 @@ export interface SessionFolder {
 /** A fresh, single-transaction snapshot for one editor load; never a persistent cache. */
 export interface SessionLoadState {
     manifest: ConversationManifest;
-    settings: import('@itookit/common').ChatSessionSettings;
+    settings: import('../contracts').ChatSessionSettings;
 }
 
 /** Editor load projection plus the selected history chain, read in the same transaction. */
@@ -107,8 +105,8 @@ export interface ISessionRepository extends SessionDeletionStore {
     updateManifest(sessionId: string, patch: Partial<ConversationManifest>): Promise<void>;
     getUIState(sessionId: string): Promise<ConversationUIState | null>;
     updateUIState(sessionId: string, patch: Partial<ConversationUIState>): Promise<void>;
-    getSessionSettings(sessionId: string): Promise<import('@itookit/common').ChatSessionSettings>;
-    saveSessionSettings(sessionId: string, patch: Partial<import('@itookit/common').ChatSessionSettings>): Promise<void>;
+    getSessionSettings(sessionId: string): Promise<import('../contracts').ChatSessionSettings>;
+    saveSessionSettings(sessionId: string, patch: Partial<import('../contracts').ChatSessionSettings>): Promise<void>;
     readDocument(sessionId: string, name: string): Promise<string | null>;
     writeDocument(sessionId: string, name: string, content: string): Promise<void>;
     listHistory(sessionId: string): Promise<string[]>;

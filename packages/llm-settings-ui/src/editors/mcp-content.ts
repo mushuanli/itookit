@@ -1,5 +1,6 @@
 import { escapeHTML, t, generateShortUUID } from '@itookit/common';
-import type { MCPDiscovery, MCPServer, IAgentManagementService } from '@itookit/llm-common';
+import type { MCPDiscovery, MCPServer } from '@itookit/tools/mcp-contracts';
+import type { IAgentManagementService } from '@itookit/llm-session/contracts';
 import { Modal, Toast } from '@itookit/ui-common';
 
 export function renderMCPPrompts(server: MCPServer): string {

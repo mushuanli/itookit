@@ -17,7 +17,7 @@
 ## 目录与职责
 
 ```text
-llm-common/src/agent/flow.ts
+llm-flow/src/contracts/flow.ts
   SessionSubmission                  通用身份与 source，不解释项目策略
 llm-session/src/persistence/submission-receipt.ts
   hasCommittedSubmission             检查 Round、execution 引用及提交的历史索引

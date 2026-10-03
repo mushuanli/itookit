@@ -1,7 +1,7 @@
 // @file: llm-conversation/session/attachment-processor.ts
 
 import { guessMimeType } from '@itookit/vfs-core';
-import type { Attachment } from '@itookit/common';
+import type { Attachment } from '@itookit/llm-context';
 import { ChatAttachment } from '../core/types';
 import { ISessionRepository } from '../persistence/types';
 import { MarkdownAnalyzer } from './MarkdownAnalyzer';

@@ -49,7 +49,7 @@
 
 | 当前位置 | 已有能力 | 应迁移/补齐的内容 |
 |---|---|---|
-| [context-types.ts](../../packages/llm-common/src/agent/context-types.ts) | Profile、Plan、Block、Snapshot、Explanation | Context 类型所有权迁入新包；兼容期旧入口只 re-export |
+| [context-types.ts](../../packages/llm-context/src/domain/context.ts) | Profile、Plan、Block、Snapshot、Explanation | Context 类型所有权迁入新包；兼容期旧入口只 re-export |
 | [context-assembler.ts](../../packages/llm-tasks/src/core/context-assembler.ts) | 分支主线遍历、profile 规则、材料/记忆装配、pending user 保留 | 装配迁入 context；当前全文装配且使用字符/4 估算，没有完整计入工具 schema/多模态；缺乏严格超限失败结果 |
 | [provider-message-adapter.ts](../../packages/llm-tasks/src/core/provider-message-adapter.ts) | 工具配对检查、部分 provider 清洗 | 协议组校验迁入 context；provider wire 编码经 codec 接口注入，避免继续积累厂商分支 |
 | [context-compaction.ts](../../packages/llm-tasks/src/durable/context-compaction.ts) | 保留 system、最后 user、最近消息与完整工具组 | 本质为按消息数裁剪，不是语义压缩；不存在摘要、原文读取或窗口世代 |
@@ -77,7 +77,7 @@ packages/llm-context/                  # Target logical layout; current files ar
   src/ports/                       # Storage, content, sources, codecs, token meter
 ```
 
-包本身不依赖 durable-kernel、llm-tasks、llm-session、common、VFS、具体设备或 UI。使用自身的 JSON DTO 与中立消息项；ID 为字符串值，宿主负责把 Round/Task/Effect ID 映射到来源字段。这样移动旧 Context 类型后不会形成 `llm-common ↔ context` 循环。
+包本身不依赖 durable-kernel、llm-tasks、llm-session、common、VFS、具体设备或 UI。使用自身的 JSON DTO 与中立消息项；ID 为字符串值，宿主负责把 Round/Task/Effect ID 映射到来源字段。这样移动旧 Context 类型后不会形成 聚合契约层与 llm-context 的循环依赖。
 
 ```mermaid
 flowchart TD
@@ -375,8 +375,8 @@ GC 与发布需要共同的 fence。活跃 Task 在线回收需要 stage 发布�
 
 旧 API 迁移规则：
 
-- `llm-common` / `common` 的 Context 类型（包括 [node-config.ts](../../packages/llm-common/src/llm/node-config.ts) 中的 ContextCompactionPolicy）、llm-tasks 的 ContextAssembler 导出在兼容期只转发或提供显式旧 DTO 转换；实现和新类型唯一来源是 context。最终消费者直接 `import type` 公开接口。
-- 旧 ChatMessage、Round/Artifact DTO 由边界 mapper 转换，context 不反向导入 llm-common。Provider wire 编码由 codec 适配，不把现有临时清洗规则当永久 API。
+- `common` 的 Context 类型（包括 [node-config.ts](../../packages/llm-tasks/src/contracts/node-config.ts) 中的 ContextCompactionPolicy）、llm-tasks 的 ContextAssembler 导出在兼容期只转发或提供显式旧 DTO 转换；实现和新类型唯一来源是 context。最终消费者直接 `import type` 公开接口。
+- 旧 ChatMessage、Round/Artifact DTO 由边界 mapper 转换，context 不反向依赖宿主或聚合兼容层。Provider wire 编码由 codec 适配，不把现有临时清洗规则当永久 API。
 - llm-session 仍拥有 Round/branch 的业务身份，Context Profile 的版本和选择规则迁出；旧 profile 文件只作为迁移输入。
 - Kernel `SessionContextApi` / ContextCommit / ContextBranch 属于历史通用提交 API；经 adapter 读取旧 context.seq，建立稳定 legacy ID 映射。新 Context 不双写两个权威 head；待消费者全部迁移后移除 Kernel 的 Context 命名 API，旧磁盘数据保留只读迁移支持。
 - Agent Program v1 保留恢复能力，v2 使用 context refs；挂起在工具/审批阶段的旧 Task 先按旧协议继续到安全边界。不得直接把所有持久 state 改形状却保持相同 program version。

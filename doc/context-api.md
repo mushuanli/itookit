@@ -16,7 +16,7 @@
 | `createContextGc` / `scheduleContextGc` | 引用标记、保留期、预算、定时维护 | [collector.ts](../packages/llm-context/src/gc/collector.ts)、[scheduler.ts](../packages/llm-context/src/gc/scheduler.ts) |
 | `ContextServiceResolver` | 按真实 Task/Session 获取服务 | [context-service.ts](../packages/app-core/src/runtime/context-service.ts) |
 
-`ChatMessage`、`ToolDefinition`、`ContextPlan`、`ContextSnapshot`、`ContextCompactionPolicy` 等类型以 Context 为唯一来源。旧 llm-common/common 与 llm-tasks 入口保留转发；Session 的 Profile 文件存储仍由 adapter 负责。
+`ChatMessage`、`ToolDefinition`、`ContextPlan`、`ContextSnapshot`、`ContextCompactionPolicy` 等类型以 Context 为唯一来源。common 与 llm-tasks 入口保留转发，原 llm-common 已删除；Session 的 Profile 文件存储仍由 adapter 负责。
 
 ## 持久执行
 

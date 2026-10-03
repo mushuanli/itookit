@@ -1,5 +1,5 @@
 import { skillContextResolver } from './session/conversation-run-coordinator';
-import { traceBoot } from '@itookit/common';
+import { traceBoot } from './utils/host-ports';
 import { FlowInvocationService } from './session/flow-invocations';
 import type { FlowInvocationSessions } from './persistence/flow-invocation-sessions';
 import { RoundLog as InvocationRoundLog } from './persistence/round-log';
@@ -86,7 +86,8 @@ export {
 } from './persistence/session-directory-storage';
 export { DurableConversationProjection } from './persistence/durable-conversation-projection';
 export { formatErrorMessage } from './utils/error-formatter';
-import type { DagPluginCatalog, ToolDefinition } from '@itookit/common';
+import type { DagPluginCatalog } from '@itookit/llm-flow/contracts';
+import type { ToolDefinition } from '@itookit/llm-context';
 import type { Kernel } from '@itookit/durable-kernel';
 import type { IAgentConfigService } from './services/agent-service';
 import type { ISessionRepository } from './persistence/types';
@@ -111,7 +112,7 @@ export interface ConversationSystemOptions {
     /** Standalone workflow storage (flows VFS module). */
     flowStore: FlowStore;
     resolveSessionContext?: (sessionId: string, userMessage: string) => Promise<{ projectInstructions: string; skillInstructions: string; skillIndex: string }>;
-    resolveSessionSkills?: (sessionId: string, ids: string[]) => Promise<import('@itookit/common').LLMSkill[]>;
+    resolveSessionSkills?: (sessionId: string, ids: string[]) => Promise<import('./contracts').LLMSkill[]>;
     resolveMCPToolIds?: (sessionId: string, ids: string[]) => Promise<string[]>;
     resolveHarnessToolIds?: (sessionId: string) => Promise<string[]>;
     resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{
@@ -250,3 +251,6 @@ async function resolveSessionConnection(options: ConversationSystemOptions, sess
 }
 
 export { hasCommittedSubmission } from './persistence/submission-receipt';
+
+export * from './contracts';
+export { configureSessionHostPorts, type SessionHostPorts } from './utils/host-ports';

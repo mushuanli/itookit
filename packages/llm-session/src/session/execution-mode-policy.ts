@@ -1,5 +1,6 @@
-import { t } from '@itookit/common';
-import type { ChatExecutionMode, ChatSessionSettings } from '@itookit/llm-common';
+import { t } from '../utils/host-ports';
+import type { ChatExecutionMode } from '@itookit/llm-tasks/contracts';
+import type { ChatSessionSettings } from '../contracts';
 
 /** Pure session policy shared by admission and transactional preference updates. */
 export function assertExecutionMode(settings: Pick<ChatSessionSettings, 'executionMode' | 'executionModeLocked'>,

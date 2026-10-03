@@ -1,4 +1,5 @@
-import type { IAgentConfigService, IAgentManagementService, MemoryPolicy } from '@itookit/common';
+import type { IAgentConfigService, IAgentManagementService } from '../contracts';
+import type { MemoryPolicy } from '@itookit/llm-tasks/contracts';
 import type { SessionMemoryProvider } from './session-memory-provider';
 
 type Reference = NonNullable<MemoryPolicy['sharedMemory']>;

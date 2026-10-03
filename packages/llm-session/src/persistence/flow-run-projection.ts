@@ -1,6 +1,8 @@
 import { flowLogicInteraction } from '../session/flow-logic-history';
 import { readFlowRunMembers } from '@itookit/llm-flow';
-import { formatFlowOutput, outputText, type AgentEvent, type FlowInteraction, type Round } from '@itookit/common';
+import { formatFlowOutput, outputText } from '@itookit/llm-flow/contracts';
+import { type AgentEvent } from '@itookit/llm-tasks/contracts';
+import { type FlowInteraction, type Round } from '../contracts';
 import type { EventEnvelope, Kernel, TaskRecord } from '@itookit/durable-kernel';
 import type { ISessionRepository } from './types';
 import { RoundLog } from './round-log';

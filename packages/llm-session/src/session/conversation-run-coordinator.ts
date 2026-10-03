@@ -1,23 +1,13 @@
 import { createContextAssembler, type IContextAssembler, type RetrievedMemoryEntry } from '@itookit/llm-context';
 import { FlowHistory } from './flow-history';
 import { CLIENT_WEB_SEARCH_TOOL, directExecutionMode, directToolIds } from './direct-execution-mode';
-import { DEFAULT_AGENT_MAX_EXCHANGES } from '@itookit/llm-common';
-import { formatFlowOutput, t } from '@itookit/common';
-import type {
-    AgentEvent,
-    Artifact,
-    ChatMessage,
-    ContextSnapshot,
-    ContextPlan,
-    DagPluginCatalog,
-    DagRunSpec,
-    DagNodeDefinition,
-    RoundResult,
-    Signal,
-    ToolCallInfo,
-    ToolDefinition,
-    LLMSkill,
-} from '@itookit/common';
+import { DEFAULT_AGENT_MAX_EXCHANGES } from '@itookit/llm-tasks/contracts';
+import { formatFlowOutput } from '@itookit/llm-flow/contracts';
+import { t } from '../utils/host-ports';
+import type { AgentEvent, ToolCallInfo } from '@itookit/llm-tasks/contracts';
+import type { Artifact, DagPluginCatalog, DagRunSpec, DagNodeDefinition } from '@itookit/llm-flow/contracts';
+import type { ChatMessage, ContextSnapshot, ContextPlan, ToolDefinition } from '@itookit/llm-context';
+import type { RoundResult, Signal, LLMSkill } from '../contracts';
 import {
     type CapabilityBinding,
     type EventEnvelope,
@@ -76,7 +66,7 @@ export interface ConversationRunCoordinatorOptions {
     retrieveMemory?: (
         plan: ContextPlan,
         agent: { id: string; version: string },
-        context: { sessionId: string; policy?: import('@itookit/common').MemoryPolicy },
+        context: { sessionId: string; policy?: import('@itookit/llm-tasks/contracts').MemoryPolicy },
     ) => Promise<RetrievedMemoryEntry[]>;
     /**
      * Host-provided isolated workspace manager for chat-embedded Flow runs.
@@ -608,7 +598,7 @@ function conversationRound(
     location: ConversationLocation,
     userMessage: ChatMessage,
     taskId: string,
-): import('@itookit/common').Round {
+): import('../contracts').Round {
     const parents = location.branchHead ? [location.branchHead] : [];
     const temporary = execution.task.input.sendIntent?.retention.mode === 'temporary';
     return {
@@ -639,7 +629,7 @@ function createUserMessage(text: string, files: ChatAttachment[]): ChatMessage {
     if (files.length) {
         message.attachments = files.map(file => ({
             name: file.name,
-            type: file.type as import('@itookit/common').AttachmentType,
+            type: file.type as import('@itookit/llm-context').AttachmentType,
             source: file.path ?? file.name,
             size: file.size,
         }));

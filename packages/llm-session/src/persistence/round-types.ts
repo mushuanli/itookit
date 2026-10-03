@@ -4,8 +4,8 @@
 // Design: each Round is stored as round-<roundId>.json inside the session's
 // Session history record store. The session manifest (RoundManifest) holds the DAG index.
 
-import type { Round, RoundId, Ref } from '@itookit/common';
-import type { ContextProfileId } from '@itookit/common';
+import type { Round, RoundId, Ref } from '../contracts';
+import type { ContextProfileId } from '@itookit/llm-context';
 
 // ─── Re-export for consumers ──────────────────────────────────────────────
 export type { Round, RoundId, Ref };
@@ -92,7 +92,7 @@ export interface RoundProjection {
 
     userMessage?: {
         content: string;
-        files?: import('@itookit/common').ChatAttachment[];
+        files?: import('../contracts').ChatAttachment[];
         persistedNodeId: string;
     };
 
@@ -103,13 +103,13 @@ export interface RoundProjection {
         persistedNodeId: string;
         /** Tool invocations executed before the final assistant message. */
         toolCalls?: ToolCallProjection[];
-    flowInteractions?: import('@itookit/common').FlowInteraction[];
+    flowInteractions?: import('../contracts').FlowInteraction[];
         /** Failure reason, rendered by the UI when the node status is failed. */
         error?: string;
     };
 
     createdAt: number;
-    origin: import('@itookit/common').Round['origin'];
+    origin: import('../contracts').Round['origin'];
     agentId?: string;
     stale?: boolean;
     defaultContextMode?: 'include' | 'exclude';

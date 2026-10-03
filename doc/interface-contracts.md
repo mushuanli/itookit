@@ -1,6 +1,6 @@
 # 跨包接口契约
 
-调用方只依赖接口，不依赖实现。契约按能力归属：driver-llm/contracts（模型通信与服务端口）、llm-context（消息与上下文）、tools/contracts（Tool/TTY 执行）、vfs-core（文件系统）；common/llm-common 保留未迁移业务契约和兼容入口。
+调用方只依赖接口，不依赖实现。契约按能力归属：driver-llm/contracts（模型通信与服务端口）、llm-context（消息与上下文）、tools/contracts（Tool/TTY 执行）、vfs-core（文件系统）；llm-tasks/contracts、llm-flow/contracts 和 llm-session/contracts 分别承载执行、编排与会话契约；common/llm-compat.ts 保留兼容导出。
 
 ## VFS 体系（@itookit/vfs-core）
 
@@ -17,26 +17,26 @@
 | `IIOStream` | `read()/write()/readStream?/close?` | `vfs-core/interfaces/` | 文件/设备句柄 | 文件↔LLM↔TTY 互拷 |
 | `IDeviceDriver` | `open()/ioctl()/close()` | `vfs-core/interfaces/device/` | `LLMDeviceDriver`、TTY driver | `kernel-adapters`、`driver-llm` |
 
-## LLM 契约（@itookit/llm-common + @itookit/common）
+## LLM 契约（能力包 contracts + common 兼容导出）
 
 | 接口/类型 | 核心字段/方法 | 定义 | 实现 | 消费 |
 |---|---|---|---|---|
 | `ILLMService` | `chat()`、`chatStream()`、`abort()`、`getConnection()` | `driver-llm/src/types/service.ts` | `kernel-adapters LLMServiceAdapter` | `llm-tasks`（经 effect）、`llm-session` |
-| `ChatMessage` | `role/content/attachments?` | `llm-common/llm/` | driver-llm | 全部 LLM 层 |
-| `ChatCompletionParams/ChatCompletionResponse/ChatCompletionChunk` | `messages/model/tools/stream/webSearch`… | `llm-common/llm/completion.ts` | driver-llm providers | `llm-tasks`、`kernel-adapters` |
-| `Citation` | `text/source/title/url`（联网搜索引用） | `llm-common/llm/completion.ts` | driver-llm providers | `kernel-adapters`、`llm-ui` |
-| `TokenUsage` | `prompt_tokens/completion_tokens/total_tokens` | `llm-common/llm/completion.ts` | driver-llm | `llm-tasks`、预算扣减 |
-| `LLMConnection/ConnectionMeta` | `id/name/providerId/tiers/model/protocol` | `llm-common/llm/connection.ts` | `driver-llm` | `llm-session AgentResolver` |
-| `WebSearchMode` | `'builtin'\|'client-tool'\|'disabled'` | `llm-common/llm/connection.ts` | `resolveWebSearchStrategy`（纯函数） | `llm-session` |
+| `ChatMessage` | `role/content/attachments?` | `llm-context/src/domain/message.ts` | driver-llm | 全部 LLM 层 |
+| `ChatCompletionParams/ChatCompletionResponse/ChatCompletionChunk` | `messages/model/tools/stream/webSearch`… | `driver-llm/src/types/response.ts` | driver-llm providers | `llm-tasks`、`kernel-adapters` |
+| `Citation` | `text/source/title/url`（联网搜索引用） | `driver-llm/src/types/response.ts` | driver-llm providers | `kernel-adapters`、`llm-ui` |
+| `TokenUsage` | `prompt_tokens/completion_tokens/total_tokens` | `driver-llm/src/types/response.ts` | driver-llm | `llm-tasks`、预算扣减 |
+| `LLMConnection/ConnectionMeta` | `id/name/providerId/tiers/model/protocol` | `llm-session/src/contracts/connection.ts` | `driver-llm` | `llm-session AgentResolver` |
+| `WebSearchMode` | `'builtin'\|'client-tool'\|'disabled'` | `llm-session/src/contracts/connection.ts` | `resolveWebSearchStrategy`（纯函数） | `llm-session` |
 | `SettingsAutoSave` / `requestSettingsSave` | 设置表单延迟保存、串行写入、失败重试与安全释放；不重建编辑 DOM | `ui-common/src/components/SettingsAutoSave.ts` | `BaseSettingsEditor`、`configuration-form.ts` | 七类 LLM 设置编辑器 |
-| `IConnectionService.listProviderModels` | 接受完整未保存 Provider，返回归一化模型目录；无持久化副作用 | `llm-common/llm/agent.ts` | `LLMDeviceDriver` → `providers/model-catalog.ts`，`VFSAgentService` 转发 | `ProviderSettingsEditor` |
-| `LLMProvider.supportedProtocols/defaultProtocol/modelsPath`、`LLMModel.preferredProtocol` | Provider 协议集合与默认、模型目录覆盖、模型首选；连接显式协议优先 | `llm-common/llm/connection.ts`、`provider-protocols.ts` | `driver-llm` registry / Driver / `.llm` 转换 | Provider / Connection 设置页 |
-| `LLMProvider.capabilities.serverSideWebSearch` | 服务端内置联网搜索能力（唯一事实源） | `llm-common/llm/connection.ts` | `kernel-adapters/src/llm-management/constants/providers.ts` | `resolveWebSearchStrategy` |
-| `ToolCall` / `ToolDefinition` | `id/name/arguments` | `llm-common/llm/` | driver-llm / `tools` | `llm-tasks` |
+| `IConnectionService.listProviderModels` | 接受完整未保存 Provider，返回归一化模型目录；无持久化副作用 | `llm-session/src/contracts/agent.ts` | `LLMDeviceDriver` → `providers/model-catalog.ts`，`VFSAgentService` 转发 | `ProviderSettingsEditor` |
+| `LLMProvider.supportedProtocols/defaultProtocol/modelsPath`、`LLMModel.preferredProtocol` | Provider 协议集合与默认、模型目录覆盖、模型首选；连接显式协议优先 | `driver-llm/src/types/connection.ts`、`driver-llm/src/types/protocol.ts` | `driver-llm` registry / Driver / `.llm` 转换 | Provider / Connection 设置页 |
+| `LLMProvider.capabilities.serverSideWebSearch` | 服务端内置联网搜索能力（唯一事实源） | `llm-session/src/contracts/connection.ts` | `kernel-adapters/src/llm-management/constants/providers.ts` | `resolveWebSearchStrategy` |
+| `ToolCall` / `ToolDefinition` | `id/name/arguments` | `llm-context/src/domain/message.ts` | driver-llm / `tools` | `llm-tasks` |
 | `ToolInvokeResult` | `success/output/durationMs`；可选 `data/errorCode/recoverable/truncated` | `tools/src/contracts/tool-types.ts` | `tools`、`kernel-adapters` | `llm-tasks`：显式 recoverable 失败反馈模型，其余失败终止任务 |
 | `DagNodeDefinition/DagEdgeDefinition/DagRunSpec/DagNodeOutcome` | `id/plugin/config/outputs/effects` | `llm-flow/src/contracts/dag-plugin.ts` | `llm-flow` | `llm-session`、`cli` |
 | `FlowDraft/FlowRevision/FlowNodeDefinition` | `nodes/edges/layout` | `llm-flow/src/contracts/flow-definition.ts` | `llm-flow FlowDefinitionStore` | `llm-ui`、`llm-session` |
-| `SerializableExpression` | `kind: eq/neq/in/and/or/not/…` | `llm-common/agent/` | `llm-flow operations` | `cli` 编译路由条件 |
+| `SerializableExpression` | `kind: eq/neq/in/and/or/not/…` | `llm-flow/src/contracts/flow-definition.ts` | `llm-flow operations` | `cli` 编译路由条件 |
 
 ## Kernel 执行内核（@itookit/durable-kernel）
 
@@ -153,4 +153,4 @@ HTTP 外挂的条件写入、取消与项目授权见 [HTTP VFS 设计](design/v
 
 `vfs-ui` 仅依赖 `vfs-core`。`BrowserSource` / `BrowserAction` 接收自定义资源与动作；`VFSPresentationOptions` 按实例注入翻译、SVG 和启动跟踪；`TagEditorFactory` / `ContextMenuConfig` / `UIPersistencePort` 接收宿主组件、菜单和存储。消费方从 vfs-ui 导入这些类型，或提供结构兼容实现，无需依赖 common/ui-common。MindOS 展示适配位于 `app-shell/src/browser/vfs-presentation.ts`。
 
-通信契约的权威实现已迁到 `driver-llm/src/types/`，llm-common 的 completion、connection、日志和协议模块保留兼容转发。中立消息契约归 `llm-context/src/domain/message.ts`；驱动的发布声明内联这些类型。模型设备与配置实现已迁到 `kernel-adapters/src/llm-management/`，通过 `@itookit/kernel-adapters/llm` 公开。
+通信契约的权威实现已迁到 `driver-llm/src/types/`，原 llm-common 已删除，common/llm-compat.ts 直接转发公开契约。中立消息契约归 `llm-context/src/domain/message.ts`；驱动的发布声明内联这些类型。模型设备与配置实现已迁到 `kernel-adapters/src/llm-management/`，通过 `@itookit/kernel-adapters/llm` 公开。

@@ -23,7 +23,7 @@ History 展示交互而不展开 DAG：输入节点与补充输入显示为 user
 - 打开历史输出只读取持久记录，不自动恢复执行；显式恢复仍使用工作台的恢复操作。切换 Session 或关闭窗口会释放轮询。
 - 新完成的 Flow 同时把格式化结果写入会话消息；旧会话中已保存的空消息不会自动重写，但仍可从「流程输出」读取 Run 的持久结果。
 
-源码：[输出投影](../../packages/llm-common/src/agent/flow-output.ts)、[会话窗口](../../packages/llm-ui/src/flows/session-output.ts)、[输出渲染](../../packages/llm-ui/src/components/dag/FlowOutput.ts)。
+源码：[输出投影](../../packages/llm-flow/src/contracts/flow-output.ts)、[会话窗口](../../packages/llm-ui/src/flows/session-output.ts)、[输出渲染](../../packages/llm-ui/src/components/dag/FlowOutput.ts)。
 
 ## 节点工具与 Skill
 

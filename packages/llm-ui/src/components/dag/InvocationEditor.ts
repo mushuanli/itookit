@@ -1,5 +1,5 @@
 import { escapeHTML, t, type FlowDraft, type FlowNodeDefinition } from '@itookit/common';
-import { renderFlowTemplate } from '@itookit/llm-common';
+import { renderFlowTemplate } from '@itookit/llm-flow/contracts';
 
 /** Authoring helpers only; neither preview nor variable insertion invokes a model. */
 export function enhanceInvocationEditor(root: HTMLElement, draft: FlowDraft, node: FlowNodeDefinition, allowPreview = true): void {

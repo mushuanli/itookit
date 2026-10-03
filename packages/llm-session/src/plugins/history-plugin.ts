@@ -2,7 +2,7 @@
 //
 // Wraps PromptHistoryService methods as ICommandBus commands.
 
-import type { ILLMPlugin, ExtensionContext } from '@itookit/common';
+import type { ILLMPlugin, ExtensionContext } from '../contracts';
 import type { SessionManager } from '../session/session-manager';
 
 export function createHistoryPlugin(sessionManager: SessionManager): ILLMPlugin {

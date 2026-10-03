@@ -55,7 +55,7 @@ async function initializeConversationSystem(options: ConversationSystemOptions):
 
 ## 会话管理：SessionManager
 
-`SessionManager implements ISession, SessionQuery` —— 会话门面，UI 主要入口。`ISession`（`llm-common`）：`signal(s)` 入站 + `events()` 出站事件流（Unix 进程模型）。
+`SessionManager implements ISession, SessionQuery` —— 会话门面，UI 主要入口。`ISession`（`llm-session/contracts`）：`signal(s)` 入站 + `events()` 出站事件流（Unix 进程模型）。
 
 ```ts
 class SessionManager implements ISession, SessionQuery {

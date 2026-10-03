@@ -268,7 +268,7 @@ CLI 实测（单节点 + 1.5s mock 响应，探针 `.tauri-acceptance/probe-publ
 
 | CLI 全量矩阵 5s 默认超时抖动（`session-delete-localfs`） | 已修复（2026-09-11 第六十六轮）：该文件是 CLI 里**唯一**生成真实子进程（`tsx` worker ×3）却未声明超时的测试（其余 10 个进程类文件为 10–60s）；单独跑 2.4s，与最重的 `worktree-run`（约 40s）并行时超过默认 5000ms。按既有约定加超时（进程重启用例 30s、其余 15s）；同条件复跑 CLI 套件 24 文件 / 88 用例通过，整仓 `pnpm test` 恢复 `=== full matrix passed` |
 
-| `docs:check` 长期告警的 5 个包缺 `AGENTS.md` | 已补齐（2026-09-11 第六十六轮）：`durable-kernel`、`kernel-adapters`、`llm-common`、`ui-common`、`demo` 各按实际源码结构/依赖方向/公共入口/约束/运行命令编写（`demo` 记为 legacy 手工 playground）。`docs:check` 的 `[missing-doc]` 告警 5→0（75 份活文档，余 5 条历史表述告警） |
+| `docs:check` 长期告警的 5 个包缺 `AGENTS.md` | 已补齐（2026-09-11 第六十六轮）：`durable-kernel`、`kernel-adapters`、`ui-common`、`demo` 各按实际源码结构/依赖方向/公共入口/约束/运行命令编写（`demo` 记为 legacy 手工 playground）。`docs:check` 的 `[missing-doc]` 告警 5→0（75 份活文档，余 5 条历史表述告警） |
 
 | P0-02② 空闲 IPC 只计 VFS 引擎、不计 SQLite sidecar（量化不完整） | 已补齐计量（2026-09-11 第六十七轮）：sidecar 是桌面端**第二条** Tauri IPC 通道（`TauriSqlSidecarDb`），`ioStats` 看不到。新增 `packages/vfsdriver-localfs/src/db/sidecar-stats.ts`（`SIDECAR_OPERATIONS` + `countSidecarOperations` 代理）与 `LocalFSBackend.sidecarStats`/`resetSidecarStats`；`transaction` 回调收到被插桩的句柄，事务内语句同样计数。`apps/tauri-app/src/log/vfs-trace.ts` 每 2s 输出 `{ ops, delta, sidecarOps, sidecar }`，`main.ts` 把 LocalFS 根后端接入 trace。回归 `packages/vfsdriver-localfs/tests/24-sidecar-stats.test.ts` 3 通过（冻结全量计数集 + reset、记录读写计数、事务内语句计数）；`packages/app-shell/tests/session-workbench-idle-localfs.test.ts` 在 LocalFS 后端装载真实 vfs-ui 侧栏 + `SessionWorkbench`，静置 1s 内 VFS 与 sidecar 增量均为 **0**。vfsdriver-localfs 54→57、app-shell 132→133。**边界**：这是计量能力 + jsdom 双通道回归；真实 Tauri IPC 下的聊天视图空闲流与真实窗口测量仍未验收 |
 
@@ -598,7 +598,7 @@ backend.statType（前缀能力检查，免元数据） = 909
 
 ### 17.3 记录一个非显然契约：`capabilityPolicy` 在顶层
 
-第一次预置时把它写在 `config.capabilityPolicy`，模型请求里 `tools: []`（工具静默缺失）；`AgentResolver.buildConfig` 读的是 **`agentDef.capabilityPolicy`（顶层）**，不是 `agentDef.config.capabilityPolicy`。已写入 [llm-common AGENTS](../packages/llm-common/AGENTS.md)。同类「配了却没生效」的静默失败值得后续加一条校验。
+第一次预置时把它写在 `config.capabilityPolicy`，模型请求里 `tools: []`（工具静默缺失）；`AgentResolver.buildConfig` 读的是 **`agentDef.capabilityPolicy`（顶层）**，不是 `agentDef.config.capabilityPolicy`。已写入 [llm-session AGENTS](../packages/llm-session/AGENTS.md)。同类「配了却没生效」的静默失败值得后续加一条校验。
 
 ### 17.4 未完成与障碍
 
@@ -796,7 +796,7 @@ user    Review the interface change
 
 - `SlashCommandRouter` 新增 `SlashSkillCommands`（`snapshot` / `load` / `describe` / `openPanel` / `refresh`）并注入 `getSkills`、`onSkillPickerOpen`、`onSkill`、`onSkills`、`onSkillInvoke`；编辑器用 `bindSkillRefresh` 维护同步快照，弹面板前触发一次刷新（弹窗 items 只在首次显示时构建）。
 - `onSkillInvoke`：模型上下文可加载的 Skill → `load` + `buildSkillPrompt`；action/silent/disabled → `buildActionSkillMessage` 把正文**内联进用户消息**，且**不调用 `load`**（`SessionSkillControls.load` 对这类定义会以 `cannot be loaded` 拒绝，这是模型上下文闸门的设计行为）。
-- `SessionSkillControls` 新增 `describe(sessionId, skillId)`（llm-common 契约 + kernel-adapters 实现）提供定义名/类型/正文/触发策略，供上面分支判断。
+- `SessionSkillControls` 新增 `describe(sessionId, skillId)`（tools/contracts 契约 + kernel-adapters 实现）提供定义名/类型/正文/触发策略，供上面分支判断。
 - `PopupPanel`：无匹配项时不再吞掉 Enter——否则 `hasArgs` 类命令（`/sk-<id>`、`/skill`）在弹窗打开时永远发不出去。
 
 ### 22.3 真机证据（真实窗口 + 真实 IPC，GUI 挂载的项目目录）
@@ -1441,7 +1441,7 @@ P0-00 此前只有「项目规则 + Skill 进入真实窗口请求」的证据�
 
 ### 71.1 实现与设计
 
-- `SKILL.md` frontmatter 新增 `auto-load`（可选布尔）：`autoLoad` 仍由 `trigger-strategy` 推导（reference 默认 true、action 恒 false），但 reference 可用 `auto-load: false` 显式关闭自动注入。这类定义仍可被 `load_skill`、Skill 面板和 `/sk-<id>` 显式加载并登记持久身份，只是新运行不因策略自动注入——正是区分「持久身份恢复」与「autoLoad」所需的定义。见 [Skill 设计 §5](design/skill-design.md) 与 `SkillFrontmatter`（`llm-common/src/skills/fs-skill-types.ts`）。
+- `SKILL.md` frontmatter 新增 `auto-load`（可选布尔）：`autoLoad` 仍由 `trigger-strategy` 推导（reference 默认 true、action 恒 false），但 reference 可用 `auto-load: false` 显式关闭自动注入。这类定义仍可被 `load_skill`、Skill 面板和 `/sk-<id>` 显式加载并登记持久身份，只是新运行不因策略自动注入——正是区分「持久身份恢复」与「autoLoad」所需的定义。见 [Skill 设计 §5](design/skill-design.md) 与 `SkillFrontmatter`（`tools/src/contracts/fs-skill-types.ts`）。
 - **多层级规则取舍**：项目规则只取项目根的 `_agent/AGENT.md`；parent-fs/local-fs 层级的 `_agent/AGENT.md` 既不合并也不替换，避免切换 cwd 静默换掉项目指令。Skill 仍按层级级联发现，同名 id 由更深层级覆盖。见 [Skill 设计 §3](design/skill-design.md)。
 
 ### 71.2 包级 / CLI / 宿主装配回归

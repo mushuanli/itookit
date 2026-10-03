@@ -22,7 +22,6 @@ export const WORKSPACE_SOURCES = [
     ['@itookit/device-tty', 'packages/device-tty/src/index.ts'],
     ['@itookit/durable-kernel', 'packages/durable-kernel/src/index.ts'],
     ['@itookit/kernel-adapters', 'packages/kernel-adapters/src/index.ts'],
-    ['@itookit/llm-common', 'packages/llm-common/src/index.ts'],
     ['@itookit/llm-flow', 'packages/llm-flow/src/index.ts'],
     ['@itookit/llm-session', 'packages/llm-session/src/index.ts'],
     ['@itookit/llm-settings-ui', 'packages/llm-settings-ui/src/index.ts'],

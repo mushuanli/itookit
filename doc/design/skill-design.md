@@ -4,7 +4,7 @@
 
 ## 1. 类型与持久化
 
-类型定义在 [skill-types.ts](../../packages/llm-common/src/skills/skill-types.ts)，服务在 [skill-service.ts](../../packages/llm-common/src/skills/skill-service.ts)。`LLMSkill` 是 `SkillDefinition` 的别名（[agent.ts](../../packages/llm-common/src/llm/agent.ts) 第 110 行），启动同步直接传递定义，不再调用 llmSkillToSkillDef 转换。
+类型定义在 [skill-types.ts](../../packages/tools/src/contracts/skill-types.ts)，服务在 [skill-service.ts](../../packages/tools/src/contracts/skill-service.ts)。`LLMSkill` 是 `SkillDefinition` 的别名（[agent.ts](../../packages/llm-session/src/contracts/agent.ts) 第 110 行），启动同步直接传递定义，不再调用 llmSkillToSkillDef 转换。
 
 | 来源 | 存储与读取 | 运行时归属 |
 | --- | --- | --- |

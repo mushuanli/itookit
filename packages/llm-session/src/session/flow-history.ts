@@ -1,6 +1,8 @@
 import { flowLogicInteraction } from './flow-logic-history';
 import { flowActor, flowToolInteraction, flowToolId, flowRequestId } from './flow-identity';
-import { formatFlowOutput, type AgentEvent, type FlowInteraction } from '@itookit/common';
+import { formatFlowOutput } from '@itookit/llm-flow/contracts';
+import { type AgentEvent } from '@itookit/llm-tasks/contracts';
+import { type FlowInteraction } from '../contracts';
 import type { EventEnvelope, TaskHandle, TaskRecord } from '@itookit/durable-kernel';
 import type { ConversationExecution } from './conversation-run-coordinator';
 import type { SessionEventBus } from './session-event-bus';

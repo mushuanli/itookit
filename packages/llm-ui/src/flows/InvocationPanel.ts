@@ -1,6 +1,6 @@
 import { flowConnectionSelection } from './connection-selection';
 import { escapeHTML, randomUUID, t, type ICommandBus, type FlowParameter, type JsonValue } from '@itookit/common';
-import { formatFlowOutput } from '@itookit/llm-common';
+import { formatFlowOutput } from '@itookit/llm-flow/contracts';
 import { FlowCommand, FlowInvocationCommand, type FlowInvocationRecord, type DurableFlowSnapshot } from '@itookit/llm-session';
 import type { InteractionRequest, TaskRecord } from '@itookit/durable-kernel';
 import { InteractionPanel } from '../components/input/InteractionPanel';

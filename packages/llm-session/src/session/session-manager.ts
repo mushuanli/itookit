@@ -22,13 +22,15 @@ import {
     SessionOrigin,
     HistoryPolicy,
 } from '../core/types';
-import type { DagPluginCatalog, JsonValue, SendIntent, ToolDefinition } from '@itookit/common';
+import type { DagPluginCatalog, JsonValue, SendIntent } from '@itookit/llm-flow/contracts';
+import type { ToolDefinition } from '@itookit/llm-context';
 import type { FlowStore } from '@itookit/llm-flow';
 import { ConversationError, ConversationErrorCode } from '../core/errors';
 import { CONVERSATION_DEFAULTS } from '../core/constants';
 import { ISessionRepository, BranchTreeNode } from '../persistence/types';
 import type { IAgentConfigService } from '../services/agent-service';
-import type { ISession, Signal, AgentEvent } from '@itookit/common';
+import type { ISession, Signal } from '../contracts';
+import type { AgentEvent } from '@itookit/llm-tasks/contracts';
 import { SessionRunCoordinator } from './session-run-coordinator';
 import { AgentResolver, AgentInfo, ModelInfo } from './agent-resolver';
 import { AttachmentProcessor } from './attachment-processor';
@@ -81,7 +83,7 @@ export class SessionManager implements ISession, SessionQuery {
             dagPlugins: DagPluginCatalog;
             flowStore: FlowStore;
             resolveSessionContext?: (sessionId: string, userMessage: string) => Promise<{ projectInstructions: string; skillInstructions: string; skillIndex: string }>;
-            resolveSessionSkills?: (sessionId: string, ids: string[]) => Promise<import('@itookit/common').LLMSkill[]>;
+            resolveSessionSkills?: (sessionId: string, ids: string[]) => Promise<import('../contracts').LLMSkill[]>;
             resolveMCPToolIds?: (sessionId: string, ids: string[]) => Promise<string[]>;
     resolveHarnessToolIds?: (sessionId: string) => Promise<string[]>;
             resolveTools?: (sessionId: string, allowedIds: string[]) => Promise<{

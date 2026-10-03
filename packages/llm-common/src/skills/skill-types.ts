@@ -1,2 +1,0 @@
-// Compatibility exports; contracts belong to their execution capability.
-export type { SkillType, SkillTriggerStrategy, SkillScopeLevel, SkillVersionPolicy, SkillVersionSnapshot, SkillVersionDrift, CompactSection, SkillCorrectionLog, SkillTaskProgramRef, SkillGlobPattern, SkillRouteLayer, SkillMatchContext, ParsedCompactInstructions, SkillDefinition, SkillToolBinding, SkillLoadResult } from '@itookit/tools/contracts';

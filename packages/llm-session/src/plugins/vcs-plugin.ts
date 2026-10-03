@@ -3,7 +3,7 @@
 // Branch management: create / switch / rename / delete / list / tree / messages.
 // All operations delegate to SessionManager which wraps the SessionRepository.
 
-import type { ILLMPlugin, ExtensionContext } from '@itookit/common';
+import type { ILLMPlugin, ExtensionContext } from '../contracts';
 import type { SessionManager } from '../session/session-manager';
 
 export function createVcsPlugin(sessionManager: SessionManager): ILLMPlugin {

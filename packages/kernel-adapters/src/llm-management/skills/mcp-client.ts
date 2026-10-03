@@ -6,7 +6,7 @@
 import { hostMCPStdioTransport } from './mcp-host-transport';
 import { createModuleLogger } from '@itookit/common';
 import { MCP_PROTOCOL_VERSION, type MCPDiscovery } from '@itookit/tools/mcp-contracts';
-import { type ToolDefinition } from '@itookit/llm-common';
+import { type ToolDefinition } from '@itookit/llm-context';
 import type { MCPConfig, MCPServerConfig } from './types';
 
 const log = createModuleLogger('device-llm:mcp');

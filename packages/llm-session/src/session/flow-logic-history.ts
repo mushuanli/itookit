@@ -1,5 +1,6 @@
-import { t } from '@itookit/common';
-import type { FlowLogicEvent, FlowInteraction } from '@itookit/common';
+import { t } from '../utils/host-ports';
+import type { FlowLogicEvent } from '@itookit/llm-flow/contracts';
+import type { FlowInteraction } from '../contracts';
 import type { EventEnvelope, TaskRecord } from '@itookit/durable-kernel';
 import { flowActor } from './flow-identity';
 

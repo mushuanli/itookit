@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import type { ContextPlan } from '@itookit/common';
+import type { ContextPlan } from '@itookit/llm-context';
 import { ContextAssembler } from '@itookit/llm-tasks';
 import { ConversationRunCoordinator } from '../src/session/conversation-run-coordinator';
 

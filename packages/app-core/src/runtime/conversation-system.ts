@@ -5,6 +5,8 @@ import type { IFileSystem, IVFSManager } from '@itookit/vfs-core';
 import { resetSessionManager } from '@itookit/llm-session';
 import type { HeadlessKernelRuntime } from './create-kernel-runtime';
 import { withWorkspaceScopeCleanup } from './workspace-scope-cleanup';
+import { configureSessionHostPorts } from '@itookit/llm-session';
+import { t, createModuleLogger, traceBoot } from '@itookit/common';
 
 export interface ConversationSystemOptions {
     vfs: IVFSManager;
@@ -32,6 +34,7 @@ export async function createConversationSystem(
     options: ConversationSystemOptions,
 ): Promise<{ sessionManager: SessionManager; commandBus: CommandBus }> {
     const { vfs, agentService, sessionRepository, flowEngine, kernel, systemFS } = options;
+    configureSessionHostPorts({ translate: t, logger: createModuleLogger('llm-conversation'), traceBoot });
     const capabilities = createFlowCapabilities(kernel);
     return initializeConversationSystem({
         agentService,
@@ -56,4 +59,5 @@ export async function createConversationSystem(
 /** The conversation layer is process-wide; release it during host shutdown. */
 export function disposeConversationSystem(): void {
     resetSessionManager();
+    configureSessionHostPorts();
 }

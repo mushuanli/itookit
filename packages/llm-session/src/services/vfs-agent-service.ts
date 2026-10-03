@@ -1,4 +1,4 @@
-import type { ProviderConnectionTestParams } from '@itookit/llm-common';
+import type { ProviderConnectionTestParams } from '@itookit/driver-llm/contracts';
 // @file: llm-conversation/src/services/vfs-agent-service.ts
 //
 // Agent VFS 持久化服务。
@@ -7,13 +7,11 @@ import type { ProviderConnectionTestParams } from '@itookit/llm-common';
 import { FileBackedService } from '../utils/file-backed-service';
 import type { IFileSystem } from '@itookit/vfs-core';
 import type { FSNode, FSSearchQuery } from '@itookit/vfs-core';
-import type { RestorableItem } from '@itookit/common';
-import type {
-    ILLMManagementService, ConnectionMeta, LLMConnection,
-    AgentDefinition, MCPServer, LLMSkill, LLMProvider,
-    InitialAgentDef, DefaultConnectionDef, ConnectionTestResult,
-    SystemPromptDefinition,
-} from '@itookit/common';
+import type { RestorableItem } from '../contracts';
+import type { ILLMManagementService, AgentDefinition, LLMSkill, InitialAgentDef, DefaultConnectionDef } from '../contracts';
+import type { ConnectionMeta, LLMConnection, LLMProvider, ConnectionTestResult } from '@itookit/driver-llm/contracts';
+import type { MCPServer } from '@itookit/tools/mcp-contracts';
+import type { SystemPromptDefinition } from '@itookit/llm-tasks/contracts';
 
 import { IAgentManagementService } from './agent-service';
 import { log } from '../utils/logger';
@@ -384,15 +382,15 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
         return this.llmService.writePricing(config);
     }
 
-    async queryCosts(filter?: Parameters<ILLMManagementService['queryCosts']>[0]): Promise<import('@itookit/common').CostRecord[]> {
+    async queryCosts(filter?: Parameters<ILLMManagementService['queryCosts']>[0]): Promise<import('../contracts').CostRecord[]> {
         return this.llmService.queryCosts(filter);
     }
 
-    getPricingConfig(): import('@itookit/common').ModelPricingConfig {
+    getPricingConfig(): import('../contracts').ModelPricingConfig {
         return this.llmService.getPricingConfig();
     }
 
-    getPricingDefaults(): import('@itookit/common').ModelPricingConfig {
+    getPricingDefaults(): import('../contracts').ModelPricingConfig {
         return this.llmService.getPricingDefaults();
     }
 

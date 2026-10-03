@@ -4,7 +4,7 @@
 // UI calls commands.execute('vcs.branch.create', args) instead of
 // directly invoking SessionManager.createBranch().
 
-import type { ICommandBus, CommandDescriptor, Disposable } from '@itookit/common';
+import type { ICommandBus, CommandDescriptor, Disposable } from '../contracts';
 
 export class CommandBus implements ICommandBus {
     private readonly handlers = new Map<string, (args?: unknown) => Promise<unknown>>();

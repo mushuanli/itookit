@@ -1,13 +1,8 @@
 // @file: llm-conversation/src/core/types.ts
 
-import type {
-    AgentDefinition,
-    ChatAttachment,
-    Citation,
-    ModelTier,
-    SendIntent,
-    WebSearchMode,
-} from '@itookit/common';
+import type { AgentDefinition, ChatAttachment, WebSearchMode } from '../contracts';
+import type { Citation, ModelTier } from '@itookit/driver-llm/contracts';
+import type { SendIntent } from '@itookit/llm-flow/contracts';
 
 // ═══════════════════════════════════════════════════════════════
 // Core types (NodeStatus, ExecutorConfig, ExecutorType — consolidated in llm-conversation)
@@ -65,8 +60,8 @@ export interface ExecutorConfig {
 }
 
 // Conversation view types.
-export type { ChatAttachment, ChatSessionSettings } from '@itookit/common';
-export { DEFAULT_SESSION_SETTINGS } from '@itookit/common';
+export type { ChatAttachment, ChatSessionSettings } from '../contracts';
+export { DEFAULT_SESSION_SETTINGS } from '../contracts';
 
 // ═══════════════════════════════════════════════════════════════
 // Session origin & history policy
@@ -110,7 +105,7 @@ export interface SessionTokenUsage {
  * ✅ 新增：查询覆盖参数
  */
 export interface ExecutionOverrides {
-    executionMode?: import('@itookit/llm-common').ChatExecutionMode;
+    executionMode?: import('@itookit/llm-tasks/contracts').ChatExecutionMode;
     /**
      * 覆盖使用的 LLM 连接 ID（替代 modelId）。
      * Explicit connection for this execution; otherwise use Session/global defaults.
@@ -445,7 +440,7 @@ export interface DeleteResult {
 // LLM 2.0 canonical event types (S7)
 // ═══════════════════════════════════════════════════════════════
 
-import type { AgentEvent } from '@itookit/common';
+import type { AgentEvent } from '@itookit/llm-tasks/contracts';
 
 /**
  * Engine-level UI projection events for tree-based rendering.
@@ -567,7 +562,7 @@ export type RegistryEvent =
     | { type: 'background_task_completed'; payload: { sessionId: string } }
     | {
         type: 'execution_task_projected';
-        payload: { sessionId: string; taskId: string; roundId: string; submission?: import('@itookit/common').SendIntent['submission'] };
+        payload: { sessionId: string; taskId: string; roundId: string; submission?: import('@itookit/llm-flow/contracts').SendIntent['submission'] };
     }
     /**
      * 后台会话打开了 TTY 交互进程。

@@ -3,7 +3,7 @@ import { resolveSessionExecutionMode } from '../src/session/session-execution-mo
 import { expect, it, vi } from 'vitest';
 import { Kernel } from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
-import { DEFAULT_AGENT_MAX_EXCHANGES, type ChatExecutionMode } from '@itookit/llm-common';
+import { DEFAULT_AGENT_MAX_EXCHANGES, type ChatExecutionMode } from '@itookit/llm-tasks/contracts';
 import { ConversationRunCoordinator } from '../src/session/conversation-run-coordinator';
 import { SessionRunCoordinator } from '../src/session/session-run-coordinator';
 import type { ExecutionTask, TaskInput } from '../src/core/types';
@@ -39,7 +39,7 @@ it.each([
             log: { loadManifest: async () => ({ currentBranch: 'main', branches: { main: null }, branchMeta: {} }) },
             roundId: 'r', contextFiles: [], finalize: async () => {} };
         if (program === 'rejected') {
-            await expect(coordinator.executeDirect(execution as never)).rejects.toThrow('没有可用工具');
+            await expect(coordinator.executeDirect(execution as never)).rejects.toThrow('No tools are available');
             expect(resolveHarnessToolIds).not.toHaveBeenCalled();
             expect(await kernel.listSessionTasks('s')).toEqual([]);
             return;

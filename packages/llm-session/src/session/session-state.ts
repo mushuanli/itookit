@@ -3,7 +3,7 @@
 // In-memory session projection cache (Round DAG format).
 // Updated via apply(RoundLogEvent); consumed by UI via getSessions().
 
-import type { RoundId } from '@itookit/common';
+import type { RoundId } from '../contracts';
 import type { RoundProjection } from '../persistence/round-types';
 import type { RoundLogEvent } from '../persistence/round-events';
 import { buildToolChildren, buildFlowChildren } from '../persistence/projection';

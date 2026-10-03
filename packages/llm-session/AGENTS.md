@@ -18,6 +18,10 @@ src/
 
 ## 约束
 
+- `llm-session/contracts` 拥有会话、命令/扩展和配置管理契约及纯策略函数，入口不加载 Session 运行时、VFS 或 YAML。
+- 实现不依赖 common/llm-common；模型、上下文、工具和编排契约直接来自所属模块。
+- 翻译、日志、启动追踪经 `configureSessionHostPorts` 注入；端口按当前会话系统的进程级 singleton 生命周期配置，启动前设置、关闭后重置。默认使用英文提示、空日志和直接启动操作。
+
 - Round 只表达对话历史，使用 `historyParentIds`。
 - Run 引用通过 `executions` 附着到 Round。
 - Branch/merge 拓扑归本包；Context 历史选择、Profile 规则和装配经 `@itookit/llm-context` 接口执行，`RoundLog` 只提供存储和缓存。
@@ -51,3 +55,5 @@ Memory 默认使用 Session shared；显式 sharedMemory 引用经 SharedMemoryS
 CLI 使用共享 `FlowRunProjection` 按根 Task 幂等写入 History Round；节点、工具、输入和批准携带 `FlowActor` 身份。Skill 作为节点/工具来源展示，工具调用按 Task 和 call ID 隔离；分支切换保留 Flow 交互。验证见 [CLI 能力验收](../../doc/design/flow-cli-capabilities-verification.md)。
 
 Flow 重跑以 Session manifest/持久 Round 索引为来源，空分支或无历史也能运行；新分支从空历史创建。`flowBranchExecutions` 按分支 Round 引用生成输出成员，禁止用 Session 全部 Task 代替分支成员。
+
+Agent 定义的 `capabilityPolicy` 位于顶层；`AgentResolver` 读取 `agentDef.capabilityPolicy`，不是 `agentDef.config.capabilityPolicy`。

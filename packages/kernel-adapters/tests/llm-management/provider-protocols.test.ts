@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import type { LLMProvider } from '@itookit/llm-common';
-import { getProviderProtocols } from '@itookit/llm-common';
+import type { LLMProvider } from '@itookit/driver-llm/contracts';
+import { getProviderProtocols } from '@itookit/driver-llm/contracts';
 import { createProvider } from '@itookit/driver-llm';
 import { ResponsesProvider } from '@itookit/driver-llm';
 import { AnthropicProvider } from '@itookit/driver-llm';

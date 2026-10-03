@@ -10,7 +10,7 @@
 // Design reference: Unix process model (stdin/signals/stdout), Actor mailbox,
 // Elm architecture (view = f(state)).
 
-import type { AgentEvent } from './agent-event';
+import type { AgentEvent } from '@itookit/llm-tasks/contracts';
 import type { Signal } from './conversation';
 
 export interface ISession {

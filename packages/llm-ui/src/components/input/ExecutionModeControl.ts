@@ -1,5 +1,5 @@
 import { t } from '@itookit/common';
-import { DEFAULT_AGENT_MAX_EXCHANGES, type ChatExecutionMode } from '@itookit/llm-common';
+import { DEFAULT_AGENT_MAX_EXCHANGES, type ChatExecutionMode } from '@itookit/llm-tasks/contracts';
 
 export interface ExecutionModeViewState {
     mode?: ChatExecutionMode;

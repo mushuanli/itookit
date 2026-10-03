@@ -1,6 +1,6 @@
 import { sessionSettings, mergeSessionSettings } from './session-settings';
 import { SessionRelations, assertSessionAvailable, readSessionMetadata, touchSessionRelations } from './session-relations';
-import { generateUUID } from '@itookit/common';
+import { ulid } from './ulid';
 import { createFileSystemView, FSError, type IFileSystem, type ISeqFileTransaction } from '@itookit/vfs-core';
 import { DEFAULT_SESSION_SETTINGS, type ChatSessionSettings, type ConversationManifest, type SessionSummary, type ConversationUIState, type ISessionRepository, type SessionFolder, type SessionOrigin, type SessionLoadState, type SessionView, type SessionRepositoryChange } from './types';
 import { sessionStorageRoot } from './session-storage-layout';
@@ -36,7 +36,7 @@ export class SessionRepository implements ISessionRepository {
     }
     private paths(id: string): SessionPaths { const root = this.root(id); return { root, session: `${root}/session.seq`, history: `${root}/history.seq` }; }
     async createSession(title: string, folder: string | null = null, parentSessionId: string | null = null): Promise<string> {
-        return this.ensureSession(generateUUID(), title, 'tauri', folder, parentSessionId);
+        return this.ensureSession(`node-${ulid()}`, title, 'tauri', folder, parentSessionId);
     }
     /** Idempotently create a Session with a host-supplied durable identity. */
     async ensureSession(id: string, title: string, origin: SessionOrigin = 'tauri', folder: string | null = null, parentSessionId: string | null = null): Promise<string> {

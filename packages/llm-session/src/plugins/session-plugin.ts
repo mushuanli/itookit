@@ -3,7 +3,7 @@
 // Maps SessionManager methods to ICommandBus commands so UI can call
 // commands.execute(SessionCommand.Send, { text }) instead of sessionManager.sendMessage().
 
-import type { ILLMPlugin, ExtensionContext } from '@itookit/common';
+import type { ILLMPlugin, ExtensionContext } from '../contracts';
 import type { SessionManager } from '../session/session-manager';
 import { FlowInvocationCommand } from '../session/flow-invocations';
 
@@ -71,7 +71,7 @@ export function createSessionPlugin(sessionManager: SessionManager): ILLMPlugin 
                 const created = await sm.createSessionFromFlow(
                     flowId,
                     revision,
-                    parameters as Record<string, import('@itookit/common').JsonValue> | undefined,
+                    parameters as Record<string, import('@itookit/llm-flow/contracts').JsonValue> | undefined,
                     title ?? 'Workflow',
                     invocation,
                     connectionId,
@@ -85,7 +85,7 @@ export function createSessionPlugin(sessionManager: SessionManager): ILLMPlugin 
             ctx.commands.register(SessionCommand.FlowBranchExecutions, args => sm.getFlowBranchExecutions((args as { sessionId: string }).sessionId));
             ctx.commands.register(SessionCommand.FlowRerunContext, () => sm.getFlowRerunContext());
             ctx.commands.register(SessionCommand.FlowRerun, args => {
-                const { parameters, sourceRoundId, sessionId, definitionKey, connectionId } = args as { connectionId?: string; parameters: Record<string, import('@itookit/common').JsonValue>; sourceRoundId: string | null; sessionId?: string; definitionKey?: string };
+                const { parameters, sourceRoundId, sessionId, definitionKey, connectionId } = args as { connectionId?: string; parameters: Record<string, import('@itookit/llm-flow/contracts').JsonValue>; sourceRoundId: string | null; sessionId?: string; definitionKey?: string };
                 return sm.rerunFlow(parameters, sourceRoundId, sessionId, definitionKey, connectionId);
             });
 

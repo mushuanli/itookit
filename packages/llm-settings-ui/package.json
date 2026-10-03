@@ -42,8 +42,9 @@
     "@itookit/driver-llm": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
     "js-yaml": "^4.1.1",
-    "@itookit/llm-common": "workspace:*",
-    "@itookit/kernel-adapters": "workspace:*"
+    "@itookit/kernel-adapters": "workspace:*",
+    "@itookit/llm-session": "workspace:*",
+    "@itookit/tools": "workspace:*"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

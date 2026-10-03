@@ -2,9 +2,9 @@
 // Agent、MCP 及服务接口定义。
 
 import type { LLMConnection, ConnectionMeta, LLMProvider, DefaultConnectionDef, ConnectionTestResult, LLMModel, ProviderConnectionTestParams } from './connection';
-import type { RestorableItem } from '../types';
-import type { SkillDefinition } from '../skills/skill-types';
-import type { SystemPromptDefinition, PromptPreset } from './node-config';
+import type { RestorableItem } from './restore';
+import type { SkillDefinition } from '@itookit/tools/contracts';
+import type { SystemPromptDefinition, PromptPreset } from '@itookit/llm-tasks/contracts';
 
 // ─── Agent ────────────────────────────────────────────────────────────────────
 
@@ -31,7 +31,7 @@ export interface AgentInterfaceDef {
  * 用于 Agent 配置中预定义的快捷提示词，可在输入框下拉选择填入。
  * Re-exported from node-config (part of the unified system-prompt model).
  */
-export type { PromptPreset } from './node-config';
+export type { PromptPreset } from '@itookit/llm-tasks/contracts';
 export interface AgentDefinition {
     id: string;
     /** Version identifier. Phase 3: derived from SHA-256 of canonical JSON. */

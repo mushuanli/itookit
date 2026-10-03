@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { Kernel } from '@itookit/durable-kernel';
-import type { MemoryPolicy } from '@itookit/common';
+import type { MemoryPolicy } from '@itookit/llm-tasks/contracts';
 import { SharedMemoryStore } from '../src/session/shared-memory-store';
 import { SessionMemoryProvider } from '../src/session/session-memory-provider';
 

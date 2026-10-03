@@ -1,7 +1,7 @@
 import { SettingsValidationError } from '@itookit/ui-common';
 import { readProviderForm, renderProviderAdvanced, syncProtocolControls, renderProtocolOptions } from './provider-form';
-import { getPrimaryProtocol, getProviderProtocols } from '@itookit/llm-common';
-import type { ApiProtocol } from '@itookit/llm-common';
+import { getPrimaryProtocol, getProviderProtocols } from '@itookit/driver-llm/contracts';
+import type { ApiProtocol } from '@itookit/driver-llm/contracts';
 import { showConfigurationForm, addConfigurationAction, addConfigurationEnabled } from './configuration-form';
 import { t, escapeAttr, ACTION_ICONS } from '@itookit/common';
 // @file: llm-ui/editors/ProviderSettingsEditor.ts

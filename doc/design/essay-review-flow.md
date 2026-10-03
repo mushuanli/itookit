@@ -47,7 +47,7 @@ flowchart LR
 
 ## 3. 可复用配置
 
-公共类型见 [dispatch.ts](../../packages/llm-common/src/agent/dispatch.ts)。route@2 配置如下：
+公共类型见 [dispatch.ts](../../packages/llm-flow/src/contracts/dispatch.ts)。route@2 配置如下：
 
 | 参数 | 语义 |
 |---|---|
@@ -223,4 +223,4 @@ registerDurablePrograms(kernel, reducers);
 - 插件 manifest 的 authoring 能力驱动调用实体选项与输入字段编辑器。普通 DAG 节点复用统一引用编译和调用前解析；不强迫纯计算节点配置 prompt。
 - 数字 JSON schema 增加 minimum/maximum，运行校验和端口 schema 兼容性检查均遵守边界。
 
-核心代码：`llm-common/src/agent/flow-templates.ts`、`llm-flow/src/flow/structured/{references,condition,join,invocation,prepare}.ts`。回归覆盖无连线参数引用、类型保持、模板不二次解释、输入修订、共享输出修复、部分失败、reducer 顺序与扩展、UI 字段和命名输出选择；既有恢复/隔离/轮数测试继续执行。
+核心代码：`llm-flow/src/contracts/flow-templates.ts`、`llm-flow/src/flow/structured/{references,condition,join,invocation,prepare}.ts`。回归覆盖无连线参数引用、类型保持、模板不二次解释、输入修订、共享输出修复、部分失败、reducer 顺序与扩展、UI 字段和命名输出选择；既有恢复/隔离/轮数测试继续执行。

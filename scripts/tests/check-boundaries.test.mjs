@@ -7,8 +7,8 @@ const core = pkg('app-core'), shell = pkg('app-shell'), vfs = pkg('vfs-ui'), hos
 const packages = [core, shell, vfs, host, pkg('vfs-core')];
 const inspect = (source, text, file = source.dir + '/src/index.ts') => sourceErrors(source, file, text, packages);
 
-test('tool and TTY capabilities cannot depend on legacy shared contracts', () => {
-    for (const source of ['@itookit/tools', '@itookit/device-tty', '@itookit/llm-tasks', '@itookit/llm-flow']) {
+test('public execution and conversation capabilities cannot depend on legacy shared contracts', () => {
+    for (const source of ['@itookit/tools', '@itookit/device-tty', '@itookit/llm-tasks', '@itookit/llm-flow', '@itookit/llm-session']) {
         for (const target of ['@itookit/common', '@itookit/llm-common'])
             assert.match(dependencyError(source, target), /owned contracts/);
     }

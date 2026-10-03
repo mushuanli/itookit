@@ -1,4 +1,5 @@
-import { sha256Hex, type ContextPlan, type MemoryPolicy } from '@itookit/common';
+import { sha256Hex, type ContextPlan } from '@itookit/llm-context';
+import { type MemoryPolicy } from '@itookit/llm-tasks/contracts';
 import { KernelError, KernelErrorCode, type Kernel, type SessionHandle } from '@itookit/durable-kernel';
 import type { RetrievedMemoryEntry } from '@itookit/llm-tasks';
 import { SharedMemoryStore, type MemoryOrigin } from './shared-memory-store';

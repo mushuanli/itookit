@@ -286,6 +286,8 @@ Web 与 Tauri 共用工作台导航、创建对话框和小屏幕列表／内容
 
 `driver-llm` 发布产物不依赖内部包；消息声明从 llm-context 内联，通信类型和纯协议函数通过 `/contracts` 提供。`kernel-adapters/llm` 保留 LLMDeviceDriver、LLM_IOCTL、VFS 配置和 MCP/Skill 管理，app-core、CLI 与设置页通过该入口接入。旧 device-llm 已拆分；llm-tasks、llm-flow、llm-session 和 llm-ui 的整体重组尚未实施。
 
-Tool/TTY 执行契约已归 tools/contracts，ILLMService 归 driver-llm/contracts；llm-common 仅兼容转发这些契约。tools 不再依赖 common/llm-common，Skill 与子代理工具只接收最小操作端口。Agent 管理和 Conversation/Session 契约仍在 llm-common，后续迁移需同步解除实现包对共享契约的反向依赖。
+Tool/TTY 执行契约已归 tools/contracts，ILLMService 归 driver-llm/contracts；common/llm-compat.ts 兼容转发这些契约。tools 不再依赖 common/llm-common，Skill 与子代理工具只接收最小操作端口。Agent 管理和 Conversation/Session 契约也已归 llm-session/contracts，原 llm-common 已删除，common/llm-compat.ts 直接保留具名兼容转发。
 
-执行事件与节点配置现归 llm-tasks/contracts；Flow/DAG、委派、模板与 Hook 现归 llm-flow/contracts。两个实现包均已解除 common/llm-common 依赖，旧类型/函数入口由 llm-common 兼容转发。Skill、子代理和 MCP 的公共能力契约归 tools；传输和持久化实现仍留在宿主适配层。
+执行事件与节点配置现归 llm-tasks/contracts；Flow/DAG、委派、模板与 Hook 现归 llm-flow/contracts。两个实现包均已解除 common/llm-common 依赖，旧类型/函数入口由 common/llm-compat.ts 兼容转发。Skill、子代理和 MCP 的公共能力契约归 tools；传输和持久化实现仍留在宿主适配层。
+
+Session 实现现已解除 common/llm-common 依赖。进程级 `configureSessionHostPorts` 注入翻译、日志与启动追踪；app-core 在创建 Conversation 系统前接入已有公共实现，关闭时重置。独立调用默认英文提示、空日志与直接启动操作。会话、命令/扩展、配置管理和纯策略契约统一在 llm-session/contracts；原 llm-common 已删除，common/llm-compat.ts 保留原有 285 个具名导出。

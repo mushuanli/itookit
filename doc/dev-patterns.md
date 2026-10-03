@@ -22,13 +22,13 @@ Provider / Connection 使用 `configuration-form.ts` 的自动保存表单，新
 ## 新增 Provider 内置联网搜索能力
 
 1. `packages/kernel-adapters/src/llm-management/constants/providers.ts` — provider 定义加 `capabilities.serverSideWebSearch: true`
-2. `packages/llm-common/src/llm/connection.ts` — `supportsServerSideSearch()` 确认协议支持
+2. `packages/llm-session/src/contracts/connection.ts` — `supportsServerSideSearch()` 确认协议支持
 3. provider 实现类注入内置工具并提取 `citations`（参考 `responses.ts` / `gemini.ts`）
 4. 详见 [web-search.md](./web-search.md)
 
 ## 新增 API 协议（如 openai-responses）
 
-1. `llm-common` `ApiProtocol` 加枚举值
+1. `driver-llm/src/types/connection.ts` 的 `ApiProtocol` 加枚举值
 2. `driver-llm` `resolveProtocol()` 加 URL/provider 推断；`createProvider()` 加协议→Provider 类分发
 3. Provider 类实现该协议端点路径（如 `responsesPath`）
 
@@ -39,7 +39,7 @@ Provider / Connection 使用 `configuration-form.ts` 的自动保存表单，新
 
 ## 新增 Agent
 
-1. `packages/llm-common/src/llm/agent.ts` — 更新 `AgentDefinition` 接口（如需新字段）
+1. `packages/llm-session/src/contracts/agent.ts` — 更新 `AgentDefinition` 接口（如需新字段）
 2. `packages/kernel-adapters/src/llm-management/constants/agents.ts` — `DEFAULT_AGENTS` 预设模板
 3. `packages/llm-settings-ui/src/editors/AgentConfigEditor.ts` — 编辑器 UI
 4. `packages/llm-session/src/session/agent-resolver.ts` — AgentResolver.resolve()
@@ -82,7 +82,7 @@ Provider / Connection 使用 `configuration-form.ts` 的自动保存表单，新
 | UI 包 | vite build | `pnpm build` (app bundle + CSS) |
 | 无 build 脚本 | — | `app-core`/`app-shell` 以 TS 源码被 app 消费 |
 
-- **tsup**：`common`/`llm-common`/`durable-kernel`/`llm-tasks`/`llm-flow`/`llm-session`/`kernel-adapters`/`driver-llm`/`device-tty`/`tools`/`vfs-core`/`vfsdriver-indexeddb`/`vfsdriver-localfs`，以及 UI 包中的 `llm-settings-ui`/`ui-common`。
+- **tsup**：`common`/`durable-kernel`/`llm-tasks`/`llm-flow`/`llm-session`/`kernel-adapters`/`driver-llm`/`device-tty`/`tools`/`vfs-core`/`vfsdriver-indexeddb`/`vfsdriver-localfs`，以及 UI 包中的 `llm-settings-ui`/`ui-common`。
 - **vite build**：`llm-ui`/`vfs-ui`/`mdx`/`app-settings`/`demo`。
 
 ### dev server 的 workspace 别名（唯一来源）

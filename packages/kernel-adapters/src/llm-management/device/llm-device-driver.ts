@@ -1,4 +1,4 @@
-import type { ProviderConnectionTestParams } from '@itookit/llm-common';
+import type { ProviderConnectionTestParams } from '@itookit/driver-llm/contracts';
 import { listProviderModels } from '@itookit/driver-llm';
 // @file: device-llm/device/llm-device-driver.ts
 //

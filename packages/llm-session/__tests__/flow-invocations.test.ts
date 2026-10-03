@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Kernel } from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { createBuiltinDagPluginRegistry, registerDurablePrograms, DagCommandService, FlowCommand, FlowDefinitionStore } from '@itookit/llm-flow';
-import type { FlowRevision } from '@itookit/common';
+import type { FlowRevision } from '@itookit/llm-flow/contracts';
 import { FlowInvocationService } from '../src/session/flow-invocations';
 import { CommandBus } from '../src/core/command-bus';
 import { SessionManager } from '../src/session/session-manager';

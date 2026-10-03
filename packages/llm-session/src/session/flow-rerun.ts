@@ -1,5 +1,6 @@
 import { FlowDefinitionStore, flowRevisionDigest, validateFlowParameters, hasValidationErrors, type FlowStore } from '@itookit/llm-flow';
-import type { DagPluginCatalog, FlowDraft, FlowRevision, JsonValue, Round } from '@itookit/common';
+import type { DagPluginCatalog, FlowDraft, FlowRevision, JsonValue } from '@itookit/llm-flow/contracts';
+import type { Round } from '../contracts';
 import { RoundLog } from '../persistence/round-log';
 import { ulid } from '../persistence/ulid';
 import type { SessionRegistry } from './session-registry';

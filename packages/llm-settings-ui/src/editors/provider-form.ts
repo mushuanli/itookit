@@ -1,6 +1,6 @@
 import { escapeAttr, t } from '@itookit/common';
-import { API_PROTOCOLS, getPrimaryProtocol, getProviderProtocols, getProviderDefaultProtocol } from '@itookit/llm-common';
-import type { ApiProtocol, LLMProvider } from '@itookit/llm-common';
+import { API_PROTOCOLS, getPrimaryProtocol, getProviderProtocols, getProviderDefaultProtocol } from '@itookit/driver-llm/contracts';
+import type { ApiProtocol, LLMProvider } from '@itookit/driver-llm/contracts';
 
 export const PROTOCOL_LABELS: Record<ApiProtocol, string> = {
     'openai-chat': 'OpenAI Chat Completions', 'openai-responses': 'OpenAI Responses',

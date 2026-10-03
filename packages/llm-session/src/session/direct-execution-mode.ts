@@ -1,4 +1,4 @@
-import type { ChatExecutionMode } from '@itookit/llm-common';
+import type { ChatExecutionMode } from '@itookit/llm-tasks/contracts';
 import type { ExecutorConfig, TaskInput } from '../core/types';
 
 export const CLIENT_WEB_SEARCH_TOOL = 'WebSearch';

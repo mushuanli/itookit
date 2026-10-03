@@ -1,4 +1,5 @@
-import type { SessionSubmission, Round } from '@itookit/common';
+import type { SessionSubmission } from '@itookit/llm-flow/contracts';
+import type { Round } from '../contracts';
 import type { ISessionRepository } from './types';
 
 type SubmissionReader = Pick<ISessionRepository, 'readDocument' | 'getManifest'>;

@@ -9,17 +9,8 @@ import { foldContextHistory } from '@itookit/llm-context';
 // The manifest owns the children reverse index. Round payloads are append-only
 // except for explicit lifecycle and assistant-output updates.
 
-import type {
-    ILog,
-    Round,
-    RoundId,
-    Ref,
-    RefStore,
-    AssemblyStrategy,
-    ChatMessage,
-    ContextRule,
-    RoundResult,
-} from '@itookit/common';
+import type { ILog, Round, RoundId, Ref, RefStore, AssemblyStrategy, RoundResult } from '../contracts';
+import type { ChatMessage, ContextRule } from '@itookit/llm-context';
 import type { ISessionRepository } from './types';
 import type { RoundManifest, PersistedRound, RoundProjection } from './round-types';
 import type { RoundLogEvent } from './round-events';
@@ -235,7 +226,7 @@ export class RoundLog implements ILog {
 
     async attachExecution(
         roundId: RoundId,
-        execution: import('@itookit/common').ExecutionRef,
+        execution: import('../contracts').ExecutionRef,
     ): Promise<void> {
         await this.graph.attachExecution(roundId, execution);
         this._cache.invalidateAll();

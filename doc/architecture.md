@@ -28,7 +28,7 @@
 ├──────────────┴──────────────┴──────────────────────┤
 │  vfs-core (VFS)                  vfsdriver-*          │  存储层
 ├────────────────────────────────────────────────────┤
-│  common / llm-common          契约层                │
+│  能力包 contracts / common    契约层                │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -134,7 +134,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 
 统一三态决策 + `citations[]` 返回（详见 [web-search.md](./web-search.md)）：
 
-- **单一决策点** `resolveWebSearchStrategy`（llm-common 纯函数）→ `WebSearchMode`（`builtin | client-tool | disabled`）。
+- **单一决策点** `resolveWebSearchStrategy`（llm-session/contracts 纯函数）→ `WebSearchMode`（`builtin | client-tool | disabled`）。
 - **下发**：`AgentResolver` 存 `ExecutorConfig.webSearchMode` → `ConversationRunCoordinator` 派生 `webSearch` 布尔（仅 builtin）+ 剥离客户端 WebSearchTool。
 - **执行**：provider 按 `ChatCompletionParams.webSearch` 注入内置工具（Responses `web_search` / Gemini `googleSearch`）。
 - **返回**：citations 经 `Chunk.citations` → `AgentEventCitations` → `message:citations` → UI 渲染。

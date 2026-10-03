@@ -1,10 +1,6 @@
-import {
-    DELEGATION_LIMITS,
-    type ChatMessage,
-    type ContextSnapshot,
-    type FlowNodeDefinition,
-    type LLMSkill,
-} from '@itookit/common';
+import { DELEGATION_LIMITS, type FlowNodeDefinition } from '@itookit/llm-flow/contracts';
+import { type ChatMessage, type ContextSnapshot } from '@itookit/llm-context';
+import { type LLMSkill } from '../contracts';
 import type { ExecutionTask, ExecutorConfig } from '../core/types';
 import { AgentResolver } from './agent-resolver';
 
