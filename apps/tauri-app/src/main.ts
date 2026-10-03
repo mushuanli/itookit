@@ -1,6 +1,6 @@
 import { createMindosFlowLibrary } from '@itookit/app-core';
 import { createHttpSourceProvider } from '@itookit/vfsdriver-http';
-import { installTauriMCP } from './shell/tauri-mcp-transport';
+import { createTauriMCPTransport } from './shell/tauri-mcp-transport';
 import { recordDiagnostic, observeTools } from './log/desktop-diagnostics';
 import { errorDetails, t } from '@itookit/common';
 import { TauriSessionDirectories } from './services/session-directories';
@@ -187,7 +187,6 @@ async function getPathSources(): Promise<{ root: string; home: string }> {
 // ── Bootstrap ──────────────────────────────────────────────────────────────────
 
 async function bootstrap(): Promise<void> {
-    installTauriMCP();
     installMobileNavigation();
     const t0 = performance.now();
     let t = t0;
@@ -318,6 +317,7 @@ async function bootstrap(): Promise<void> {
         backend: rootBackend,
         additionalMounts: [...workspaceMounts],
         ownerKind: 'tauri',
+        mcp: { stdioTransport: createTauriMCPTransport() },
         // The same window keeps its lease identity across reloads, so a refresh can take over
         // the Sessions its previous page still leases instead of leaving them read-only for a TTL.
         sessionOwnerToken: windowSessionLeaseToken(),

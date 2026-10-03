@@ -48,6 +48,8 @@ export function importError(source, file, specifier, packages) {
         if (specifier.startsWith('@itookit/llm-settings-ui') || (specifier.startsWith('.') && resolve(file, '..', specifier).replace(/\.ts$/, '') === resolve(source.dir, 'src/settings')))
             return 'chat and shared UI must not load optional settings implementations';
     }
+    if (source.name === '@itookit/llm-settings-ui' && specifier === '@itookit/kernel-adapters/llm/mcp-host')
+        return 'settings UI must query service instance capabilities, not the global host registry';
     if (source.name === '@itookit/llm-settings-ui' && specifier === '@itookit/kernel-adapters/llm')
         return 'settings UI must use config codecs, contracts or explicit host ports; not the management aggregate';
     if (source.name === '@itookit/llm-ui' && /\.flow(?:\?raw)?$/.test(specifier))

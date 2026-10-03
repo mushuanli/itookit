@@ -2,6 +2,7 @@
 //
 // MCPManager — MCP server config storage and active connection lifecycle.
 
+import type { MCPConnectionOptions } from '../contracts/mcp-transport';
 import { mcpTimeoutMs, type MCPServer, type MCPDiscovery } from '@itookit/tools/mcp-contracts';
 import type { IVFSManager, IFileSystem } from '@itookit/vfs-core';
 import { MCPServerConnection } from '../skills/mcp-client';
@@ -22,7 +23,9 @@ export class MCPManager {
         private readonly helpers: VFSHelpers,
         private readonly vfs: IVFSManager,
         private readonly onChanged: () => void,
-    ) {}
+        options: MCPConnectionOptions = {},
+    ) { this.options = { ...options }; }
+    private readonly options: MCPConnectionOptions;
 
     // ─── Read accessors ────────────────────────────────────────────────────
 
@@ -112,7 +115,7 @@ export class MCPManager {
         const fingerprint = JSON.stringify(this.mcpServerToConfig(server));
         if (this.fingerprints.get(server.id) !== fingerprint) await this.closeServer(server.id);
         if (this._activeMCPConns.get(server.id)?.isConnected()) return;
-        const connection = new MCPServerConnection(this.mcpServerToConfig(server));
+        const connection = new MCPServerConnection(this.mcpServerToConfig(server), this.options);
         await connection.connect();
         this.fingerprints.set(server.id, fingerprint);
         this._activeMCPConns.set(server.id, connection);

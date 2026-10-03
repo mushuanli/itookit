@@ -8,6 +8,7 @@ export interface ApplicationInfrastructureOptions {
     backend: IStorageBackend;
     additionalMounts?: Array<{ path: string; backend: IStorageBackend; options?: MountOptions }>;
     llmLogger?: ILLMLogger;
+    mcp?: import('@itookit/kernel-adapters/llm/core').MCPConnectionOptions;
     codexTransport?: CodexAppServerTransport;
     onProgress?(message: string): void;
 }
@@ -59,7 +60,10 @@ async function initializeDevices(options: ApplicationInfrastructureOptions, vfs:
     logIO('createVFS');
 
     logStep(t('boot.llmDriver'));
-    const llmDriver = new LLMDeviceDriver(vfs, { presets: createMindosLlmPresets(), providerConnectionPolicy: firstChatModelConnection, llmLogger: options.llmLogger, codexTransport: options.codexTransport });
+    const llmDriver = new LLMDeviceDriver(vfs, {
+        presets: createMindosLlmPresets(), providerConnectionPolicy: firstChatModelConnection,
+        llmLogger: options.llmLogger, mcp: options.mcp, codexTransport: options.codexTransport,
+    });
     let started = performance.now();
     await traceBoot('llmDriver.init', () => llmDriver.init());
     console.log(`[Boot]   ↳ llmDriver.init: +${(performance.now() - started).toFixed(0)}ms`);

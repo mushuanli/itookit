@@ -30,6 +30,9 @@ for (const format of ['js', 'cjs']) {
     const host = graph(`llm-mcp-host.${format}`);
     const registry = [...host.entries()].filter(([, source]) => source.includes('var hostFactory'));
     assert.equal(registry.length, 1, `${format}: host bridge must have one registry`);
-    assert.ok(core.has(registry[0][0]), `${format}: core and host must share their bridge registry`);
+    assert.ok(graph(`llm.${format}`).has(registry[0][0]),
+        `${format}: compatibility driver and host entry must share the legacy registry`);
+    assert.doesNotMatch([...core.values()].join('\n'), /hostFactory|registerMCPStdioHost|snapshotMCPStdioHost/,
+        `${format}: core must not load the legacy host registry`);
 }
-process.stdout.write('LLM ESM/CJS entry boundaries and shared MCP host state passed.\n');
+process.stdout.write('LLM ESM/CJS entry boundaries and instance MCP isolation passed.\n');

@@ -1,3 +1,4 @@
+import type { MCPConnectionOptions } from '../contracts/mcp-transport';
 import type { ProviderConnectionTestParams } from '@itookit/driver-llm/contracts';
 import { listProviderModels } from '@itookit/driver-llm';
 // @file: device-llm/device/llm-device-driver.ts
@@ -127,6 +128,7 @@ export interface IShellRunner {
 // ─── LLMDeviceDriver ─────────────────────────────────────────────────────────
 
 export interface LLMDeviceDriverOptions {
+    mcp?: MCPConnectionOptions;
     presets?: Partial<LlmManagementPresets>;
     providerConnectionPolicy?: ProviderConnectionPolicy;
     /**
@@ -148,6 +150,7 @@ export interface LLMDeviceDriverOptions {
 }
 
 export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
+    private readonly mcpOptions: MCPConnectionOptions;
     private readonly presets: LlmManagementPresets;
     private readonly providerConnectionPolicy?: ProviderConnectionPolicy;
     readonly handlerId = 'llm';
@@ -190,6 +193,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     }
 
     constructor(private readonly vfs: IVFSManager, options?: LLMDeviceDriverOptions) {
+        this.mcpOptions = { ...options?.mcp };
         this.presets = snapshotLlmPresets(options?.presets);
         this.providerConnectionPolicy = options?.providerConnectionPolicy;
         this.shellRunner = options?.shellRunner;
@@ -217,7 +221,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         this.vfsHelpers = new VFSHelpers(this.engine);
         this.providerManager = new ProviderManager(this.engine, this.vfsHelpers, () => this.notify(), this.presets);
         this.connectionManager = new ConnectionManager(this.vfsHelpers, this.vfs, this.providerManager, () => this.notify(), this.presets, this.providerConnectionPolicy);
-        this.mcpManager = new MCPManager(this.vfsHelpers, this.vfs, () => this.notify());
+        this.mcpManager = new MCPManager(this.vfsHelpers, this.vfs, () => this.notify(), this.mcpOptions);
         this.skillManager = new SkillManager(this.vfsHelpers, this.vfs, this.mcpManager, this.shellRunner, () => this.notify());
 
         // Pre-load all data directories in parallel
@@ -667,6 +671,10 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     }
 
     // ─── ILLMManagementService — MCP ─────────────────────────────────────────
+
+    supportsMCPStdio(): boolean {
+        return this.mcpOptions.stdioTransport !== false && (Boolean(this.mcpOptions.stdioTransport) || typeof window === 'undefined');
+    }
 
     async getMCPServers(): Promise<MCPServer[]> {
         return this.mcpManager.getMCPServers();

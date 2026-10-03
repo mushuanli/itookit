@@ -139,3 +139,9 @@ test('settings cannot load the model management aggregate for config conversion'
     const ui = pkg('llm-settings-ui');
     assert.match(inspect(ui, "import { parseLLMConfig } from '@itookit/kernel-adapters/llm'")[0], /management aggregate/);
 });
+
+
+test('settings use service capabilities instead of process-global MCP state', () => {
+    const ui = pkg('llm-settings-ui');
+    assert.match(inspect(ui, "import { hasMCPStdioHost } from '@itookit/kernel-adapters/llm/mcp-host'")[0], /service instance capabilities/);
+});

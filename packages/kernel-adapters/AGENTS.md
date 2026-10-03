@@ -99,6 +99,6 @@ pnpm --filter @itookit/kernel-adapters typecheck
 
 模型管理机制使用 `/llm/core`，预设经 `presets` 快照注入，自动连接经 `providerConnectionPolicy` 注入。MindOS 目录与默认连接策略只在可选 `/llm/presets`；旧 `/llm` 构造器保留兼容默认行为。禁止机制入口加载产品目录。
 
-配置格式与目录组合只从 `/llm/config` 提供，不依赖产品目录或设备实现。MCP 宿主桥从 `/llm/mcp-host` 接入。多入口构建需为 ESM/CJS 共享模块状态，禁止独立复制宿主桥注册表。
+配置格式与目录组合只从 `/llm/config` 提供，不依赖产品目录或设备实现。MCP 宿主桥从 `/llm/mcp-host` 的 createMCPStdioTransportFactory 创建，通过驱动 options.mcp.stdioTransport 注入。机制入口禁止读取全局桥；旧 `/llm` 构造器仅在构造时快照兼容注册。
 
-构建自动运行 [入口检查](../../scripts/check-llm-entrypoints.mjs)，递归检查 ESM/CJS 配置与机制导入图，并验证 MCP 宿主入口和核心入口共享同一注册模块。
+构建自动运行 [入口检查](../../scripts/check-llm-entrypoints.mjs)，递归检查 ESM/CJS 配置与机制导入图，并验证核心入口不加载旧 MCP 全局注册模块。

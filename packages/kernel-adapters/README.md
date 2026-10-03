@@ -78,4 +78,4 @@ TaskProgram 由 Skill 插件注册；KernelAdapters 不执行或解释 Skill 私
 
 例如：`new LLMDeviceDriver(vfs, { presets: composeLlmPresets({ version: 1 }, [parseLLMConfig(text)]) })`（驱动来自 `/llm/core`，配置函数来自 `/llm/config`）。旧 registerLLMConfig 仅用于兼容，需在旧驱动构造前调用。
 
-`/llm/mcp-host` 只暴露 MCP stdio 宿主桥注册与状态及类型。设置 UI 和 Tauri 桥使用该入口，不加载模型管理聚合入口。
+`/llm/mcp-host` 提供 createMCPStdioTransportFactory(bridge)，每次连接创建独立 transport。通过 `/llm/core` 驱动的 `mcp: { stdioTransport: factory }` 注入；`false` 显式禁止 stdio，省略时仅 Node 可用。工厂失败直接传播，不回退。设置 UI 通过管理服务 supportsMCPStdio() 查询实例能力，缺省不可用。旧 registerMCPStdioHost 仅供 `/llm` 兼容构造器取快照，不影响已经创建的实例或 `/llm/core`。

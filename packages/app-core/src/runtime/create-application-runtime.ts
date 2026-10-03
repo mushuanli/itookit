@@ -88,6 +88,7 @@ export interface ApplicationRuntimeOptions {
     configureSessionFiles?(files: SessionFilesService): void | Promise<void>;
     kernelPlatform?: ApplicationKernelPlatform;
     llmLogger?: ILLMLogger;
+    mcp?: import('@itookit/kernel-adapters/llm/core').MCPConnectionOptions;
     codexTransport?: CodexAppServerTransport;
     ownerKind?: SessionOwnerKind;
     /**

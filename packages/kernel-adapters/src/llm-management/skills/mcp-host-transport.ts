@@ -1,6 +1,7 @@
 import type { Transport, JSONRPCMessage } from '@modelcontextprotocol/client';
 import { JSONRPCMessageSchema } from '@modelcontextprotocol/core';
 import type { MCPServerConfig } from './types';
+import type { MCPStdioTransportFactory } from '../contracts/mcp-transport';
 
 export interface MCPProcessBatch { lines: string[]; exited: boolean; error?: string; }
 export interface MCPProcessBridge {
@@ -9,16 +10,22 @@ export interface MCPProcessBridge {
     poll(id: string): Promise<MCPProcessBatch>;
     stop(id: string): Promise<void>;
 }
-let hostFactory: ((config: MCPServerConfig) => Transport) | undefined;
-/** The desktop host installs its process bridge before constructing the LLM driver. */
+let hostFactory: MCPStdioTransportFactory | undefined;
+/** Create a local bridge without changing any other runtime. */
+export function createMCPStdioTransportFactory(bridge: MCPProcessBridge): MCPStdioTransportFactory {
+    return config => new HostMCPTransport(bridge, config);
+}
+/** Snapshot the legacy bridge once at driver construction. */
+export function snapshotMCPStdioHost(): MCPStdioTransportFactory | undefined { return hostFactory; }
+/** @deprecated Inject a local factory through options.mcp; retained for the legacy /llm driver. */
 export function registerMCPStdioHost(bridge: MCPProcessBridge): () => void {
     const previous = hostFactory;
-    const factory = (config: MCPServerConfig) => new HostMCPTransport(bridge, config);
+    const factory = createMCPStdioTransportFactory(bridge);
     hostFactory = factory;
     return () => { if (hostFactory === factory) hostFactory = previous; };
 }
+/** @deprecated Query supportsMCPStdio() on the management service instance. */
 export function hasMCPStdioHost(): boolean { return Boolean(hostFactory) || typeof window === 'undefined'; }
-export function hostMCPStdioTransport(config: MCPServerConfig): Transport | undefined { return hostFactory?.(config); }
 
 /** Bounded native polling keeps JSON-RPC off the WebView event thread. */
 export class HostMCPTransport implements Transport {

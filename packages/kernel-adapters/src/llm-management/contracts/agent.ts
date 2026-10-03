@@ -160,6 +160,8 @@ export interface IConnectionService extends IConnectionReader {
  */
 export interface ILLMManagementService extends IConnectionService {
     // ── MCP Server ────────────────────────────────────────────────
+    /** Capability of this service instance; absent means unsupported. */
+    supportsMCPStdio?(): boolean;
     getMCPServers(): Promise<MCPServer[]>;
     saveMCPServer(server: MCPServer): Promise<void>;
     deleteMCPServer(id: string): Promise<void>;

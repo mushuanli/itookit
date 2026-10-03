@@ -12,9 +12,11 @@ describe('application infrastructure ownership', () => {
             backend: new MemoryBackend(),
             additionalMounts: [{ path: '/extra', backend: new MemoryBackend() }],
             codexTransport: { close },
+            mcp: { stdioTransport: false },
         });
         try {
             expect(infrastructure.vfs.devices.isFrozen()).toBe(true);
+            expect(infrastructure.llmDriver.supportsMCPStdio()).toBe(false);
             for (const path of ['/run', '/extra', '/home/admin/chats', '/home/admin/.config']) {
                 expect(await infrastructure.systemFS.driver.getNode(path)).not.toBeNull();
             }

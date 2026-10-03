@@ -366,6 +366,7 @@ export class VFSAgentService extends FileBackedService implements IAgentManageme
     async readMCPResource(id: string, uri: string) { return this.llmService.readMCPResource(id, uri); }
     async getMCPPrompt(id: string, name: string, args?: Record<string, string>) { return this.llmService.getMCPPrompt(id, name, args); }
 
+    supportsMCPStdio(): boolean { return this.llmService.supportsMCPStdio?.() ?? false; }
     async testMCPServer(server: MCPServer) { return this.llmService.testMCPServer(server); }
     async getMCPServers(): Promise<MCPServer[]> { return this.llmService.getMCPServers(); }
     async saveMCPServer(server: MCPServer): Promise<void> { return this.llmService.saveMCPServer(server); }

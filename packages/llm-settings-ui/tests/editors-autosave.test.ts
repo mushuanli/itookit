@@ -80,3 +80,13 @@ it('auto-saves pricing edits without requiring a save button', async () => {
     expect(writePricing).toHaveBeenCalledOnce(); expect(writePricing.mock.calls[0][0].model_pricing[0].price[0]).toBe(3.5);
     expect(container.querySelector('#btn-save-pricing')).toBeNull(); expect(field.isConnected).toBe(true);
 });
+
+it.each([true, false, undefined])('uses the service capability (%s) for MCP stdio controls', async supported => {
+    const container = mount();
+    const server = { id: 'm', name: 'MCP', transport: 'http', endpoint: 'https://example.com/mcp', tools: [], resources: [] };
+    const service = { getMCPServers: async () => [server],
+        ...(supported === undefined ? {} : { supportsMCPStdio: () => supported }) };
+    const editor = new MCPSettingsEditor(container, service as never, { target: { kind: 'entity', entityType: 'mcp', id: 'm' } });
+    editors.push(editor); await editor.init(container);
+    expect(container.querySelector<HTMLOptionElement>('option[value="stdio"]')!.disabled).toBe(supported !== true);
+});

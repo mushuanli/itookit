@@ -3,7 +3,7 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { expect, it, vi } from 'vitest';
 import { MCPServerConnection } from '../../src/llm-management/skills/mcp-client';
-import { HostMCPTransport, registerMCPStdioHost } from '../../src/llm-management/skills/mcp-host-transport';
+import { HostMCPTransport, createMCPStdioTransportFactory } from '../../src/llm-management/skills/mcp-host-transport';
 
 it('runs the host bridge through SDK latest protocol discovery, capability discovery, content and progress', async () => {
     const child = spawn(process.execPath, [fileURLToPath(new URL('./fixtures/mcp-capabilities.mjs', import.meta.url))], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -12,10 +12,10 @@ it('runs the host bridge through SDK latest protocol discovery, capability disco
     const lines: string[] = []; const input = createInterface({ input: child.stdout }); input.on('line', line => lines.push(line));
     const closed = new Promise<void>(resolve => child.on('close', () => resolve()));
     const stop = vi.fn(async () => { child.kill(); await closed; });
-    const restore = registerMCPStdioHost({ start: async () => 'native', send: (_id, line) => new Promise<void>((resolve, reject) => { child.stdin.write(line + '\n', error => error ? reject(error) : resolve()); }),
+    const stdioTransport = createMCPStdioTransportFactory({ start: async () => 'native', send: (_id, line) => new Promise<void>((resolve, reject) => { child.stdin.write(line + '\n', error => error ? reject(error) : resolve()); }),
         poll: async () => ({ lines: lines.splice(0), exited: child.exitCode !== null, ...(child.exitCode !== null ? { error: stderr } : {}) }), stop });
     vi.stubGlobal('window', {});
-    const client = new MCPServerConnection({ name: 'test', transport: 'stdio', command: 'node' });
+    const client = new MCPServerConnection({ name: 'test', transport: 'stdio', command: 'node' }, { stdioTransport });
     try {
         await client.connect(); const catalog = await client.discover();
         expect(catalog).toMatchObject({ protocolVersion: '2026-07-28', capabilities: { tools: true, resources: true, prompts: true },
@@ -27,7 +27,7 @@ it('runs the host bridge through SDK latest protocol discovery, capability disco
         expect(progress).toHaveBeenCalledWith(expect.objectContaining({ progress: 1, message: 'Searching' }));
         expect(result).toMatchObject({ content: [{ text: 'TOOL_RESULT' }] });
     } catch (error) { throw new Error(`Host bridge failed (${child.exitCode}): ${stderr}`, { cause: error }); }
-    finally { await client.disconnect(); restore(); vi.unstubAllGlobals(); input.close(); child.kill(); await closed; }
+    finally { await client.disconnect(); vi.unstubAllGlobals(); input.close(); child.kill(); await closed; }
     expect(stop).toHaveBeenCalledOnce();
 });
 

@@ -12,7 +12,6 @@ import { BaseSettingsEditor, Toast, Modal } from '@itookit/ui-common';
 import type { MCPServer } from '@itookit/tools/mcp-contracts';
 import type { IAgentManagementService } from '@itookit/kernel-adapters/contracts';
 import { bindMCPContent, renderMCPPrompts, parseMCPStringMap } from './mcp-content';
-import { hasMCPStdioHost } from '@itookit/kernel-adapters/llm/mcp-host';
 import { mcpTimeoutMs } from '@itookit/tools/mcp-contracts';
 
 
@@ -172,11 +171,11 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                         <p>${t('mcp.protocolRequirement')}</p>
                         <select class="settings-select" name="transport" id="transport-select">
                             ${!['stdio', 'http'].includes(server.transport) ? `<option value="${escape(server.transport)}" selected disabled>${escape(server.transport)} — ${t('mcp.unsupportedTransport')}</option>` : ''}
-                            <option value="stdio" ${hasMCPStdioHost() ? '' : 'disabled'} ${server.transport === 'stdio' ? 'selected' : ''}>${MCP_TRANSPORT_ICONS.stdio} ${t('mcpTransport.stdio.option')}</option>
+                            <option value="stdio" ${(this.service.supportsMCPStdio?.() ?? false) ? '' : 'disabled'} ${server.transport === 'stdio' ? 'selected' : ''}>${MCP_TRANSPORT_ICONS.stdio} ${t('mcpTransport.stdio.option')}</option>
                             <option value="http"  ${server.transport === 'http'  ? 'selected' : ''}>${MCP_TRANSPORT_ICONS.http} ${t('mcpTransport.http.option')}</option>
                         </select>
                     </div>
-                    ${!hasMCPStdioHost() ? `<p>${t('mcp.stdioUnavailable')}</p>` : ''}
+                    ${!(this.service.supportsMCPStdio?.() ?? false) ? `<p>${t('mcp.stdioUnavailable')}</p>` : ''}
                     <div id="transport-fields">
                         ${this.renderTransportFields(server)}
                     </div>
@@ -403,7 +402,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         const server: MCPServer = {
             id:        `mcp-${generateShortUUID()}`,
             name:      'New Server',
-            transport: hasMCPStdioHost() ? 'stdio' : 'http',
+            transport: (this.service.supportsMCPStdio?.() ?? false) ? 'stdio' : 'http',
             status:    'idle',
             tools:     [],
             resources: [],

@@ -3,7 +3,7 @@
 // MCPClient — MCP (Model Context Protocol) client.
 // Manages connections to multiple MCP servers via stdio / Streamable HTTP transports.
 
-import { hostMCPStdioTransport } from './mcp-host-transport';
+import type { MCPConnectionOptions } from '../contracts/mcp-transport';
 import { createModuleLogger } from '@itookit/common';
 import { MCP_PROTOCOL_VERSION, type MCPDiscovery } from '@itookit/tools/mcp-contracts';
 import { type ToolDefinition } from '@itookit/llm-context';
@@ -62,7 +62,8 @@ export class MCPClient {
     private servers = new Map<string, MCPServerConnection>();
     private tools = new Map<string, { server: string; tool: MCPToolInfo }>();
 
-    constructor(private config?: MCPConfig) {}
+    private readonly options: MCPConnectionOptions;
+    constructor(private config?: MCPConfig, options: MCPConnectionOptions = {}) { this.options = { ...options }; }
 
     async initialize(): Promise<void> {
         if (!this.config?.servers) return;
@@ -78,7 +79,7 @@ export class MCPClient {
     async connectServer(config: MCPServerConfig): Promise<void> {
         log.debug('Connecting MCP server', { name: config.name, transport: config.transport });
 
-        const connection = new MCPServerConnection(config);
+        const connection = new MCPServerConnection(config, this.options);
         await connection.connect();
         this.servers.set(config.name, connection);
 
@@ -183,7 +184,8 @@ export class MCPClient {
 export class MCPServerConnection {
     private client: import('@modelcontextprotocol/client').Client | undefined;
     private connecting: Promise<void> | undefined;
-    constructor(private readonly config: MCPServerConfig) {}
+    private readonly options: MCPConnectionOptions;
+    constructor(private readonly config: MCPServerConfig, options: MCPConnectionOptions = {}) { this.options = { ...options }; }
 
     connect(): Promise<void> {
         if (this.client) return Promise.resolve();
@@ -209,8 +211,8 @@ export class MCPServerConnection {
     private async createTransport() {
         const config = this.config;
         if (config.transport === 'stdio') {
-            const hosted = hostMCPStdioTransport(config);
-            if (hosted) return hosted;
+            if (this.options.stdioTransport === false) throw new Error('MCP stdio is disabled by the host');
+            if (this.options.stdioTransport) return this.options.stdioTransport(config);
             if (typeof window !== 'undefined') throw new Error('MCP stdio requires a desktop or Node host');
             if (!config.command) throw new Error('MCP stdio requires command');
             const { createStdioTransport } = await import('#mcp-stdio');

@@ -313,4 +313,4 @@ MindOS 默认工具授权已从 kernel-adapters/contracts 与 llm-session/contra
 
 DirectAgentPolicy 从 ApplicationRuntimeOptions 经 ConversationSystemOptions、SessionManager、SessionRunCoordinator 传到 ConversationRunCoordinator，实例内冻结。显式 Agent 附加提示参与 Context 装配和预算计算，maxExchanges 固定到持久 Task；普通 Chat/Flow 不消费该提示。MindOS 默认指令留在 app-core JSON 预设，SessionViewPort 可暴露只读策略供 UI 显示实际上限。
 
-设置 UI 的配置解析/导出已改为 kernel-adapters/llm/config，MCP 宿主状态与 Tauri 桥改为 /llm/mcp-host。composeLlmPresets 纯合并模型目录并显式选择冲突策略，不写 VFS、不修改全局预设，驱动只消费注入的快照；旧全局 registerLLMConfig 仅作为兼容路径。
+设置 UI 的配置解析/导出已改为 kernel-adapters/llm/config，Tauri 桥通过 /llm/mcp-host 创建本地 transport 工厂，经 ApplicationRuntimeOptions.mcp 注入驱动；设置 UI 通过服务 supportsMCPStdio() 查询同一实例能力。机制核心不读取全局桥，旧 /llm 构造器仅取兼容注册快照。composeLlmPresets 纯合并模型目录并显式选择冲突策略，不写 VFS、不修改全局预设，驱动只消费注入的快照；旧全局 registerLLMConfig 仅作为兼容路径。
