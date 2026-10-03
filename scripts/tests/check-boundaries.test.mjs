@@ -133,3 +133,9 @@ test('public LLM capabilities cannot choose MindOS default tool grants', () => {
     }
     assert.equal(inspect(core, "export const DEFAULT_HARNESS_TOOL_IDS = ['Bash'];").length, 0);
 });
+
+
+test('settings cannot load the model management aggregate for config conversion', () => {
+    const ui = pkg('llm-settings-ui');
+    assert.match(inspect(ui, "import { parseLLMConfig } from '@itookit/kernel-adapters/llm'")[0], /management aggregate/);
+});

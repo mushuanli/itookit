@@ -22,7 +22,7 @@ import { BaseSettingsEditor, requestSettingsSave } from '@itookit/ui-common';
 import type { IConnectionService } from '@itookit/kernel-adapters/contracts';
 import type { LLMProvider, LLMModel, ModelCategory } from '@itookit/driver-llm/contracts';
 import { Modal, Toast } from '@itookit/ui-common';
-import { exportBundleToLLM, fromConnectionDef } from '@itookit/kernel-adapters/llm';
+import { exportBundleToLLM, fromConnectionDef } from '@itookit/kernel-adapters/llm/config';
 import { runLLMImport } from './llm-import';
 
 /** 模型用途分类选项（顺序即下拉顺序） */

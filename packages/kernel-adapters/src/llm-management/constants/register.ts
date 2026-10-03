@@ -1,6 +1,6 @@
 // @file: device-llm/constants/register.ts
 // Runtime registration of external .llm configs into the global provider/connection catalogs.
-// Must be called before LLMDeviceDriver.init() so that syncDefaultProviders picks them up.
+// Legacy-only mutation; new hosts compose catalogs explicitly before driver construction.
 
 import type { LLMConfigFile } from './llm-loader';
 import { toLLMProvider } from './llm-loader';
@@ -11,7 +11,8 @@ import { DEFAULT_CONNECTIONS } from './connections';
  * Register an external .llm config into the global provider and connection catalogs.
  *
  * Mutates LLM_PROVIDERS and DEFAULT_CONNECTIONS in-place.
- * Must be called before LLMDeviceDriver.init().
+ * Must be called before constructing the legacy LLMDeviceDriver.
+ * @deprecated Use composeLlmPresets from the /llm/config entry and inject the result into /llm/core.
  */
 export function registerLLMConfig(config: LLMConfigFile): void {
     const defs = config.providers ?? (config.provider ? [config.provider] : []);

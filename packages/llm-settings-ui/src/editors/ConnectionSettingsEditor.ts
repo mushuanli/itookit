@@ -15,7 +15,7 @@ import { BaseSettingsEditor } from '@itookit/ui-common';
 import type { IConnectionService } from '@itookit/kernel-adapters/contracts';
 import type { ConnectionMeta, LLMConnection, LLMProvider, ModelTier, ApiProtocol } from '@itookit/driver-llm/contracts';
 import { Toast } from '@itookit/ui-common';
-import { fromConnectionDef, serializeLLMConfig } from '@itookit/kernel-adapters/llm';
+import { fromConnectionDef, serializeLLMConfig } from '@itookit/kernel-adapters/llm/config';
 import { runLLMImport } from './llm-import';
 import { escapeAttr, escapeHTML } from '@itookit/common';
 

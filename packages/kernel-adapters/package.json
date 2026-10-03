@@ -31,6 +31,16 @@
       "types": "./src/llm-management/presets.ts",
       "import": "./src/llm-management/presets.ts",
       "default": "./src/llm-management/presets.ts"
+    },
+    "./llm/config": {
+      "types": "./src/llm-management/config.ts",
+      "import": "./src/llm-management/config.ts",
+      "default": "./src/llm-management/config.ts"
+    },
+    "./llm/mcp-host": {
+      "types": "./src/llm-management/mcp-host.ts",
+      "import": "./src/llm-management/mcp-host.ts",
+      "default": "./src/llm-management/mcp-host.ts"
     }
   },
   "publishConfig": {
@@ -63,6 +73,16 @@
         "types": "./dist/llm-presets.d.ts",
         "import": "./dist/llm-presets.js",
         "require": "./dist/llm-presets.cjs"
+      },
+      "./llm/config": {
+        "types": "./dist/llm-config.d.ts",
+        "import": "./dist/llm-config.js",
+        "require": "./dist/llm-config.cjs"
+      },
+      "./llm/mcp-host": {
+        "types": "./dist/llm-mcp-host.d.ts",
+        "import": "./dist/llm-mcp-host.js",
+        "require": "./dist/llm-mcp-host.cjs"
       }
     },
     "imports": {
@@ -77,7 +97,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node ../../scripts/check-llm-entrypoints.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rimraf dist"

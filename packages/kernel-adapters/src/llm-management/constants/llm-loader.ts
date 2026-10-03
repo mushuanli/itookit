@@ -262,7 +262,7 @@ export function toLLMProvider(def: LLMProviderDef): LLMProvider {
 /**
  * Convert a parsed LLMAgentDef to the runtime AgentDefinition type.
  */
-export function toRuntimeAgent(def: LLMAgentDef): AgentDefinition {
+export function toRuntimeAgent(def: LLMAgentDef, timestamp = Date.now()): AgentDefinition {
     const snapshot = structuredClone(def);
     return {
         ...snapshot,
@@ -280,7 +280,7 @@ export function toRuntimeAgent(def: LLMAgentDef): AgentDefinition {
         } as AgentConfig,
         tags: snapshot.tags,
         interface: snapshot.interface as AgentDefinition['interface'],
-        createdAt: Date.now(),
+        createdAt: timestamp,
     };
 }
 
@@ -418,6 +418,8 @@ export function serializeLLMConfig(config: LLMConfigFile): string {
     if (config.mcp) {
         out.mcp = config.mcp;
     }
+
+    if (config.pricing !== undefined) out.pricing = config.pricing;
 
     return yaml.dump(out, {
         indent: 2,

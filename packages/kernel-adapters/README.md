@@ -73,3 +73,9 @@ await task.start();
 TaskProgram 由 Skill 插件注册；KernelAdapters 不执行或解释 Skill 私有状态机。
 
 `skill.unload@1` 使用与加载相同的 `{ resourceHandleId, skillId }` 请求，要求 Skill execute grant 和 Session shared state。先以 CAS 删除加载身份，再卸载当前作用域；可重试中断的清理，旧定义缺失不会阻止删除身份。服务层 `unloadSkill` 只修改活动作用域，需要持久语义的调用方应提交该 Effect。
+
+`/llm/config` 提供 `.llm` 解析、导出、转换与纯 `composeLlmPresets(base, configs, options)`，不加载驱动、VFS、MCP 或内置目录。合并 Provider、连接、Agent 与定价，冲突默认 reject，可选 keep/replace；输入保持不变，Agent 静态时间戳默认 0，可用 timestamp 注入。Skills/MCP 仍通过管理服务导入。宿主负责增加 base.version 以更新已安装的默认连接。
+
+例如：`new LLMDeviceDriver(vfs, { presets: composeLlmPresets({ version: 1 }, [parseLLMConfig(text)]) })`（驱动来自 `/llm/core`，配置函数来自 `/llm/config`）。旧 registerLLMConfig 仅用于兼容，需在旧驱动构造前调用。
+
+`/llm/mcp-host` 只暴露 MCP stdio 宿主桥注册与状态及类型。设置 UI 和 Tauri 桥使用该入口，不加载模型管理聚合入口。
