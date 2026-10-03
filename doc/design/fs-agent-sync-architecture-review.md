@@ -2,7 +2,7 @@
 
 本评审对照当前工作树中的 fs-agent 源码，聚焦新实现的 sync 子系统及其与认证、export、执行、管理员命令的边界。结论是：存储协议方向正确，客户端与服务端的职责划分合理；当前优先级是错误分类、准入协调、失败结果可信与恢复不丢数据。共享 `SyncService` 和单连接事务协调本身合理，内部边界应依据不变量与重复规则收紧，组件数量不是质量目标。
 
-这是源码评审与修复记录，不替代 [同步设计](fs-agent-sync.md) 或 [部署与协议说明](../../tools/fs-agent/doc/sync.md)。第 6、9、10 节保留修复前的发现和验收缺口；2026-10-03 已实施正确性修复，当前处理结果与证据见第 11 节。全局串行协调与同一发布事务继续保留。
+这是源码评审与修复记录，不替代 [同步设计](fs-agent-sync.md) 或 [部署与协议说明](../../tools/fs-agent/doc/sync.md)。第 6、9、10 节保留修复前的发现和验收缺口；2026-10-03 已实施正确性修复，当前处理结果与证据见第 11、12 节。全局串行协调与同一发布事务继续保留。
 
 ## 1 系统职责与 C4 上下文
 
@@ -63,6 +63,8 @@ C4Component
         Component(cmd, "commands.rs", "领域变更", "项目和数据集 CAS、删除、恢复")
         Component(query, "catalog.rs", "查询与发现", "游标、catalog、changes、历史、ACK")
         Component(gc, "retention.rs", "保留与恢复", "pin、根集合、GC、启动恢复")
+        Component(compact, "compaction.rs", "发现索引清理", "窗口、边界快照与原子压缩")
+        Component(metrics, "metrics.rs", "进程内测量", "锁等待、持锁、事务和提交耗时")
         Component(admin, "admin.rs", "离线管理", "验证、备份、恢复、修复")
         Component(runtime, "coordination.rs", "运行协调", "准入、活动计数、停止与有界排空")
         Component(policy, "policy.rs / manifest.rs", "规则", "限制、标识与 manifest 校验")
@@ -82,6 +84,10 @@ C4Component
     Rel(service, store, "对象与数据库操作")
     Rel(query, store, "SQL 与通用 records")
     Rel(gc, store, "SQL 与文件删除")
+    Rel(gc, compact, "分批清理发现索引")
+    Rel(compact, policy, "计算安全保留边界")
+    Rel(compact, store, "事务更新边界及索引")
+    Rel(service, metrics, "记录锁及事务耗时")
     Rel(admin, store, "SQL 与文件复制")
 ```
 
@@ -413,3 +419,63 @@ HTTP 同步调用经 `transport::work` 获取已有 Workers 预算后进入 spaw
 最终验证：`FS_AGENT_PROCESS_TEST=1 cargo test --all-features --offline -- --test-threads=1` 共 106 项通过；默认构建的真实 HTTP 脚本验证 3 个设备、3 个历史版本、完整摘要、epoch 更换及旧 epoch 隔离。2 个共享 fixture、cargo fmt、Clippy（沿用非同步模块 manual_inspect 豁免）和 pnpm docs:check 通过；文档检查仍有 5 条既有历史表述告警。90 天删除场景的加强用例另行通过，包含 manifest 与实际文件内容。
 
 性能工作继续以指标为前提：发布校验仍在全局锁/事务内，catalog/version/身份索引仍保守保留。当前没有宣称完成锁优化或长期索引压缩。项目 checkpoint 与 itookit 会话安全接续仍是单独能力。
+
+
+## 12 发现索引与性能批量实施结果
+
+本轮在正确性修复之后继续实施，保留单连接和原子发布边界。新增 compaction 模块承担可替换发现索引的清理，metrics 模块只负责进程内计量；没有按 C4 方框新增 trait 或包。
+
+| 范围 | 当前实现 |
+| --- | --- |
+| changes 保留 | 新事件带 recordedAt；纯策略计算 change_retention_seconds + cursor TTL 的安全窗口，默认 7 天 + 900 秒 |
+| 清理机制 | 每次最多 2000 行发现索引，单项目每类最多 1000 行；项目 changeFloor、变化日志和 catalog 在同一事务更新，SQL 故障整体回滚 |
+| catalog 快照 | 保留边界前各成员最后快照及边界后全部快照，包括删除成员；正常旧分页内容不因压缩改变 |
+| 游标协议 | catalog 与未完成 changes 分页保留原 expiry；catalog、changes、ACK、activate 对过旧边界返回 CURSOR_EXPIRED；调用者重新全量对账 |
+| 历史及防重放 | version、dataset tombstone、replica 高水位和 operation-id 不随 changes 清理；未知旧事件时间保守阻止前缀回收 |
+| 性能诊断 | lockWait、lockHold、transaction、commit 单列次数、总纳秒和最大值；事务错误回滚计时；debug 维护日志输出累计快照 |
+| 重复工作清理 | manifest 文件引用按摘要去重，同摘要不同长度拒绝；验证完成后在同事务内写引用，不再重复检查已验证对象 |
+
+本机 debug 构建的相同负载：两个约 124 KB 的 manifest，1000 个文件路径引用一个内容对象，100 次版本发布，4 个并发读取线程各读取 200 次。
+
+| 指标 | 去重前 | 去重后 |
+| --- | --- | --- |
+| 负载总时间 | 6.30 秒 | 2.22 秒 |
+| 累计持锁时间 | 6.259 秒 | 2.169 秒 |
+| 最长持锁时间 | 120.37 ms | 26.06 ms |
+| 累计事务时间（213 次） | 6.167 秒 | 2.091 秒 |
+| 累计 COMMIT 时间 | 13.16 ms | 12.16 ms |
+| 最长锁等待 | 233.95 ms | 39.92 ms |
+
+这是单次局部测量，包含调度和存储噪声；说明该共享对象负载的重复检查值得删除，不代表生产 SLA 或全部项目吞吐提升 65%。验证仍在锁和事务内，大量独有对象及大文件场景需要单独负载。没有通过连接池或拆散发布事务获取这些改善。
+
+新增测试覆盖：清理事务回滚、每批上限、旧时间戳屏障、catalog 固定快照、游标期限不续命、删除成员保留、操作身份保留以及同摘要不同长度拒绝。诊断负载为显式执行的 ignored 测试，不增加常规矩阵耗时。
+
+剩余边界：历史版本摘要及永久防重放身份仍增长并受 max_metadata_records 限制；未执行 VACUUM，逻辑删除允许 SQLite 复用空闲页，但不宣称磁盘文件立刻缩小。项目 checkpoint 与 itookit 会话安全接续继续独立验收。
+
+
+```mermaid
+sequenceDiagram
+    participant G as 周期维护或管理员 GC
+    participant P as 纯保留策略
+    participant D as SQLite
+    participant C as 客户端
+    G->>P: 当前时间、changes 窗口、cursor TTL
+    P-->>G: 安全回收时间
+    G->>D: BEGIN，读取连续可回收前缀
+    G->>D: 保留成员边界快照，删除冗余 catalog
+    G->>D: 删除前缀事件，更新项目 changeFloor
+    alt 全部成功
+        G->>D: COMMIT
+    else SQL 或提交失败
+        G->>D: 回滚或进入 unknown 恢复路径
+    end
+    C->>D: 使用固定上界及原期限的游标
+    alt 游标仍有效且在边界内
+        D-->>C: 固定快照或完整增量区间
+    else 游标过期或落后边界
+        D-->>C: CURSOR_EXPIRED
+        C->>D: 重新 catalog 枚举并全量对账
+    end
+```
+
+最终回归：`FS_AGENT_PROCESS_TEST=1 cargo test --all-features --offline -- --test-threads=1` 共 110 项通过；诊断负载单独通过。默认构建的 HTTP 验收通过三端同步、3 个历史版本恢复、完整摘要、灾备 epoch 更换及旧请求隔离。Clippy（既有非 sync manual_inspect 豁免）、fmt、2 个共享 fixture 和文档检查通过。
