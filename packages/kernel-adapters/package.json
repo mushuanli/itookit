@@ -12,11 +12,6 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
-    "./llm": {
-      "types": "./src/llm-management/index.ts",
-      "import": "./src/llm-management/index.ts",
-      "default": "./src/llm-management/index.ts"
-    },
     "./contracts": {
       "types": "./src/contracts.ts",
       "import": "./src/contracts.ts",
@@ -53,11 +48,6 @@
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "require": "./dist/index.cjs"
-      },
-      "./llm": {
-        "types": "./dist/llm.d.ts",
-        "import": "./dist/llm.js",
-        "require": "./dist/llm.cjs"
       },
       "./contracts": {
         "types": "./dist/contracts.d.ts",
@@ -103,7 +93,6 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
-    "@itookit/common": "workspace:*",
     "@itookit/driver-llm": "workspace:*",
     "@itookit/durable-kernel": "workspace:*",
     "@itookit/vfs-core": "workspace:*",

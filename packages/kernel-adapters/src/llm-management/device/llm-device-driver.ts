@@ -128,6 +128,7 @@ export interface IShellRunner {
 // ─── LLMDeviceDriver ─────────────────────────────────────────────────────────
 
 export interface LLMDeviceDriverOptions {
+    providerFactory?: import('@itookit/driver-llm/contracts').ProviderFactory;
     mcp?: MCPConnectionOptions;
     presets?: Partial<LlmManagementPresets>;
     providerConnectionPolicy?: ProviderConnectionPolicy;
@@ -172,6 +173,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     private readonly shellRunner: IShellRunner | undefined;
     private readonly codexRunner: CodexCommandRunner | undefined;
     private readonly codexTransport: CodexAppServerTransport | undefined;
+    private readonly providerFactory?: import('@itookit/driver-llm/contracts').ProviderFactory;
     private readonly llmLogger: import('@itookit/driver-llm/contracts').ILLMLogger | undefined;
 
     // ── Managers (initialised in init()) ──
@@ -197,6 +199,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         this.presets = snapshotLlmPresets(options?.presets);
         this.providerConnectionPolicy = options?.providerConnectionPolicy;
         this.shellRunner = options?.shellRunner;
+        this.providerFactory = options?.providerFactory;
         this.codexRunner = options?.codexRunner;
         this.codexTransport = options?.codexTransport;
         this.llmLogger = options?.llmLogger;
@@ -419,183 +422,189 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     }
 
     // ─── IDeviceDriver: ioctl ────────────────────────────────────────────────
-
     async ioctl(ctx: DeviceContext, command: string | number, arg?: unknown): Promise<unknown> {
-        switch (command) {
-            case LLM_IOCTL.LIST_CONNECTIONS:
-                return this.connectionManager.listConnections();
+        if (typeof command === 'string' && Object.hasOwn(this.managementIoctl, command)) {
+            return this.managementIoctl[command as keyof typeof this.managementIoctl]!(ctx, arg);
+        }
+        const session = this.sessions.get(ctx.sessionId!);
+        if (session?.kind === 'mcp')
+            return this.mcpIoctl(session, command, arg);
+        if (session?.kind === 'skill')
+            return this.skillIoctl(session, command, arg);
+        return this.chatIoctl(this.requireLLMSession(ctx), command, arg);
+    }
 
-            case LLM_IOCTL.GET_CONNECTION_META:
-                return this.connectionManager.getConnection(arg as string) ?? null;
-
-            case LLM_IOCTL.GET_DEFAULT_CONNECTION:
-                return this.connectionManager.getDefaultConnection();
-
-            case LLM_IOCTL.GET_FULL_CONNECTION:
-                return this.connectionManager.getFullConnection(arg as string);
-
-            case LLM_IOCTL.SAVE_CONNECTION:
-                await this.saveConnection(arg as LLMConnection, this.getSystemFS(ctx));
-                return;
-
-            case LLM_IOCTL.DELETE_CONNECTION:
-                await this.deleteConnection(arg as string, this.getSystemFS(ctx));
-                return;
-
-            case LLM_IOCTL.TEST_CONNECTION_PARAMS:
-                return this.testConnection(arg as Parameters<LLMDeviceDriver['testConnection']>[0]);
-
-            case LLM_IOCTL.LIST_MCP_SERVERS:
-                return this.mcpManager.getMCPServers();
-
-            case LLM_IOCTL.SAVE_MCP_SERVER:
-                await this.mcpManager.saveMCPServer(arg as MCPServer, this.getSystemFS(ctx));
-                return;
-
-            case LLM_IOCTL.DELETE_MCP_SERVER:
-                await this.mcpManager.deleteMCPServer(arg as string, this.getSystemFS(ctx));
-                return;
-
-            case LLM_IOCTL.CONNECT_MCP_SERVER: {
+    private readonly managementIoctl: Readonly<Partial<Record<(typeof LLM_IOCTL)[keyof typeof LLM_IOCTL], (ctx: DeviceContext, arg?: unknown) => Promise<unknown>>>> = Object.freeze({
+        [LLM_IOCTL.LIST_CONNECTIONS]: async (_ctx, _arg) => {
+            return this.connectionManager.listConnections();
+        },
+        [LLM_IOCTL.GET_CONNECTION_META]: async (_ctx, arg) => {
+            return this.connectionManager.getConnection(arg as string) ?? null;
+        },
+        [LLM_IOCTL.GET_DEFAULT_CONNECTION]: async (_ctx, _arg) => {
+            return this.connectionManager.getDefaultConnection();
+        },
+        [LLM_IOCTL.GET_FULL_CONNECTION]: async (_ctx, arg) => {
+            return this.connectionManager.getFullConnection(arg as string);
+        },
+        [LLM_IOCTL.SAVE_CONNECTION]: async (ctx, arg) => {
+            await this.saveConnection(arg as LLMConnection, this.getSystemFS(ctx));
+            return;
+        },
+        [LLM_IOCTL.DELETE_CONNECTION]: async (ctx, arg) => {
+            await this.deleteConnection(arg as string, this.getSystemFS(ctx));
+            return;
+        },
+        [LLM_IOCTL.TEST_CONNECTION_PARAMS]: async (_ctx, arg) => {
+            return this.testConnection(arg as Parameters<LLMDeviceDriver['testConnection']>[0]);
+        },
+        [LLM_IOCTL.LIST_MCP_SERVERS]: async (_ctx, _arg) => {
+            return this.mcpManager.getMCPServers();
+        },
+        [LLM_IOCTL.SAVE_MCP_SERVER]: async (ctx, arg) => {
+            await this.mcpManager.saveMCPServer(arg as MCPServer, this.getSystemFS(ctx));
+            return;
+        },
+        [LLM_IOCTL.DELETE_MCP_SERVER]: async (ctx, arg) => {
+            await this.mcpManager.deleteMCPServer(arg as string, this.getSystemFS(ctx));
+            return;
+        },
+        [LLM_IOCTL.CONNECT_MCP_SERVER]: async (_ctx, arg) => {
+            {
                 const server = this.mcpManager.getRawServers().find(s => s.id === (arg as string));
-                if (server) await this.mcpManager.connectMCPServer(server);
+                if (server)
+                    await this.mcpManager.connectMCPServer(server);
                 return;
             }
-
-            case LLM_IOCTL.DISCONNECT_MCP_SERVER: {
+        },
+        [LLM_IOCTL.DISCONNECT_MCP_SERVER]: async (_ctx, arg) => {
+            {
                 await this.mcpManager.disconnectServer(arg as string);
                 return;
             }
-
-            case LLM_IOCTL.LIST_PROVIDERS:
-                return this.providerManager.getProviders();
-
-            case LLM_IOCTL.GET_PROVIDER:
-                return this.providerManager.getProvider(arg as string) ?? null;
-
-            case LLM_IOCTL.GET_FULL_PROVIDER:
-                return this.providerManager.getFullProvider(arg as string) ?? null;
-
-            case LLM_IOCTL.SAVE_PROVIDER:
-                await this.saveProvider(arg as LLMProvider, this.getSystemFS(ctx));
-                return;
-
-            case LLM_IOCTL.DELETE_PROVIDER:
-                await this.providerManager.deleteProvider(arg as string, this.getSystemFS(ctx));
-                return;
-
-            case LLM_IOCTL.LIST_SKILLS:
-                return this.skillManager.getSkills();
-
-            case LLM_IOCTL.SAVE_SKILL:
-                await this.saveSkill(arg as LLMSkill, this.getSystemFS(ctx));
-                return;
-
-            case LLM_IOCTL.DELETE_SKILL:
-                await this.deleteSkill(arg as string, this.getSystemFS(ctx));
-                return;
-
-            case LLM_IOCTL.QUERY_COSTS_BY_SESSION:
-                return this.costManager.queryBySession(arg as string);
-
-            case LLM_IOCTL.QUERY_COSTS_BY_PROVIDER: {
-                const f = arg as { providerId: string; dateFrom?: string; dateTo?: string };
+        },
+        [LLM_IOCTL.LIST_PROVIDERS]: async (_ctx, _arg) => {
+            return this.providerManager.getProviders();
+        },
+        [LLM_IOCTL.GET_PROVIDER]: async (_ctx, arg) => {
+            return this.providerManager.getProvider(arg as string) ?? null;
+        },
+        [LLM_IOCTL.GET_FULL_PROVIDER]: async (_ctx, arg) => {
+            return this.providerManager.getFullProvider(arg as string) ?? null;
+        },
+        [LLM_IOCTL.SAVE_PROVIDER]: async (ctx, arg) => {
+            await this.saveProvider(arg as LLMProvider, this.getSystemFS(ctx));
+            return;
+        },
+        [LLM_IOCTL.DELETE_PROVIDER]: async (ctx, arg) => {
+            await this.providerManager.deleteProvider(arg as string, this.getSystemFS(ctx));
+            return;
+        },
+        [LLM_IOCTL.LIST_SKILLS]: async (_ctx, _arg) => {
+            return this.skillManager.getSkills();
+        },
+        [LLM_IOCTL.SAVE_SKILL]: async (ctx, arg) => {
+            await this.saveSkill(arg as LLMSkill, this.getSystemFS(ctx));
+            return;
+        },
+        [LLM_IOCTL.DELETE_SKILL]: async (ctx, arg) => {
+            await this.deleteSkill(arg as string, this.getSystemFS(ctx));
+            return;
+        },
+        [LLM_IOCTL.QUERY_COSTS_BY_SESSION]: async (_ctx, arg) => {
+            return this.costManager.queryBySession(arg as string);
+        },
+        [LLM_IOCTL.QUERY_COSTS_BY_PROVIDER]: async (_ctx, arg) => {
+            {
+                const f = arg as {
+                    providerId: string;
+                    dateFrom?: string;
+                    dateTo?: string;
+                };
                 return this.costManager.queryAll({ providerId: f.providerId, dateFrom: f.dateFrom, dateTo: f.dateTo });
             }
-
-            case LLM_IOCTL.QUERY_COSTS_ALL:
-                return this.costManager.queryAll(arg as { providerId?: string; dateFrom?: string; dateTo?: string } | undefined);
+        },
+        [LLM_IOCTL.QUERY_COSTS_ALL]: async (_ctx, arg) => {
+            return this.costManager.queryAll(arg as {
+                providerId?: string;
+                dateFrom?: string;
+                dateTo?: string;
+            } | undefined);
         }
+    });
 
-        // ── MCP / Skill 会话命令 ────────────────────────────────────────────────
-        const session = this.sessions.get(ctx.sessionId!);
-        if (session?.kind === 'mcp') {
-            switch (command) {
-                case LLM_IOCTL.MCP_DISCOVER: return session.connection.discover();
-                case LLM_IOCTL.MCP_READ_RESOURCE: {
-                    const { uri, signal } = arg as { uri: string; signal?: AbortSignal };
-                    return session.connection.readResource(uri, { signal });
-                }
-                case LLM_IOCTL.MCP_GET_PROMPT: {
-                    const { name, args, signal } = arg as { name: string; args?: Record<string, string>; signal?: AbortSignal };
-                    return session.connection.getPrompt(name, args, { signal });
-                }
-                case LLM_IOCTL.MCP_LIST_TOOLS: {
-                    const tools = await session.connection.listTools();
-                    return tools.map((t: MCPToolInfo): ToolDefinition => ({
-                        type: 'function',
-                        function: {
-                            name: t.name,
-                            description: t.description,
-                            parameters: t.inputSchema,
-                        },
-                    }));
-                }
-
-                case LLM_IOCTL.MCP_CALL_TOOL: {
-                    const { tool, args, ...options } = arg as { tool: string; args: Record<string, any>; timeout?: number; signal?: AbortSignal;
-                        onProgress?: (progress: { progress: number; total?: number; message?: string }) => void };
-                    return session.connection.callTool(tool, args, options);
-                }
-
-                default:
-                    throw new Error(`LLMDeviceDriver: unknown MCP ioctl '${String(command)}'`);
-            }
-        }
-
-        if (session?.kind === 'skill') {
-            switch (command) {
-                case LLM_IOCTL.SKILL_GET_DEF:
-                    return session.skill;
-
-                case LLM_IOCTL.SKILL_INVOKE: {
-                    const { args } = arg as { args: Record<string, unknown> };
-                    return this.skillManager.invokeSkill(session.skill, args);
-                }
-
-                default:
-                    throw new Error(`LLMDeviceDriver: unknown Skill ioctl '${String(command)}'`);
-            }
-        }
-
-        // ── LLM Chat 会话命令（需要 sessionId）─────────────────────────────────
-        const llmSession = this.requireLLMSession(ctx);
-
+    private async mcpIoctl(session: MCPSessionState, command: string | number, arg?: unknown): Promise<unknown> {
         switch (command) {
-            case LLM_IOCTL.CHAT: {
-                const params = arg as ChatCompletionParams;
-                llmSession.abortController?.abort();
-                llmSession.pendingStream = null;
-                const abort = new AbortController();
-                params.signal?.addEventListener('abort', () => abort.abort(), { once: true });
-                llmSession.abortController = abort;
-
-                const lastUserMsg = params.messages.filter(m => m.role === 'user').pop();
-                if (lastUserMsg) {
-                    this.llmLogger?.logMessage(llmSession.id, 'user', this.extractContent(lastUserMsg));
-                }
-                const { signal: _sig, ...logParams } = params as ChatCompletionParams & { signal?: unknown };
-                this.llmLogger?.logRequest(llmSession.id, {
-                    provider: llmSession.driver.providerName,
-                    model: llmSession.driver.currentModel ?? '',
-                    messages: params.messages,
-                    params: logParams as Record<string, unknown>,
-                });
-
-                const rawStream = await llmSession.driver.chat.create({
-                    ...params, stream: true, signal: abort.signal,
-                });
-                return this.wrapStreamOnly(rawStream, llmSession);
+            case LLM_IOCTL.MCP_DISCOVER: return session.connection.discover();
+            case LLM_IOCTL.MCP_READ_RESOURCE: {
+                const { uri, signal } = arg as {
+                    uri: string;
+                    signal?: AbortSignal;
+                };
+                return session.connection.readResource(uri, { signal });
             }
+            case LLM_IOCTL.MCP_GET_PROMPT: {
+                const { name, args, signal } = arg as {
+                    name: string;
+                    args?: Record<string, string>;
+                    signal?: AbortSignal;
+                };
+                return session.connection.getPrompt(name, args, { signal });
+            }
+            case LLM_IOCTL.MCP_LIST_TOOLS: {
+                const tools = await session.connection.listTools();
+                return tools.map((t: MCPToolInfo): ToolDefinition => ({
+                    type: 'function',
+                    function: {
+                        name: t.name,
+                        description: t.description,
+                        parameters: t.inputSchema,
+                    },
+                }));
+            }
+            case LLM_IOCTL.MCP_CALL_TOOL: {
+                const { tool, args, ...options } = arg as {
+                    tool: string;
+                    args: Record<string, any>;
+                    timeout?: number;
+                    signal?: AbortSignal;
+                    onProgress?: (progress: {
+                        progress: number;
+                        total?: number;
+                        message?: string;
+                    }) => void;
+                };
+                return session.connection.callTool(tool, args, options);
+            }
+            default:
+                throw new Error(`LLMDeviceDriver: unknown MCP ioctl '${String(command)}'`);
+        }
+    }
 
+    private async skillIoctl(session: SkillSessionState, command: string | number, arg?: unknown): Promise<unknown> {
+        switch (command) {
+            case LLM_IOCTL.SKILL_GET_DEF:
+                return session.skill;
+            case LLM_IOCTL.SKILL_INVOKE: {
+                const { args } = arg as {
+                    args: Record<string, unknown>;
+                };
+                return this.skillManager.invokeSkill(session.skill, args);
+            }
+            default:
+                throw new Error(`LLMDeviceDriver: unknown Skill ioctl '${String(command)}'`);
+        }
+    }
+
+    private async chatIoctl(llmSession: LLMSessionState, command: string | number, arg?: unknown): Promise<unknown> {
+        switch (command) {
+            case LLM_IOCTL.CHAT: return this.streamChat(llmSession, arg as ChatCompletionParams);
             case LLM_IOCTL.CHAT_SYNC: {
                 const params = arg as ChatCompletionParams;
                 return llmSession.driver.chat.create({ ...params, stream: false }) as Promise<ChatCompletionResponse>;
             }
-
             case LLM_IOCTL.GET_HISTORY:
                 return llmSession.history.slice();
-
             case LLM_IOCTL.CLEAR_HISTORY:
                 llmSession.abortController?.abort();
                 llmSession.pendingStream = null;
@@ -603,27 +612,49 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
                 llmSession.lastUsage = null;
                 llmSession.history = llmSession.history.filter(m => m.role === 'system');
                 return;
-
             case LLM_IOCTL.GET_MODELS: {
                 const provider = this.providerManager.getProvider(llmSession.connection.providerId);
                 return provider?.models ?? [];
             }
-
             case LLM_IOCTL.ABORT:
                 llmSession.abortController?.abort();
                 llmSession.pendingStream = null;
                 return;
-
             case LLM_IOCTL.SET_SYSTEM_PROMPT: {
                 const prompt = arg as string | undefined;
                 llmSession.history = llmSession.history.filter(m => m.role !== 'system');
-                if (prompt) llmSession.history.unshift({ role: 'system', content: prompt });
+                if (prompt)
+                    llmSession.history.unshift({ role: 'system', content: prompt });
                 return;
             }
-
             default:
                 throw new Error(`LLMDeviceDriver: unknown ioctl '${String(command)}'`);
         }
+    }
+
+    private async streamChat(llmSession: LLMSessionState, params: ChatCompletionParams): Promise<AsyncGenerator<ChatCompletionChunk>> {
+        llmSession.abortController?.abort();
+        llmSession.pendingStream = null;
+        const abort = new AbortController();
+        params.signal?.addEventListener('abort', () => abort.abort(), { once: true });
+        llmSession.abortController = abort;
+        const lastUserMsg = params.messages.filter(m => m.role === 'user').pop();
+        if (lastUserMsg) {
+            this.llmLogger?.logMessage(llmSession.id, 'user', this.extractContent(lastUserMsg));
+        }
+        const { signal: _sig, ...logParams } = params as ChatCompletionParams & {
+            signal?: unknown;
+        };
+        this.llmLogger?.logRequest(llmSession.id, {
+            provider: llmSession.driver.providerName,
+            model: llmSession.driver.currentModel ?? '',
+            messages: params.messages,
+            params: logParams as Record<string, unknown>,
+        });
+        const rawStream = await llmSession.driver.chat.create({
+            ...params, stream: true, signal: abort.signal,
+        });
+        return this.wrapStreamOnly(rawStream, llmSession);
     }
 
     // ─── IConnectionService ───────────────────────────────────────────────────
@@ -855,6 +886,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         const baseLabel = sanitizeLabel((opts?.sessionLabel as string) ?? '');
         const sessionId = baseLabel || `llm-${++this.sessionSeq}`;
         const driver = new LLMDriver({
+            providerFactory: this.providerFactory,
             connection: connForDriver,
             customProviderDefaults,
             codex: this.resolveCodexConfig(),

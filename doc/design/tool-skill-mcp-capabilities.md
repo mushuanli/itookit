@@ -28,7 +28,7 @@ llm-ui 的 Skill 面板分别显示指令加载状态和当前 Agent 声明的�
 | Tauri | 原生子进程桥 + SDK Client | WebView 中的 SDK transport |
 | Web | 不可用，配置页明确提示 | SDK transport；服务器需允许浏览器访问 |
 
-Tauri 在装配 LLM 服务前安装 `registerMCPStdioHost`。每个连接拥有独立子进程，JSON 行通过有界队列传输；消息最多 4 MiB，积压最多 8 MiB / 1024 行，stderr 最多保留 16 KiB。溢出会失败并停止进程，不静默丢失协议响应。启动、写入、轮询和停止经后台任务执行。关闭清理进程组；Linux 等待组成员停止，应用退出拒绝迟到进程注册。
+Tauri 在装配 LLM 服务时通过 `createMCPStdioTransportFactory` 创建实例桥并注入 MCP 选项。每个连接拥有独立子进程，JSON 行通过有界队列传输；消息最多 4 MiB，积压最多 8 MiB / 1024 行，stderr 最多保留 16 KiB。溢出会失败并停止进程，不静默丢失协议响应。启动、写入、轮询和停止经后台任务执行。关闭清理进程组；Linux 等待组成员停止，应用退出拒绝迟到进程注册。
 
 stdio 服务器是用户配置的外部进程，使用该服务器的启动目录、参数和环境变量。其文件访问不经过 Session VFS；MCP 调用属于 external 能力并走工具审批。Session 的内置文件工具与 Bash 继续使用各自挂载和隔离边界。
 

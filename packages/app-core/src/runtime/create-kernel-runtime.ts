@@ -1,3 +1,4 @@
+import { t, createModuleLogger } from '@itookit/common';
 import { Kernel, type RecoveryOptions, type SessionStorageResolver } from '@itookit/durable-kernel';
 import {
     createKernelAdaptersRuntime,
@@ -66,6 +67,8 @@ export async function createKernelRuntime(
         : createRuntimeContextGc(() => kernel, options.contextGc);
     const adapters = await createKernelAdaptersRuntime({
         contextService: options.contextService ?? createRuntimeContextResolver(() => kernel, () => adapters.llmService, contextGc?.observe, options.contextEngineOptions),
+        logger: createModuleLogger('kernel-adapters'),
+        processUnavailableMessage: () => t('chatInput.command.unavailable'),
         llmDriver: options.llmDriver,
         runMode: 'kernel',
         fileContextForSession: options.fileContextForSession,

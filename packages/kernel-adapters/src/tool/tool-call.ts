@@ -2,7 +2,6 @@
 // Shared helpers for normalising ToolCall across Anthropic and OpenAI formats.
 
 import type { ToolCall } from '@itookit/llm-context';
-import { generateId } from '@itookit/common';
 
 /** Extract tool name (handles both Anthropic `name` and OpenAI `function.name`). */
 export function getToolName(call: ToolCall): string {
@@ -45,7 +44,7 @@ export function extractXmlToolCalls(text: string): { calls: ToolCall[]; cleanTex
                 : JSON.stringify(rawArgs);
 
             calls.push({
-                id: `call_${generateId()}`,
+                id: `call_${crypto.randomUUID()}`,
                 type: 'function',
                 function: { name, arguments: argsStr },
             });

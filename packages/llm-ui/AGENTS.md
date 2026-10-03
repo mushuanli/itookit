@@ -79,3 +79,5 @@ ChatInput 设置按对话、OCR、高级分组；高级项默认折叠。Skills 
 `/chat` 的正式会话编辑器必须注入 SessionViewPort，提示词历史仅由实例提供。Session/Flow 命令常量来自各自 `/contracts`，共享 UI 禁止导入 Session 实现根入口；禁止全局单例回退。
 
 声明由 tsup.types.config.ts 打包，中性契约内联，Kernel 和 UI 公共类保持外部身份。build 自动执行 check-llm-ui-entrypoints.mjs，检查默认入口无设置/单例，以及四个开发契约包不泄漏到 JS 或公开声明。禁止只移动 package.json 依赖而不验证产物。
+
+Slash 命令描述在 slash-command-catalog.ts，弹出交互在 SlashCommandPlugin，执行按 SlashCommandRouter 的领域回调分组。输入创建状态只接收 initialInputState，禁止恢复 app_create_params 或全局创建缓存。

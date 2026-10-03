@@ -8,18 +8,19 @@ import { SkillLoadEffectAdapter } from './skill-load-effect';
 
 describe('KernelAdapters Effect adapters', () => {
     it('logs execution identity and the original error without dumping tool arguments', async () => {
-        const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const log = vi.fn();
+        const logger = { debug() {}, info() {}, warn() {}, error: log };
         const failure = new Error('File view was cancelled');
         try {
             const service = toolService(async () => { throw failure; });
             const request = { resourceHandleId: 'tool-handle', toolId: 'Glob', cwd: '/workspace', args: { secret: 'private-input' } };
-            await expect(new ToolCallEffectAdapter(service).execute(request, context('tool'))).rejects.toBe(failure);
-            expect(log).toHaveBeenCalledWith('[tool.call] Execution failed', expect.objectContaining({ toolId: 'Glob', cwd: '/workspace' }), failure);
+            await expect(new ToolCallEffectAdapter(service, undefined, undefined, [], logger).execute(request, context('tool'))).rejects.toBe(failure);
+            expect(log).toHaveBeenCalledWith('[tool.call] Execution failed', expect.objectContaining({ toolId: 'Glob', cwd: '/workspace', error: failure }));
             expect(JSON.stringify(log.mock.calls)).not.toContain('private-input');
-            await expect(new BashEffectAdapter(service).execute({ resourceHandleId: 'process-handle', command: 'private-command' }, context('process'))).rejects.toBe(failure);
+            await expect(new BashEffectAdapter(service, logger).execute({ resourceHandleId: 'process-handle', command: 'private-command' }, context('process'))).rejects.toBe(failure);
             expect(log.mock.calls.at(-1)?.[0]).toBe('[process.exec] Execution failed');
             expect(JSON.stringify(log.mock.calls)).not.toContain('private-command');
-        } finally { log.mockRestore(); }
+        } finally { log.mockReset(); }
     });
     it('streams bounded progress using the call identity before tool completion', async () => {
         const emit = vi.fn(async () => {});

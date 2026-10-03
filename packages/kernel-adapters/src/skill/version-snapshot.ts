@@ -1,4 +1,4 @@
-import { sha256HexSync } from '@itookit/common';
+import { sha256HexSync } from '@itookit/llm-context';
 import { type SkillDefinition, type SkillVersionSnapshot } from '@itookit/tools/contracts';
 
 /** Object key order and catalog timestamps do not define a Skill version. */

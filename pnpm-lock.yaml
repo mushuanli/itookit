@@ -642,9 +642,6 @@ importers:
 
   packages/kernel-adapters:
     dependencies:
-      '@itookit/common':
-        specifier: workspace:*
-        version: link:../common
       '@itookit/driver-llm':
         specifier: workspace:*
         version: link:../driver-llm

@@ -1,3 +1,5 @@
+import type { LLMLogSink } from '@itookit/driver-llm/contracts';
+import { silentAdapterLog } from '../ports/diagnostics';
 import { assertEffectGrant } from '@itookit/durable-kernel';
 import type { ISkillService } from '@itookit/tools/contracts';
 import type { IToolService, ToolInvokeResult } from '@itookit/tools/contracts';
@@ -35,6 +37,7 @@ export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectReques
         private readonly onSkillLoaded?: (skillId: string, context: EffectExecutionContext) => void | ToolInvokeResult['skillContext'] | Promise<void | ToolInvokeResult['skillContext']>,
         private readonly resolveSkillTracker?: (context: EffectExecutionContext) => Promise<SkillLoadTracker | undefined>,
         private readonly effectTools: EffectToolBinding[] = [],
+        private readonly log: LLMLogSink = silentAdapterLog,
     ) {}
 
     async execute(request: ToolCallEffectRequest, context: EffectExecutionContext): Promise<ToolInvokeResult> {
@@ -55,9 +58,9 @@ export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectReques
         admitOutput?: import('@itookit/tools/contracts').ToolInvokeRequest['admitOutput']): Promise<ToolInvokeResult> {
         try { return await this.invoke(request, context, admitOutput); }
         catch (error) {
-            console.error('[tool.call] Execution failed', { sessionId: context.sessionId, taskId: context.taskId,
+            this.log.error('[tool.call] Execution failed', { sessionId: context.sessionId, taskId: context.taskId,
                 effectId: context.effectId, toolId: request.toolId, cwd: request.cwd,
-                cancelled: context.abortSignal.aborted }, error);
+                cancelled: context.abortSignal.aborted, error });
             throw error;
         }
     }

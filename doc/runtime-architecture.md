@@ -323,7 +323,7 @@ UI 发布收尾：driver-llm、tools、kernel-adapters、llm-tasks 改为开发�
 
 ## LLM 模块 C4 与代码审查（2026-10-03）
 
-本节以当前工作树为准，包含尚未提交的 Session 单例及 UI `/legacy` 删除。审查关注源代码依赖、实际装配、公开接口、事件流和清理候选；不把此前测试通过等同于所有架构目标均已完成。C4 Component 中的组件代表逻辑 npm 模块，不代表独立部署进程。
+本节以当前工作树为准。Session 单例及 UI `/legacy` 删除与首轮审查已提交为 `34afb19d`；下文同时记录审查后的实施结果。审查关注源代码依赖、实际装配、公开接口、事件流和清理候选；不把此前测试通过等同于所有架构目标均已完成。C4 Component 中的组件代表逻辑 npm 模块，不代表独立部署进程。
 
 ### C4 系统边界
 
@@ -424,7 +424,6 @@ flowchart TD
     Adapters --> Tools
     Adapters --> Context
     Adapters --> VFS
-    Adapters --> Common[common]
     Tools --> VFS
     Tools --> Context
     Tools --> Driver
@@ -547,25 +546,25 @@ sequenceDiagram
 | 提示词、授权、超时、重试、目录 | 主执行链已分离 | DirectAgentPolicy、buildLlmTaskInput、显式 presets 与 MCP 选项注入，并持久化任务策略 |
 | 重试所有权 | 正确，保持回归 | program-helpers 的 LLM 请求明确 `_maxAttempts: 1`，Effect 使用 retries+1；避免 Driver 与 Kernel 重试乘积 |
 | Session 单例 | 已清理 | 当前工作树删除 Session/PromptHistory 单例与 UI legacy；调用者持有实例和 dispose |
-| UI 宿主创建协议 | 尚有产品耦合 | SlashCommandRouter 写 app_create_params；StateManager 读取，app-shell 也写同键；应使用已有 initialInputState/导航参数或新增最小创建端口 |
-| Effect 日志与翻译 | 尚有全局耦合 | llm-chat-effect 直接使用 common 的模块日志；create-kernel-adapters-runtime 用 common.t 生成不可用提示；改为实例日志/诊断及宿主翻译 |
-| Provider 扩展注册 | 尚有共享可变状态 | providers/registry 的全局 Map 可经 registerProvider 改写，LLMDriver 固定调用 createProvider；应注入实例 ProviderFactory/Registry |
-| MCP 兼容宿主 | 可继续清理 | 全局 hostFactory 仅供 legacy-device-driver 快照；生产 host 已走 core；全仓未发现生产 registerMCPStdioHost 调用 |
-| 厂商默认行为 | 需显式界定 | driver defaults 给 DeepSeek 默认 thinking；这是厂商行为默认，建议可选配置或宿主 presets，不强制所有用户接受 |
+| UI 宿主创建协议 | 已改为显式参数 | 导航、WorkspaceCreation、EditorOptions 传递 initialInputState；删除 app_create_params 读写及固定 isNewSession 分支 |
+| Effect 日志与翻译 | 已改为实例注入 | KernelAdapterDiagnostics 提供日志和不可用提示；宿主注入翻译，适配器默认静默；kernel-adapters 不再依赖 common |
+| Provider 扩展注册 | 已改为实例端口 | createProviderRegistry 创建独立注册表，snapshot 固定 Driver 的工厂；LLMProviderInstance 为结构接口，无需继承 BaseProvider |
+| MCP 兼容宿主 | 已删除 | 删除 legacy-device-driver、全局注册及 /llm 聚合；使用 core/config/presets/contracts 与实例传输工厂 |
+| 厂商默认行为 | 已显式化 | DeepSeek thinking 默认移至可选 MindOS presets；独立 Driver 通过 responses 选项配置；wire 日志使用实例 sink |
 | UI 完全通用化 | 尚未完成 | 仍依赖通用包翻译/图标和具体仓储能力；作为框架 UI 合理，但不等于任意系统都能只传一个流使用 |
 
-因此“主链解耦已完成”应限定为模块依赖方向与主要策略注入已成立；“所有产品策略、全局状态均已消除”不成立。无需为可替换性无限增加接口或包；只抽取确实存在多宿主差异的端口。
+因此“主链解耦已完成”应限定为模块依赖方向、主要策略注入和本轮确认的共享状态已处理；UI 通用化、外部解码与复杂执行函数治理仍未全部完成。无需为可替换性无限增加接口或包；只抽取确实存在多宿主差异的端口。
 
 ### 代码质量：量化与结构风险
 
-使用 TypeScript AST 扫描选定 10 个 LLM/执行/工具模块的 src，排除 `.test.ts`，函数长度包括注释、模板字符串和嵌套回调。发现 367 个带函数体节点超过 30 行；这只是定位线索，不是圈复杂度或缺陷数。本轮没有测量圈复杂度，也没有用 LOC 推断性能问题。
+审查基线使用 TypeScript AST 扫描选定 10 个 LLM/执行/工具模块的 src，排除 `.test.ts`，函数长度包括注释、模板字符串和嵌套回调。实施前发现 367 个带函数体节点超过 30 行；这只是定位线索，不是圈复杂度或缺陷数。本轮没有测量圈复杂度，也没有用 LOC 推断性能问题。
 
-| 热点 | 实测 | 建议的包内拆分 |
+| 热点 | 审查基线 → 实施后 | 结构与剩余工作 |
 |---|---:|---|
-| llm-flow/src/flow/executor.ts 的 execute | 约 770 行 | 编译与校验、运行状态/恢复、调度推进、工作区终结；显式 RunState，保留事务和 checkpoint 顺序 |
-| llm-ui/src/components/input/plugins/SlashCommandPlugin.ts 的 buildDefaultCommands | 约 439 行 | 命令描述目录与执行处理分开；按已有命令领域组织 |
-| llm-ui/src/shell/SlashCommandRouter.ts 的 buildSlashCallbacks | 约 366 行 | 会话、模型、工具、导航处理器；宿主动作从公共 UI 退出 |
-| kernel-adapters/src/llm-management/device/llm-device-driver.ts 的 ioctl | 约 205 行 | 类型化命令分派，按配置、会话、模型调用分组 |
+| llm-flow/src/flow/executor.ts 的 execute | 约 770 → 716 行 | 已提取 scheduler-readiness，保留跳过、循环和返回屏障语义；运行状态、恢复与终结仍需拆分 |
+| llm-ui/src/components/input/plugins/SlashCommandPlugin.ts 的 buildDefaultCommands | 约 439 → 3 行 | 命令描述移至 slash-command-catalog，参数解析移至 slash-tool-args；弹窗仅消费描述目录 |
+| llm-ui/src/shell/SlashCommandRouter.ts 的 buildSlashCallbacks | 约 366 → 12 行 | 按会话、模型、工具、导航领域组织处理器；创建状态通过宿主导航参数传递 |
+| kernel-adapters/src/llm-management/device/llm-device-driver.ts 的 ioctl | 约 205 → 11 行 | 管理命令使用类型化分派表；MCP、Skill、Chat 单独处理；输入 payload 校验仍可加强 |
 | llm-session/src/session/conversation-run-coordinator.ts | 文件约 818 行 | 准入、任务构造、Context 装配、历史投影与恢复分别测试 |
 | llm-ui/src/shell/LLMWorkspaceEditor.ts | 文件约 1245 行 | 视图装配、会话绑定、任务挂接、保存生命周期；避免编辑器持有全部业务分支 |
 
@@ -573,29 +572,27 @@ Provider wire 层与管理适配层存在 any 和双重断言，但数量不能�
 
 API 仍有改进空间：UI 工厂参数中的 sessionManager 与 resolveSessionView 均可省略，正式会话编辑器到运行时才报错；可用区分 Draft/Session 的依赖类型提前约束。UI 内部已有 TaskControlPlane，可以逐步用它替换暴露到 UI 工厂的具体 Kernel 类，但先确认所有消费所需方法；不应通过内联 Kernel 的私有字段类型破坏类身份。
 
-### 冗余与清理候选
+### 冗余清理与实施结果
 
-| 候选 | 确认程度 | 清理方式 |
-|---|---|---|
-| llm-tasks 的 core/context-assembler、core/provider-message-adapter、durable/context-compaction | 已确认是 llm-context 的薄转发；有测试、根导出和活文档引用 | 消费者直接引用 llm-context，迁移测试到权威实现，再删除转发与旧导出 |
-| kernel-adapters 的 legacy-device-driver、MCP 全局注册与 /llm 兼容聚合 | 生产 host 无调用；仍有公开 API 和兼容测试 | 按公开 API 迁移清单清理；保留 core/config/presets/contracts 和实例 MCP 工厂 |
-| llm-ui/chat 的 LLMFactoryOptions | 仓库中只有定义，无其他消费者；未由根显式转发 | 删除或与实际工厂依赖类型统一，不保留两个不一致的选项定义 |
-| llm-ui/chat 的 isNewSession=false | 工厂固定为 false，但编辑器和 StateManager 仍读取该字段 | 先核对其他编辑器创建方式与草稿行为，再删除分支；不能据此直接删除全部新建会话逻辑 |
-| LLMServiceAdapter.runMode 类型 | 确认是 `'kernel' | 'kernel'` 重复联合 | 直接简化；另行审查该参数是否还需要与设备协议绑定 |
-| 附件展开 | Effect、ServiceAdapter、Driver 均有相关逻辑 | 核实不同数据阶段和独立 Driver 入口；整合转换边界，保留独立运行功能，不能简单删一处 |
-| context 的旧装配和 v2 服务 | 仍有实际装配与历史读取消费者 | 不作为死代码删除；先规定历史选择、窗口与 wire 编码的各自责任 |
-| 文档索引 | 部分指向兼容转发而非权威实现，事件流文档仍说活动描述未接线 | 更新 file-index 和事件流表述，避免继续引导新代码消费旧接口 |
+| 审查项 | 本轮结果 |
+|---|---|
+| Tasks 的 Context 薄转发与根导出 | 已删除；消费者直接引用 llm-context，装配和消息编码测试迁至权威模块 |
+| legacy-device-driver、MCP 全局注册与 /llm 聚合 | 已删除；包括 MCP 工具内的聚合导入，宿主与测试改用明确子入口 |
+| LLMFactoryOptions、固定 isNewSession、重复 runMode 联合 | 已清理；保留真正的新建会话流程 |
+| 附件转换 | 删除无消费者的 prepareLlmChatEffectRequest；ServiceAdapter 原样转发，Driver 在通信入口按协议编码，保留 Codex 本地图片路径 |
+| Context 旧装配与 v2 服务 | 保留；历史装配与持久请求仍有不同的实际消费者 |
+| 文档索引与事件说明 | 已同步权威 Context 路径、实例 MCP 工厂及活动描述接线 |
+| 架构回归守卫 | 增加 kernel-adapters 禁止依赖 common、UI 禁止 app_create_params、禁止恢复 /llm 聚合与 MCP 全局状态 |
 
-上述“无消费者”只指本仓库静态检索，没有外部 npm 使用统计。删除公开导出应在发布说明中明确迁移和版本兼容性。本轮审查不自动删除这些候选，也不把缺少检索结果作为删除工具、恢复分支或协议兼容行为的充分证据。
+公开 API 删除以仓库消费者迁移和外部产物验证为依据，不能推断外部 npm 用户均已迁移。后续发布须明确兼容变更：全局 Provider 注册改用实例 Registry/Factory，旧 /llm 聚合改用明确子入口，Tasks 的 Context 转发改为直接导入 llm-context。本轮未发布。
 
-### 建议实施顺序与验证
+本轮完成兼容清理、实例策略/诊断注入、显式 UI 创建参数、命令目录和 ioctl 分派拆分，以及 Flow 就绪判定提取。Flow execute 仍约 716 行，Session 协调与编辑器生命周期仍有大函数；UI 工厂的具体 Kernel 类型和外部 JSON/ioctl 解码仍需进一步治理。不能把顶层函数缩短视为所有复杂度已消除。
 
-1. 清理剩余兼容转发、MCP legacy 和明确重复定义；同步消费者、测试、README 和产物守卫。
-2. 移除 UI 的 app_create_params 协议，以及适配器日志/翻译和 Provider Registry 的全局状态；增加多实例隔离回归。
-3. 按上述责任拆分 Flow execute 与 UI 命令装配；每次保留恢复、幂等结算、取消确认和审批的现有证据。
-4. 最后统一类型化命令分派、外部解码、附件转换与公共声明，验证 npm 外部消费者。
+### 验证证据
 
-当前工作树此前通过 Session 215 项、UI 66 项、会话编辑器定向 3 项、全仓类型检查、相关构建、架构守卫和发布外部消费者验证。这些是已有改动的验证，并非本轮静态审查发现的所有候选都已修复；本轮只新增审查文档。完整 app-shell 矩阵仍有已知基线问题，不能宣称全量通过。
+本轮 Context 31、Tasks 68、Flow 346、UI 67、Driver 63、Adapters 209、app-core 232 项测试通过；app-shell 的 SessionWorkbench/Tauri bootstrap 定向 28 项和宿主边界 11 项通过。相关包构建、Web 构建、全仓类型检查、架构守卫和文档检查通过。Driver 打包后在工作区外验证结构 ProviderFactory、ESM/CJS 与严格类型；UI 外部消费者验证 root/chat/settings、实例 Session API 与兼容入口删除。外部检查时也重建了设置模块产物，避免旧产物继续引用已删除的 MCP API。
+
+此前 Session 单例清理通过 215 项 Session 测试，本轮未重跑完整 Session 矩阵。完整 app-shell 矩阵仍有已知基线问题，以上定向通过不代表全仓测试矩阵通过。
 
 主要源码入口：
 

@@ -1,7 +1,7 @@
 import { sha256Hex, type ContextPlan } from '@itookit/llm-context';
 import { type MemoryPolicy } from '@itookit/llm-tasks/contracts';
 import { KernelError, KernelErrorCode, type Kernel, type SessionHandle } from '@itookit/durable-kernel';
-import type { RetrievedMemoryEntry } from '@itookit/llm-tasks';
+import type { RetrievedMemoryEntry } from '@itookit/llm-context';
 import { SharedMemoryStore, type MemoryOrigin } from './shared-memory-store';
 
 export interface MemoryEntry extends RetrievedMemoryEntry { scope: string; updatedAt: number; revision: string;

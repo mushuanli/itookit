@@ -89,7 +89,6 @@ export interface LLMEditorOptions extends EditorOptions<import('@itookit/llm-flo
     defaultHarnessToolIds?: readonly string[];
     agentService: IAgentConfigService;
     initialInputState?: { text?: string; agentId?: string };
-    isNewSession?: boolean;
     /** Host-owned OCR capability and configuration. */
     ocr?: import('@itookit/ui-common').OcrControls;
     /**
@@ -828,14 +827,8 @@ export class LLMWorkspaceEditor implements IEditor {
 
         this.stateManager.restoreInputState(this.chatInput, {
             initialInputState: effectiveInitialInputState,
-            isNewSession: this.options.isNewSession,
             savedState: savedUIState,
             sessionSettings,
-            onTitleRestore: (restoredTitle: string) => {
-                this.currentTitle = restoredTitle;
-                this.titleInput.value = restoredTitle;
-                this.handleTitleChange(restoredTitle);
-            },
         });
 
         // 恢复 workflow 实例来源（manifest.flow）→ 恢复参数；新实例则立即运行一次。

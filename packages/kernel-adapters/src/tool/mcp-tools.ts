@@ -2,7 +2,7 @@ import type { MCPDiscovery } from '@itookit/tools/mcp-contracts';
 import type { IToolService, ToolDefinition, ToolExecutionContext } from '@itookit/tools/contracts';
 import type { DeviceContext, IDeviceDriver } from '@itookit/vfs-core';
 import { createToolProgressReporter } from '@itookit/tools';
-import { LLM_IOCTL } from '../llm-management/index';
+import { LLM_IOCTL } from '../llm-management/contracts/device';
 
 const encode = (value: string) => encodeURIComponent(value).replace(/_/g, '%5F').replace(/%/g, '_');
 const decode = (value: string) => decodeURIComponent(value.replace(/_([0-9A-F]{2})/g, '%$1'));

@@ -10,5 +10,5 @@ export interface WorkspaceController {
 
 /** Optional capability; not every workspace creates resources. */
 export interface WorkspaceCreation {
-    createResource(options?: { title?: string; content?: string; parentPath?: string | null }): Promise<string>;
+    createResource(options?: { title?: string; content?: string; parentPath?: string | null; initialInputState?: { text?: string; agentId?: string } }): Promise<string>;
 }

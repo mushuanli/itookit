@@ -54,3 +54,5 @@ pnpm --filter @itookit/llm-flow test
 统一契约：`structured/references.ts` 编译引用依赖并在节点提交前解析；`condition.ts` 将可视条件编译为表达式；`join.ts` 注册版本化纯 reducer。公共 prompt 在每次 spawn 时渲染一次，不能重解释插入数据。修改 schema 支持范围时同步 schema-registry、schema-compat 和结构化输出校验。
 
 变量声明、assign 写回、并发依赖、恢复与组合 Flow 隔离见 [Flow 内部变量](../../doc/design/flow-variables.md)。新变量能力统一经 `flow/variables.ts` 校验与提交，不允许节点直接改写 Session 参数。
+
+Scheduler 就绪判定在 flow/scheduler-readiness.ts，以显式运行状态消费循环、路由、join 与 return 范围；跳过状态仍由调度器持有，不改变 checkpoint 或租约边界。

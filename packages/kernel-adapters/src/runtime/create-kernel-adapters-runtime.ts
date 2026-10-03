@@ -1,5 +1,5 @@
 import { MCPToolAdapter } from '../tool/mcp-tools';
-import { t } from '@itookit/common';
+import { silentAdapterLog, type KernelAdapterDiagnostics } from '../ports/diagnostics';
 import { FSError } from '@itookit/vfs-core';
 import { createSkillToolHandlers } from '../skill/tool-handlers';
 import { coordinateSkillEffect, runSessionSkillOperation, invalidateSessionSkillOperations, reopenSessionSkillOperations, closeSessionSkillOperations } from '../skill/operation-queue';
@@ -36,7 +36,7 @@ import { ApprovedEffectProgram } from '../programs/approved-effect-program';
 import { ExecProgram } from '../programs/exec-program';
 import { ContextPrepareEffect, ContextLlmEffect, ContextToolEffect, type ContextServiceResolver } from '../context/effects';
 
-export interface KernelAdaptersRuntimeOptions {
+export interface KernelAdaptersRuntimeOptions extends KernelAdapterDiagnostics {
     contextService?: ContextServiceResolver;
     effectTools?: import('../effects/tool-call-effect').EffectToolBinding[];
     /** Resolve a trusted Task to its isolated Run identity; undefined selects the normal Session. */
@@ -82,7 +82,7 @@ export async function createKernelAdaptersRuntime(options: KernelAdaptersRuntime
     registerCoreTools(catalogTools, catalogSkills);
     registerEffectTools(catalogTools, options.effectTools);
     await catalogTools.init();
-    const effects = createEffects(llmService, registry, Boolean(options.fileContextForSession || options.fileContextForScope), options.effectTools);
+    const effects = createEffects(llmService, registry, Boolean(options.fileContextForSession || options.fileContextForScope), options.effectTools, options);
     if (options.contextService) effects.push(new ContextPrepareEffect(options.contextService),
         new ContextLlmEffect(options.contextService, effects.find(effect => effect.kind === 'llm.chat')! as LlmChatEffectAdapter),
         new ContextToolEffect(options.contextService, effects.find(effect => effect.kind === 'tool.call')! as ToolCallEffectAdapter));
@@ -376,13 +376,14 @@ function createEffects(
     registry: KernelAdaptersSessionRegistry,
     ttyEnabled: boolean,
     effectTools: import('../effects/tool-call-effect').EffectToolBinding[] = [],
+    diagnostics: KernelAdapterDiagnostics = {},
 ): import('@itookit/durable-kernel').EffectAdapter[] {
     const tools = async (context: import('@itookit/durable-kernel').EffectExecutionContext) =>
         (await registry.getForContext(context)).toolService;
     const skills = async (context: import('@itookit/durable-kernel').EffectExecutionContext) =>
         (await registry.getForContext(context)).skillService;
     const effects: import('@itookit/durable-kernel').EffectAdapter[] = [
-        new LlmChatEffectAdapter(llm),
+        new LlmChatEffectAdapter(llm, diagnostics.logger),
         new ToolCallEffectAdapter(async (context, request) => {
             const scope = await registry.getForEffect(context);
             const meta = scope.toolService.getToolMeta(request.toolId);
@@ -410,16 +411,16 @@ function createEffects(
             const snapshot = { skillId, compactInstructions: skill.compact?.rawContent ?? '', tools: boundTools };
             await persistLoadedSkill({ skillId, success: true, toolIds: [], snapshot: service.getSkillSnapshot?.(skillId) }, context);
             return snapshot;
-        }, context => skills(context), effectTools),
+        }, context => skills(context), effectTools, diagnostics.logger),
         new BashEffectAdapter(context => runSessionSkillOperation(registry, context.sessionId, async () => {
             const scope = await registry.getForContext(context);
             if (!scope.processContext.shellAttached) {
-                console.error('[process.context] No execution backend', { sessionId: context.sessionId,
+                (diagnostics.logger ?? silentAdapterLog).error('[process.context] No execution backend', { sessionId: context.sessionId,
                     taskId: context.taskId, ...scope.processContext });
-                throw new FSError('ECAPABILITY', t('chatInput.command.unavailable'), 'process.exec', scope.processContext.cwd);
+                throw new FSError('ECAPABILITY', diagnostics.processUnavailableMessage?.() ?? 'Process execution is unavailable', 'process.exec', scope.processContext.cwd);
             }
             return scope.toolService;
-        })),
+        }), diagnostics.logger),
         new SkillLoadEffectAdapter(skills, persistLoadedSkill),
         new SkillUnloadEffectAdapter(async context => (await registry.getForEffect(context)).skillService),
     ];

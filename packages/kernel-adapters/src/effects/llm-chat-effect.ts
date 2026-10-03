@@ -1,15 +1,14 @@
 import { assertEffectGrant } from '@itookit/durable-kernel';
-import { createModuleLogger } from '@itookit/common';
+import type { LLMLogSink } from '@itookit/driver-llm/contracts';
+import { silentAdapterLog } from '../ports/diagnostics';
 import type { LlmCommunicationEvent } from '@itookit/driver-llm/contracts';
 import type { AssistantMessage, ChatCompletionChunk, ChatCompletionParams, ChatCompletionResponse, Citation, FinishReason, TokenUsage } from '@itookit/driver-llm/contracts';
 import type { ToolCall } from '@itookit/llm-context';
 import type { ILLMService } from '@itookit/driver-llm/contracts';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/durable-kernel';
-import { expandMessagesAttachments } from '@itookit/driver-llm';
 import { resolveCapability, type CapabilitySource } from '../ports/capabilities';
 import { InFlightEffects } from './in-flight';
 
-const log = createModuleLogger('llm-chat-effect');
 
 export interface LlmChatEffectRequest {
     resourceHandleId: string;
@@ -24,7 +23,7 @@ export class LlmChatEffectAdapter implements EffectAdapter<LlmChatEffectRequest,
     /** In-flight executions by Effect id, so `cancel` can confirm the request settled. */
     private readonly inFlight = new InFlightEffects();
 
-    constructor(private readonly service: CapabilitySource<ILLMService>) {}
+    constructor(private readonly service: CapabilitySource<ILLMService>, private readonly log: LLMLogSink = silentAdapterLog) {}
 
     async execute(
         request: LlmChatEffectRequest,
@@ -60,7 +59,7 @@ export class LlmChatEffectAdapter implements EffectAdapter<LlmChatEffectRequest,
             const response = request.request.stream === false
                 ? await completeChat(service, request.connectionId, params, emit)
                 : await streamChat(service, request.connectionId, params, emit);
-            log.debug('LLM response assembled', {
+            this.log.debug('LLM response assembled', {
                 sessionId: context.sessionId, taskId: context.taskId, effectId: context.effectId,
                 connectionId: request.connectionId, responseId: response.id, model: response.model,
                 stream: request.request.stream !== false, responseFormat: request.request.responseFormat?.type,
@@ -88,24 +87,6 @@ export class LlmChatEffectAdapter implements EffectAdapter<LlmChatEffectRequest,
             error: { message: 'LLM request outcome cannot be reconciled after worker loss', code: 'LLM_INDETERMINATE' },
         };
     }
-}
-
-export async function prepareLlmChatEffectRequest(
-    connectionId: string,
-    resourceHandleId: string,
-    request: ChatCompletionParams,
-    recovery?: LlmChatEffectRequest['recovery'],
-): Promise<LlmChatEffectRequest> {
-    const { signal: _signal, ...durable } = request;
-    return {
-        connectionId,
-        resourceHandleId,
-        request: {
-            ...durable,
-            messages: await expandMessagesAttachments(request.messages),
-        },
-        recovery,
-    };
 }
 
 // ─── Streaming helpers ─────────────────────────────────────────────────────────

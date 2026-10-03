@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ProviderMessageAdapter } from '../src/core/provider-message-adapter';
+import { ProviderMessageAdapter } from './provider-message-adapter';
 
 describe('ProviderMessageAdapter', () => {
     it('keeps a complete multi-tool protocol group intact', () => {

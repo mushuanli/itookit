@@ -206,10 +206,11 @@ it('starts the new editor while the sidebar listing is still pending', async () 
     const sidebar = vi.mocked(createVFSUI).mock.results.at(-1)!.value;
     let release!: () => void;
     sidebar.refresh = () => new Promise<void>(resolve => { release = resolve; });
-    const creating = f.workbench.createResource();
+    const creating = f.workbench.createResource({ initialInputState: { text: 'host goal', agentId: 'chosen' } });
     try {
         await vi.waitFor(() => expect(f.factory).toHaveBeenCalledOnce());
         expect(f.factory.mock.calls[0][1].target.sessionId).toBe('new-session');
+        expect(f.factory.mock.calls[0][1].initialInputState).toEqual({ text: 'host goal', agentId: 'chosen' });
     } finally {
         release(); await creating; await f.workbench.destroy();
     }

@@ -1,3 +1,4 @@
+export type { KernelAdapterDiagnostics } from './ports/diagnostics';
 export { createKernelAdaptersRuntime } from './runtime/create-kernel-adapters-runtime';
 export type { KernelAdaptersRuntime, KernelAdaptersRuntimeOptions } from './runtime/create-kernel-adapters-runtime';
 
@@ -5,7 +6,6 @@ export { KernelAdaptersPlugin } from './plugin/kernel-adapters-plugin';
 export type { KernelAdaptersPluginOptions } from './plugin/kernel-adapters-plugin';
 
 export { LlmChatEffectAdapter } from './effects/llm-chat-effect';
-export { prepareLlmChatEffectRequest } from './effects/llm-chat-effect';
 export type { LlmChatEffectRequest } from './effects/llm-chat-effect';
 export { ToolCallEffectAdapter } from './effects/tool-call-effect';
 export type { ToolCallEffectRequest } from './effects/tool-call-effect';

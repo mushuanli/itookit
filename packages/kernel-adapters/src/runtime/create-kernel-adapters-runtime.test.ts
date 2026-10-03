@@ -23,6 +23,7 @@ describe('createKernelAdaptersRuntime', () => {
         const exec = vi.fn(async () => ({ stdout: 'ok', stderr: '', code: 0 }));
         const log = vi.spyOn(console, 'error').mockImplementation(() => {});
         const runtime = await createKernelAdaptersRuntime({ llmDriver: {} as IDeviceDriver,
+            logger: { debug() {}, info() {}, warn() {}, error: log },
             fileContextForSession: async () => ({ cwd: '/workspace',
                 vfs: { readFile: async () => '', writeFile: async () => {}, listFiles: async () => [] },
                 nativeShell: attached ? { capabilities: { ripgrep: false, fd: false }, exec } : undefined,

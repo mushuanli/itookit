@@ -10,23 +10,10 @@ export interface MCPProcessBridge {
     poll(id: string): Promise<MCPProcessBatch>;
     stop(id: string): Promise<void>;
 }
-let hostFactory: MCPStdioTransportFactory | undefined;
 /** Create a local bridge without changing any other runtime. */
 export function createMCPStdioTransportFactory(bridge: MCPProcessBridge): MCPStdioTransportFactory {
     return config => new HostMCPTransport(bridge, config);
 }
-/** Snapshot the legacy bridge once at driver construction. */
-export function snapshotMCPStdioHost(): MCPStdioTransportFactory | undefined { return hostFactory; }
-/** @deprecated Inject a local factory through options.mcp; retained for the legacy /llm driver. */
-export function registerMCPStdioHost(bridge: MCPProcessBridge): () => void {
-    const previous = hostFactory;
-    const factory = createMCPStdioTransportFactory(bridge);
-    hostFactory = factory;
-    return () => { if (hostFactory === factory) hostFactory = previous; };
-}
-/** @deprecated Query supportsMCPStdio() on the management service instance. */
-export function hasMCPStdioHost(): boolean { return Boolean(hostFactory) || typeof window === 'undefined'; }
-
 /** Bounded native polling keeps JSON-RPC off the WebView event thread. */
 export class HostMCPTransport implements Transport {
     onclose?: Transport['onclose'];

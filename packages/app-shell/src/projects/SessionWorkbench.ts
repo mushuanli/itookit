@@ -50,6 +50,7 @@ export const SESSION_BROWSER_SCOPE = 'session-browser:v1:admin';
 
 /** One navigation request. `fileNavigation` decides how the content column follows a file. */
 export interface OpenResourceOptions {
+    initialInputState?: { text?: string; agentId?: string };
     reload?: boolean;
     branch?: string;
     fileNavigation?: ProjectFileView;
@@ -557,6 +558,7 @@ export class SessionWorkbench implements WorkspaceController {
                         assets = createFileSystemView({ viewId: `editor-attachments:${target.sessionId}`, mounts: [{ mountId: 'attachments', at: '/', root: '/attachments', fs: context.context.fs, access: 'rw' }] });
                         const project = await this.projects?.forFolder(manifest.folder);
                         editor = await load.read(async () => editor = await this.factory(mount!, {
+                            initialInputState: options.initialInputState,
                             resolveSubmission: project ? () => this.projects!.drafts.submissionForSession(project.project.id, target.sessionId) : undefined,
                             target: { kind: 'session', sessionId: target.sessionId, branch: branch ?? manifest.currentBranch ?? 'main' }, files: context.context, assets, title: manifest.title,
                             hostContext: { ...this.hostContext!, directoryCommands: this.directoryMounts ? {
@@ -1123,11 +1125,11 @@ export class SessionWorkbench implements WorkspaceController {
         this.tail = work.catch(() => {}); await work;
     }
 
-    async createResource(options: { title?: string; parentPath?: string | null } = {}): Promise<string> {
+    async createResource(options: { title?: string; parentPath?: string | null; initialInputState?: { text?: string; agentId?: string } } = {}): Promise<string> {
         if (this.closed) throw new Error('Session workspace closed');
         const folder = await this.creationFolder(options.parentPath);
         const id = await this.sessions.create(options.title || formatDefaultFileTitle(), folder);
-        const opening = this.openResource(id);
+        const opening = this.openResource(id, { initialInputState: options.initialInputState });
         await Promise.all([opening, this.sidebarUI?.refresh()]);
         if (!this.closed && this.active === id) {
             // The editor can finish before its new sidebar entry is available.

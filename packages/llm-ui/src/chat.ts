@@ -23,12 +23,6 @@ export type { DagWorkbenchOptions } from './components/DagWorkbench';
 export { FlowsEditor, createFlowsEditorFactory } from './components/FlowsEditor';
 export type { FlowsEditorDeps } from './components/FlowsEditor';
 
-import type { PromptHistoryPort } from './domain/ports/SessionViewPort';
-
-export interface LLMFactoryOptions {
-    agentService: IAgentConfigService;
-    promptHistory?: PromptHistoryPort;
-}
 
 /**
  * 创建 LLM 编辑器工厂
@@ -75,7 +69,6 @@ export const createLLMFactory = (
         const sessionId = options.target.sessionId;
         const engine = deps.sessionRepository;
         await engine.getManifest(sessionId);
-        const isNewSession = false;
 
         // 去重：如果同一个 sessionId 正在创建中，等待并复用
         if (sessionId && pendingCreations.has(sessionId)) {
@@ -94,7 +87,6 @@ export const createLLMFactory = (
             sessionRepository: engine,
             sessionManager: deps.sessionManager ?? deps.resolveSessionView?.(),
             defaultHarnessToolIds: deps.defaultHarnessToolIds,
-            isNewSession,
             ocr: deps.ocr,
             commandBus: deps.commandBus,
             kernel: deps.kernel,

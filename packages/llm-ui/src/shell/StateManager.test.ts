@@ -81,3 +81,13 @@ it('immediately serializes configuration snapshots against their original Sessio
     await expect(manager.saveInputConfiguration(config)).rejects.toThrow('disk');
     await manager.saveInputConfiguration(config); expect(saveSessionSettings).toHaveBeenLastCalledWith('original', { connectionId: 'retry' });
 });
+
+it('does not consume ambient host creation data while restoring a Session', () => {
+    vi.stubGlobal('sessionStorage', { getItem: () => { throw new Error('Unexpected ambient creation state'); } });
+    try {
+        const manager = new StateManager({} as StateService, {} as SessionManager, 's', id => id);
+        const input = { setConfig: vi.fn() } as unknown as IChatInputPresenter;
+        manager.restoreInputState(input, { savedState: { input_text: 'saved', input_agent_id: 'saved-agent' } as never });
+        expect(input.setConfig).toHaveBeenLastCalledWith({ text: 'saved', agentId: 'saved-agent', settings: undefined });
+    } finally { vi.unstubAllGlobals(); }
+});

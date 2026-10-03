@@ -28,11 +28,10 @@ for (const format of ['js', 'cjs']) {
     assert.doesNotMatch([...core.values()].join('\n'), /LLM_PROVIDERS|DEFAULT_AGENTS|MODEL_PRICING|@itookit\/common/,
         `${format}: core entry must not load product catalogs or application globals`);
     const host = graph(`llm-mcp-host.${format}`);
-    const registry = [...host.entries()].filter(([, source]) => source.includes('var hostFactory'));
-    assert.equal(registry.length, 1, `${format}: host bridge must have one registry`);
-    assert.ok(graph(`llm.${format}`).has(registry[0][0]),
-        `${format}: compatibility driver and host entry must share the legacy registry`);
+    assert.doesNotMatch([...host.values()].join('\n'), /hostFactory|registerMCPStdioHost|snapshotMCPStdioHost/, `${format}: host bridges must remain instance scoped`);
     assert.doesNotMatch([...core.values()].join('\n'), /hostFactory|registerMCPStdioHost|snapshotMCPStdioHost/,
         `${format}: core must not load the legacy host registry`);
 }
+const manifest = JSON.parse(readFileSync(new URL('../packages/kernel-adapters/package.json', import.meta.url), 'utf8'));
+assert.ok(!manifest.exports['./llm'] && !manifest.publishConfig.exports['./llm'], 'Legacy LLM aggregate must not be exported');
 process.stdout.write('LLM ESM/CJS entry boundaries and instance MCP isolation passed.\n');

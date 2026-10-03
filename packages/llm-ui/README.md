@@ -40,3 +40,5 @@ SessionViewPort 可通过可选的 getDirectAgentPolicy 返回实际 Agent 策�
 迁移：旧根入口的设置编辑器和工厂改从 `/settings` 导入；`VFSAgentService` 改从 `@itookit/llm-session` 导入；使用返回的 SessionManager 实例替换单例调用，并传给 UI。
 
 发布依赖：driver-llm、tools、kernel-adapters、llm-tasks 只作为开发契约依赖；声明在构建时内联，少量任务契约常量进入 UI 产物。直接运行依赖从 12 个降到 8 个。Session/Flow、VFS、common/ui-common 与 Kernel 仍有功能或公开类型依赖，传递依赖仍存在；Kernel 的类身份保留，宿主传入真实 Kernel 时类型兼容。
+
+会话创建的初始 text/agentId 通过 EditorOptions.initialInputState 显式传入，UI 不读取宿主 storage 键。导航创建由宿主将请求状态传给工作区，再传给对应编辑器实例；标题由持久 Session manifest 提供。

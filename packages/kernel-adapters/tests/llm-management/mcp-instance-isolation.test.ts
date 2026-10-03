@@ -3,8 +3,6 @@ import type { Transport } from '@modelcontextprotocol/client';
 import { MCP_PROTOCOL_VERSION } from '@itookit/tools/mcp-contracts';
 import { MCPClient, MCPServerConnection } from '../../src/llm-management/skills/mcp-client';
 import { LLMDeviceDriver } from '../../src/llm-management/core';
-import { LLMDeviceDriver as LegacyDriver } from '../../src/llm-management/legacy-device-driver';
-import { registerMCPStdioHost } from '../../src/llm-management/mcp-host';
 import { MCPManager } from '../../src/llm-management/device/mcp-manager';
 import type { MCPConnectionOptions } from '../../src/llm-management/core';
 
@@ -58,21 +56,6 @@ it('propagates asynchronous factory failures and honors explicit stdio disabling
     expect(failed.isConnected()).toBe(false); expect(factory).toHaveBeenCalledOnce();
     const disabled = new MCPServerConnection(config, { stdioTransport: false });
     await expect(disabled.connect()).rejects.toThrow('disabled by the host');
-});
-
-it('confines legacy registration to compatibility drivers and snapshots it at construction', async () => {
-    vi.stubGlobal('window', {});
-    const restore = registerMCPStdioHost({ start: vi.fn(), send: vi.fn(), poll: vi.fn(), stop: vi.fn() });
-    let legacy!: LegacyDriver;
-    try {
-        legacy = new LegacyDriver({} as never);
-        expect(legacy.supportsMCPStdio()).toBe(true);
-        expect(new LLMDeviceDriver({} as never).supportsMCPStdio()).toBe(false);
-        expect(new LegacyDriver({} as never, { mcp: {} }).supportsMCPStdio()).toBe(false);
-        await expect(new MCPServerConnection(config).connect()).rejects.toThrow('requires a desktop or Node host');
-    } finally { restore(); }
-    expect(legacy.supportsMCPStdio()).toBe(true);
-    expect(new LegacyDriver({} as never).supportsMCPStdio()).toBe(false);
 });
 
 it('snapshots driver capability options, including explicit disabling in Node', () => {

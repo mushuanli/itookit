@@ -23,8 +23,8 @@
 | 依赖收集（collectDependency/dependenciesReady/dependencyWait） | `llm-tasks/src/durable/dependency-collector.ts` |
 | TaskSpec 装配（buildLlmTaskInput） | `llm-tasks/src/durable/task-spec.ts` |
 | 输入/输出类型（DurableAgentInput 等） | `llm-tasks/src/durable/types.ts` |
-| 上下文装配（ContextAssembler） | `llm-tasks/src/core/context-assembler.ts` |
-| provider 消息适配 | `llm-tasks/src/core/provider-message-adapter.ts` |
+| 上下文装配（ContextAssembler） | `llm-context/src/assembly/context-assembler.ts` |
+| provider 消息适配 | `llm-context/src/assembly/provider-message-adapter.ts` |
 
 ## DAG 编排（@itookit/llm-flow）
 

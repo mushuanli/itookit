@@ -154,16 +154,13 @@ export class StateManager {
     /**
      * 恢复输入状态 — 面向 IChatInputPresenter 接口
      * 
-     * 新增 onTitleRestore 回调，支持从创建参数恢复标题
      */
     restoreInputState(
         chatInput: IChatInputPresenter,
         options: {
             initialInputState?: { text?: string; agentId?: string };
-            isNewSession?: boolean;
             savedState?: UIState | null;
             sessionSettings?: ChatInputSettings;
-            onTitleRestore?: (title: string) => void;
         }
     ): void {
         const validate = (id: string) => this.validateAgentFn(id);
@@ -180,23 +177,8 @@ export class StateManager {
             return;
         }
 
-        // 优先级 2：NavigationRequest 创建参数（新版 + 旧版兼容）
-        const createParams = this.getAndClearCreateParams();
-        if (createParams) {
-            chatInput.setConfig({
-                text: createParams.text || '',
-                agentId: validate(createParams.agentId || 'default'),
-            });
-
-            // 如果创建参数包含标题，通知 Shell 更新
-            if (createParams.title && options.onTitleRestore) {
-                options.onTitleRestore(createParams.title);
-            }
-            return;
-        }
-
         // 优先级 3：恢复已保存的状态（非新会话）
-        if (!options.isNewSession && options.savedState) {
+        if (options.savedState) {
             chatInput.setConfig({
                 text: options.savedState.input_text || '',
                 agentId: validate(options.savedState.input_agent_id || 'default'),
@@ -206,49 +188,13 @@ export class StateManager {
         }
 
         // 兜底：保持现有 agentId，仅应用 settings
-        if (!options.isNewSession && options.sessionSettings) {
+        if (options.sessionSettings) {
             const current = chatInput.getConfig();
             chatInput.setConfig({
                 text: current.text,
                 agentId: current.agentId,
                 settings: options.sessionSettings,
             });
-        }
-    }
-
-    /**
-     * 读取并清除 sessionStorage 中的创建参数
-     * 
-     * 支持新版 NavigationRequest 协议的 title 字段
-     */
-    private getAndClearCreateParams(): { 
-        agentId?: string; 
-        text?: string;
-        title?: string;
-    } | null {
-        const key = 'app_create_params';
-        const paramsJson = sessionStorage.getItem(key);
-        if (!paramsJson) return null;
-
-        try {
-            const params = JSON.parse(paramsJson);
-            const isValid = params.timestamp && (Date.now() - params.timestamp < 5 * 60 * 1000);
-            const isTargetMatch = !params.target ||
-                params.target === 'chat' ||
-                params.target === 'llm-workspace';
-
-            sessionStorage.removeItem(key);
-
-            if (!isValid || !isTargetMatch) return null;
-
-            return { 
-                agentId: params.agentId || params.state?.agentId,
-                text: params.text || params.state?.inputText,
-                title: params.title || params.create?.title,
-            };
-        } catch {
-            sessionStorage.removeItem(key);
-            return null;
         }
     }
 

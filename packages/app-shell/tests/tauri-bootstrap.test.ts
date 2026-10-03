@@ -23,7 +23,8 @@ import { createVFS } from '@itookit/vfs-core';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { Kernel } from '@itookit/durable-kernel';
 import { SessionRepository, VFSAgentService, SessionDirectoryStorageResolver, sessionDirectoryStorage } from '@itookit/llm-session';
-import { LLMDeviceDriver } from '@itookit/kernel-adapters/llm';
+import { LLMDeviceDriver } from '@itookit/kernel-adapters/llm/core';
+import { createMindosLlmPresets, firstChatModelConnection } from '@itookit/kernel-adapters/llm/presets';
 import type { IVFSManager } from '@itookit/vfs-core';
 
 // ── Module list (mirrors tauri-app/src/config/modules.ts, minus settings/home) ─
@@ -107,7 +108,7 @@ beforeAll(async () => {
     });
 
     // ── 4. LLM device driver (same as bootstrap) ───────────────────────────────
-    const llmDriver = new LLMDeviceDriver(vfs);
+    const llmDriver = new LLMDeviceDriver(vfs, { presets: createMindosLlmPresets(), providerConnectionPolicy: firstChatModelConnection });
     await llmDriver.init();
     vfs.devices.register(llmDriver);
     await llmDriver.createDeviceNodes();

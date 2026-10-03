@@ -11,7 +11,6 @@ import type {
     DeviceContext,
 } from '@itookit/vfs-core';
 import { LLM_IOCTL } from '../llm-management/contracts/device';
-import { expandMessagesAttachments } from '@itookit/driver-llm';
 
 const BASE_CTX: DeviceContext = { nodeId: 'llm', name: 'llm' };
 
@@ -19,7 +18,7 @@ export class LLMServiceAdapter implements ILLMService {
     constructor(
         private readonly driver: IDeviceDriver,
         /** 运行模式；kernel 下层自动选 anthropic-messages 协议。 */
-        private readonly runMode?: 'kernel' | 'kernel',
+        private readonly runMode?: 'kernel',
     ) {}
 
     async chat(connectionId: string, request: ChatCompletionParams): Promise<ChatCompletionResponse> {
@@ -30,9 +29,7 @@ export class LLMServiceAdapter implements ILLMService {
         const ctx: DeviceContext = { ...BASE_CTX, sessionId };
 
         try {
-            const expandedMessages = await expandMessagesAttachments(request.messages);
-            const params: ChatCompletionParams = { ...request, messages: expandedMessages };
-            const result = await this.driver.ioctl!(ctx, LLM_IOCTL.CHAT_SYNC, params);
+            const result = await this.driver.ioctl!(ctx, LLM_IOCTL.CHAT_SYNC, request);
             return result as ChatCompletionResponse;
         } finally {
             await this.driver.close?.(ctx);
@@ -47,9 +44,7 @@ export class LLMServiceAdapter implements ILLMService {
         const ctx: DeviceContext = { ...BASE_CTX, sessionId };
 
         try {
-            const expandedMessages = await expandMessagesAttachments(request.messages);
-            const params: ChatCompletionParams = { ...request, messages: expandedMessages };
-            const raw = await this.driver.ioctl!(ctx, LLM_IOCTL.CHAT, params);
+            const raw = await this.driver.ioctl!(ctx, LLM_IOCTL.CHAT, request);
             const generator = raw as AsyncIterable<ChatCompletionChunk> | undefined;
             if (!generator) throw new Error('LLM driver did not return a stream');
             for await (const chunk of generator) yield chunk;

@@ -4,7 +4,7 @@
 
 ## 定位与铁律
 
-- **只依赖下层**：`llm-context`、`common`、`driver-llm`、`durable-kernel`、`vfs-core`、`tools`；不得依赖 `llm-session` / `llm-flow` / `llm-tasks` / `app-core` / UI 包或任何 app。
+- **只依赖下层**：`llm-context`、`driver-llm`、`durable-kernel`、`vfs-core`、`tools`；不得依赖 `llm-session` / `llm-flow` / `llm-tasks` / `app-core` / UI 包或任何 app。
 - **Effect 必须可取消且确认停止**：6 个适配器（`llm.chat`、`tool.call`、`skill.load`、`skill.unload`、`process.exec`、`tty.command`）全部实现 `EffectAdapter.cancel`；`effects/in-flight.ts` 记录在途执行，`cancel` 必须等它结束才确认——「取消已发出」不等于「外部已停止」。
 - **装配即接线**：`createKernelAdaptersRuntime` 只做组合与生命周期；策略（工具白名单、Skill 触发、项目规则）由注入的 `SkillSource` / `configureSession` / `additionalTools` 决定，调用方（CLI / app-core）负责宿主差异。
 - **Skill 身份持久化**：成功 `load_skill` 后把身份写入 `kernel-adapters.skills.loaded`（`skill/loaded-state.ts`）；身份写入失败必须回滚（新加载卸载、已加载保留），回滚自身失败以 `AggregateError` 保留原始错误。
@@ -104,3 +104,5 @@ pnpm --filter @itookit/kernel-adapters typecheck
 构建自动运行 [入口检查](../../scripts/check-llm-entrypoints.mjs)，递归检查 ESM/CJS 配置与机制导入图，并验证核心入口不加载旧 MCP 全局注册模块。
 
 MCP 日志与客户端身份经 MCPConnectionOptions.logger/clientInfo 实例注入；机制默认空日志与通用身份，禁止读取 common 全局日志或内置 MindOS 身份。
+
+诊断日志与进程不可用提示通过实例选项注入；禁止重新引入 common 全局日志/翻译、MCP 全局注册或旧 /llm 聚合。设备 ioctl 分为管理分派表与 MCP/Skill/Chat 会话处理。

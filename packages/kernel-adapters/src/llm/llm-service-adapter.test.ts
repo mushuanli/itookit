@@ -17,6 +17,16 @@ describe('LLMServiceAdapter lifecycle', () => {
         expect(close).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'llm-session' }));
     });
 
+    it('forwards attachments unchanged so the selected provider owns their encoding', async () => {
+        const request = { messages: [{ role: 'user' as const, content: 'inspect',
+            attachments: [{ type: 'image' as const, source: '/workspace/image.png' }] }] };
+        const ioctl = vi.fn(async (_context: unknown, _command: unknown, _request: unknown) => ({ choices: [] }));
+        const service = new LLMServiceAdapter({ open: async () => 's', ioctl, close: async () => {} } as IDeviceDriver);
+        await service.chat('codex', request);
+        expect(ioctl.mock.calls[0][2]).toBe(request);
+        expect(request.messages[0].attachments[0].source).toBe('/workspace/image.png');
+    });
+
     it('closes a streaming session when its consumer stops early', async () => {
         const close = vi.fn(async () => undefined);
         const driver = {

@@ -24,7 +24,7 @@ src/
 
 ## 模型管理子入口
 
-`@itookit/kernel-adapters/llm` 提供 `LLMDeviceDriver`、`LLM_IOCTL`、Provider/Connection 配置、费用、默认 Agent、Skill、MCP 和 `.llm` 导入导出，承接旧 device-llm 的宿主集成功能。它是本包的公开子入口，不是额外 npm 包。
+`/llm/core` 提供 LLMDeviceDriver 与设备常量；`/contracts` 拥有公共管理接口，`/llm/config` 提供配置编码，`/llm/presets` 提供可选 MindOS 目录，`/llm/mcp-host` 提供实例传输桥。旧 `/llm` 聚合已删除。
 
 ```ts
 import { LLMDeviceDriver } from '@itookit/kernel-adapters/llm/core';
@@ -78,6 +78,8 @@ TaskProgram 由 Skill 插件注册；KernelAdapters 不执行或解释 Skill 私
 
 例如：`new LLMDeviceDriver(vfs, { presets: composeLlmPresets({ version: 1 }, [parseLLMConfig(text)]) })`（驱动来自 `/llm/core`，配置函数来自 `/llm/config`）。旧 registerLLMConfig 仅用于兼容，需在旧驱动构造前调用。
 
-`/llm/mcp-host` 提供 createMCPStdioTransportFactory(bridge)，每次连接创建独立 transport。通过 `/llm/core` 驱动的 `mcp: { stdioTransport: factory }` 注入；`false` 显式禁止 stdio，省略时仅 Node 可用。工厂失败直接传播，不回退。设置 UI 通过管理服务 supportsMCPStdio() 查询实例能力，缺省不可用。旧 registerMCPStdioHost 仅供 `/llm` 兼容构造器取快照，不影响已经创建的实例或 `/llm/core`。
+`/llm/mcp-host` 提供 createMCPStdioTransportFactory(bridge)，每次连接创建独立 transport。通过 `/llm/core` 驱动的 `mcp: { stdioTransport: factory }` 注入；`false` 显式禁止 stdio，省略时仅 Node 可用。工厂失败直接传播，不回退。设置 UI 通过管理服务 supportsMCPStdio() 查询实例能力，缺省不可用。全局 MCP 注册 API 已删除，所有宿主显式持有自己的工厂。
 
 MCPConnectionOptions 同时接受 logger（debug/info/warn/error）和 clientInfo（name/version）。默认空日志及通用 mcp-client 身份；clientInfo 在构造时复制、冻结并验证。app-core 显式提供 MindOS 身份和应用日志，其他实例互不覆盖。
+
+运行时诊断通过 KernelAdaptersRuntimeOptions.logger 与 processUnavailableMessage 注入，缺省静默日志及英文提示。Effect 不读取 common 的全局日志或翻译；app-core 负责 MindOS 诊断装配。本包已移除 common 运行依赖。

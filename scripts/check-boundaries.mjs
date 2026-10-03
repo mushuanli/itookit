@@ -16,7 +16,7 @@ export function dependencyError(source, target) {
     if (source === '@itookit/common' && target.startsWith('@itookit/')) return 'common must not depend on capability packages';
     if (source === '@itookit/ui-common' && target.startsWith('@itookit/') && !['@itookit/common', '@itookit/vfs-core'].includes(target)) return 'shared UI must receive domain data through generic ports';
     if (source === '@itookit/kernel-adapters' && ['@itookit/llm-tasks', '@itookit/llm-flow', '@itookit/llm-session'].includes(target)) return 'adapters must not depend on execution or conversation layers';
-    if (['@itookit/tools', '@itookit/device-tty', '@itookit/llm-tasks', '@itookit/llm-flow', '@itookit/llm-session'].includes(source) &&
+    if (['@itookit/kernel-adapters', '@itookit/tools', '@itookit/device-tty', '@itookit/llm-tasks', '@itookit/llm-flow', '@itookit/llm-session'].includes(source) &&
         ['@itookit/common', '@itookit/llm-common'].includes(target)) return 'execution capabilities must use owned contracts and injected ports';
     if (source === '@itookit/driver-llm' && target !== '@itookit/llm-context') return 'driver-llm must receive host capabilities through its public ports';
     if (source === '@itookit/llm-context') return 'llm-context must receive I/O through its public ports';
@@ -100,6 +100,8 @@ export function sourceErrors(source, file, text, packages) {
     const errors = [];
     const report = (node, message) => errors.push(`${file}:${ast.getLineAndCharacterOfPosition(node.getStart()).line + 1}: ${message}`);
     const visit = node => {
+        if (source.name === '@itookit/llm-ui' && ts.isStringLiteralLike(node) && node.text === 'app_create_params')
+            report(node, 'UI must receive initial input through instance options, not ambient host storage');
         const specifier = moduleSpecifier(node);
         if (specifier && ts.isStringLiteralLike(specifier)) {
             const error = importError(source, file, specifier.text, packages);

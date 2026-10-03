@@ -100,6 +100,8 @@ export interface EditorHostContext {
 
 // ✨ [重构] 提升 fs 和 nodeId 为核心配置
 export interface EditorOptions<TSubmission = unknown> {
+    /** Explicit initial input for conversation editors. */
+    initialInputState?: { text?: string; agentId?: string };
     /** A project draft is separate from Session history until first submission. */
     sessionDraft?: import('./SessionDraftControls').SessionDraftControls<TSubmission>;
     /** Resolve optional host correlation for a user-initiated submission. */

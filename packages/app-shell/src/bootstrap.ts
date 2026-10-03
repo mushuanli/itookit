@@ -524,17 +524,6 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
         switch (action) {
             case 'create': {
-                if (req.state ?? req.create) {
-                    sessionStorage.setItem('app_create_params', JSON.stringify({
-                        target:    req.target,
-                        state:     req.state,
-                        create:    req.create,
-                        agentId:   req.state?.agentId,
-                        text:      req.state?.inputText,
-                        title:     req.create?.title,
-                        timestamp: Date.now(),
-                    }));
-                }
                 updateHistory(targetWsId, null, 'push');
                 await performNavigation(targetWsId, undefined, req.target);
                 const mgr = managerCache.get(targetWsId);
@@ -545,6 +534,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                             title:    req.create?.title,
                             content:  req.create?.content,
                             parentPath: req.create?.parentPath,
+                            initialInputState: req.state ? { agentId: req.state.agentId, text: req.state.inputText } : undefined,
                         });
                         console.log(`[Shell] createAndOpenFile ok: newId=${newId}`);
                         updateHistory(targetWsId, newId, 'replace');

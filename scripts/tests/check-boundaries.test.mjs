@@ -152,3 +152,10 @@ test('production hosts cannot rely on implicit LLM presets through the compatibi
     for (const source of [pkg('app-core'), pkg('app-shell'), pkg('cli', true)])
         assert.match(inspect(source, "import { LLMDeviceDriver } from '@itookit/kernel-adapters/llm'")[0], /explicit LLM/);
 });
+
+
+test('adapter diagnostics and UI creation state are instance scoped', () => {
+    assert.match(dependencyError('@itookit/kernel-adapters', '@itookit/common'), /injected ports/);
+    const ui = pkg('llm-ui');
+    assert.match(sourceErrors(ui, ui.dir + '/src/StateManager.ts', "sessionStorage.getItem('app_create_params')", [ui])[0], /instance options/);
+});

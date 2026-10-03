@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { BranchContextProfile, ContextPlan, ContextSnapshot } from '@itookit/llm-context';
 
 type Artifact = { id: string; content: unknown; contentHash?: string; [key: string]: unknown };
-import { ContextAssembler } from '../src/core/context-assembler';
+import { ContextAssembler } from './context-assembler';
 
 async function hash(content: string): Promise<string> {
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));

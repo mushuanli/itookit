@@ -1,3 +1,4 @@
+import { readyFlowNodes } from './scheduler-readiness';
 import { FlowVariableStore, validateVariableGraph, variableDefinitions, variableCurrent } from './variables';
 import { rememberSchedulerLease } from './control-session';
 import { fenceSchedulerSession } from './fenced-session';
@@ -369,62 +370,8 @@ export class DurableFlowExecutor {
                 return loopNodes.has(node.id) ? loopMaxIterations() : 1;
             };
 
-            const readyNodes = (): DagNodeDefinition[] => {
-                const candidates = nodes.filter(node => {
-                if (Object.entries(spec.parameterScopes ?? {}).some(([prefix, scope]) => node.id.startsWith(prefix) && scope.source && !Object.hasOwn(callInputs, scope.source))) return false;
-                const iteration = (instances.get(node.id)?.length ?? 0) + 1;
-                if (iteration > maxIterations(node) || skipped.has(node.id)) return false;
-                // Loop 节点的每一轮都必须等自身上一轮结束，避免 Human 未回应时提前创建后续实例。
-                if (iteration > 1 && !doneAt(node.id, iteration - 1)) return false;
-                if (node.plugin === 'builtin.loop' && iteration > 1
-                    && (record(node.config).members as unknown as string[]).some(id => (instances.get(id)?.length ?? 0) >= iteration - 1 && !doneAt(id, iteration - 1))) return false;
-                const incoming = incomingOf(edges, node.id);
-                if (!incoming.length) return true;
-                const gates = incoming.filter(edge => routeEdgeIds.has(edge.id));
-                if (gates.length && gates.every(edge => edgeState.get(edge.id) === 'inactive')) {
-                    if (!loopNodes.has(node.id)) skipped.add(node.id);
-                    return false;
-                }
-                const active = incoming.filter(e => !backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'active');
-                const pending = incoming.filter(e => !backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'pending');
-                const backActive = incoming.filter(e => backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'active');
-                const backPending = incoming.filter(e => backEdges.has(e.id) && (edgeState.get(e.id) ?? 'active') === 'pending');
-
-                if (!active.length && !pending.length && !backActive.length && !backPending.length) {
-                    // 环上节点不永久 skip（Loop 中 route 边会重新激活）；非环节点才标记跳过。
-                    if (!loopNodes.has(node.id)) skipped.add(node.id);
-                    return false;
-                }
-                // 回边在首次迭代时不阻塞（循环体入口先执行一次），之后才等待前置。
-                if (pending.length || (iteration > 1 && backPending.length)) return false;
-                const activeReady = active.every(e => {
-                    if (skipped.has(e.from)) return true;
-                    if (node.plugin === 'builtin.join' && e.kind !== 'control') return loopNodes.has(node.id) && loopNodes.has(e.from)
-                        ? (instances.get(e.from)?.length ?? 0) >= iteration : instances.has(e.from);
-                    // 环内前向边必须绑定同一轮上游；环外/外部输入仍等最新已完成实例。
-                    return loopNodes.has(node.id) && loopNodes.has(e.from)
-                        ? doneAt(e.from, iteration)
-                        : latestDone(e.from);
-                });
-                // 回边在首次迭代时不阻塞；无回边约束时恒为 true。
-                // 有派发记录（supervisor）时按「上一轮派发的 worker」串行等待；
-                // 否则（普通 Loop）严格等待上一轮回边来源。
-                let backReady = true;
-                if (iteration > 1 && backActive.length > 0) {
-                    backReady = dispatchOrder.length > 0
-                        ? (dispatchOrder.length < iteration - 1 ? false : latestDone(dispatchOrder[iteration - 2]))
-                        : backActive.every(e => doneAt(e.from, iteration - 1));
-                }
-                return activeReady && backReady;
-                });
-                // A function returns only after its scope settles, including further loop rounds.
-                return candidates.filter(node => {
-                    if (node.plugin !== 'builtin.return') return true;
-                    const prefix = node.id.slice(0, node.id.lastIndexOf('/') + 1);
-                    return !nodes.some(member => member.id !== node.id && member.id.startsWith(prefix) && !detachedNodes.has(member.id)
-                        && (candidates.includes(member) || (instances.get(member.id) ?? []).some((_, index) => !doneAt(member.id, index + 1))));
-                });
-            };
+            const readyNodes = () => readyFlowNodes({ spec, nodes, edges, callInputs, instances, skipped,
+                detachedNodes, loopNodes, backEdges, routeEdgeIds, edgeState, dispatchOrder, maxIterations, doneAt, latestDone });
 
             const submitNode = async (node: DagNodeDefinition, historyGroup?: string): Promise<void> => {
                 const iteration = (instances.get(node.id)?.length ?? 0) + 1;

@@ -10,14 +10,12 @@ export default defineConfig(
       '@itookit/mdx-adapter',
       '@itookit/common',
       '@itookit/vfs',
-      '@itookit/kernel-adapters/llm',
       '@itookit/llm-ui'
     ],
     globals: {
       '@itookit/mdx-adapter': 'MDxAdapter',
       '@itookit/common': 'ItookitCommon',
       '@itookit/vfs': 'VFSCore',
-      '@itookit/kernel-adapters/llm': 'LLMDriver',
       '@itookit/llm-ui': 'LLMUI'
     }
   })

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '@itookit/llm-context';
-import { compactMessages } from './context-compaction';
+import { compactMessages } from '@itookit/llm-context';
 import { DurableAgentProgram } from './agent-program';
-import { ProviderMessageAdapter } from '../core/provider-message-adapter';
+import { ProviderMessageAdapter } from '@itookit/llm-context';
 
 const call = (id: string) => ({ id, type: 'function' as const, function: { name: 'inspect', arguments: '{}' } });
 

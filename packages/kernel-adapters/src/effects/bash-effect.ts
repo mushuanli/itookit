@@ -1,3 +1,5 @@
+import type { LLMLogSink } from '@itookit/driver-llm/contracts';
+import { silentAdapterLog } from '../ports/diagnostics';
 import { assertEffectGrant } from '@itookit/durable-kernel';
 import type { IToolService, ToolInvokeResult } from '@itookit/tools/contracts';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/durable-kernel';
@@ -17,7 +19,7 @@ export class BashEffectAdapter implements EffectAdapter<BashEffectRequest, ToolI
     readonly version = '1';
     private readonly inFlight = new InFlightEffects();
 
-    constructor(private readonly service: CapabilitySource<IToolService>) {}
+    constructor(private readonly service: CapabilitySource<IToolService>, private readonly log: LLMLogSink = silentAdapterLog) {}
 
     async execute(request: BashEffectRequest, context: EffectExecutionContext): Promise<ToolInvokeResult> {
         return this.inFlight.track(context, this.run(request, context));
@@ -31,8 +33,8 @@ export class BashEffectAdapter implements EffectAdapter<BashEffectRequest, ToolI
     private async run(request: BashEffectRequest, context: EffectExecutionContext): Promise<ToolInvokeResult> {
         try { return await this.invoke(request, context); }
         catch (error) {
-            console.error('[process.exec] Execution failed', { sessionId: context.sessionId, taskId: context.taskId,
-                effectId: context.effectId, cwd: request.cwd, cancelled: context.abortSignal.aborted }, error);
+            this.log.error('[process.exec] Execution failed', { sessionId: context.sessionId, taskId: context.taskId,
+                effectId: context.effectId, cwd: request.cwd, cancelled: context.abortSignal.aborted, error });
             throw error;
         }
     }

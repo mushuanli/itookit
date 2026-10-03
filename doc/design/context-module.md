@@ -50,9 +50,9 @@
 | 当前位置 | 已有能力 | 应迁移/补齐的内容 |
 |---|---|---|
 | [context-types.ts](../../packages/llm-context/src/domain/context.ts) | Profile、Plan、Block、Snapshot、Explanation | Context 类型所有权迁入新包；兼容期旧入口只 re-export |
-| [context-assembler.ts](../../packages/llm-tasks/src/core/context-assembler.ts) | 分支主线遍历、profile 规则、材料/记忆装配、pending user 保留 | 装配迁入 context；当前全文装配且使用字符/4 估算，没有完整计入工具 schema/多模态；缺乏严格超限失败结果 |
-| [provider-message-adapter.ts](../../packages/llm-tasks/src/core/provider-message-adapter.ts) | 工具配对检查、部分 provider 清洗 | 协议组校验迁入 context；provider wire 编码经 codec 接口注入，避免继续积累厂商分支 |
-| [context-compaction.ts](../../packages/llm-tasks/src/durable/context-compaction.ts) | 保留 system、最后 user、最近消息与完整工具组 | 本质为按消息数裁剪，不是语义压缩；不存在摘要、原文读取或窗口世代 |
+| [context-assembler.ts](../../packages/llm-context/src/assembly/context-assembler.ts) | 分支主线遍历、profile 规则、材料/记忆装配、pending user 保留 | 装配迁入 context；当前全文装配且使用字符/4 估算，没有完整计入工具 schema/多模态；缺乏严格超限失败结果 |
+| [provider-message-adapter.ts](../../packages/llm-context/src/assembly/provider-message-adapter.ts) | 工具配对检查、部分 provider 清洗 | 协议组校验迁入 context；provider wire 编码经 codec 接口注入，避免继续积累厂商分支 |
+| [context-compaction.ts](../../packages/llm-context/src/window/compact-messages.ts) | 保留 system、最后 user、最近消息与完整工具组 | 本质为按消息数裁剪，不是语义压缩；不存在摘要、原文读取或窗口世代 |
 | [agent-program.ts](../../packages/llm-tasks/src/durable/agent-program.ts) | 持久 messages、pending calls、审批键、独立 Skill 快照 | 循环仅消费 context 接口；去除长 messages 副本；保留 Kernel 执行控制与审批事实 |
 | [context-profile-store.ts](../../packages/llm-session/src/persistence/context-profile-store.ts) | Profile 不可变版本与进程内写序列 | Profile 规则/版本语义迁入 context；持久化端口实现留 adapter，进程内 Promise 链不能充当跨进程 CAS |
 | [Kernel domain](../../packages/durable-kernel/src/domain/types.ts)、[SeqFile store](../../packages/durable-kernel/src/infrastructure/seqfile/store.ts) | `context.seq` commit/branch/head CAS；Task state、effects、shared mutations 可同事务提交 | 既有 `commitContext()` 是单独事务，不能当成与 Task checkpoint 联合原子提交；Context 语义 API 最终迁出 Kernel |
