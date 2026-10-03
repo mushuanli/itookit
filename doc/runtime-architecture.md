@@ -284,7 +284,7 @@ Web 与 Tauri 共用工作台导航、创建对话框和小屏幕列表／内容
 
 ## 公共通信与宿主适配
 
-`driver-llm` 发布产物不依赖内部包；消息声明从 llm-context 内联，通信类型和纯协议函数通过 `/contracts` 提供。`kernel-adapters/llm` 保留 LLMDeviceDriver、LLM_IOCTL、VFS 配置和 MCP/Skill 管理，app-core、CLI 与设置页通过该入口接入。旧 device-llm 已拆分；执行、编排、会话契约已按能力归属整理。
+`driver-llm` 发布产物不依赖内部包；消息声明从 llm-context 内联，通信类型和纯协议函数通过 `/contracts` 提供。`kernel-adapters/llm` 保留 LLMDeviceDriver、LLM_IOCTL、VFS 配置和 MCP/Skill 管理，宿主从 /llm/core 与 /llm/presets 显式接入，设置页使用 /llm/config。旧 device-llm 已拆分；执行、编排、会话契约已按能力归属整理。
 
 Tool/TTY 执行契约归 tools/contracts，模型通信与流式事件归 driver-llm/contracts；Agent、连接管理、恢复和定价归 kernel-adapters/contracts，入口只包含契约与纯策略，不初始化适配器。适配层不依赖 Tasks、Flow 或 Session。Prompt 库 DTO 归 tools/contracts，任务配置保留类型转发。
 
@@ -303,7 +303,7 @@ LLM UI 分为 `/chat` 与 `/settings` 子入口；设置包是可选 peer，聊�
 
 本轮验证：全仓类型检查、库/Web 构建、Driver tarball 独立 ESM/CJS 消费及无依赖安装通过；app-core 231 项、CLI 185 项通过，Context/Session/UI 包回归通过。app-shell 全量中 471 项通过，4 项原生恢复用例在正常权限下重跑通过；其余 4 项失败在提交前基线 `70f9947c` 的独立源码快照复现（提示词复制清理、外部草稿刷新两项、已删除 saveCurrent 的旧用例），不将其记为通过。
 
-模型管理由 app-core 显式组合 `kernel-adapters/llm/core` 与可选 `kernel-adapters/llm/presets`。机制默认空目录，Provider/连接/Agent/定价通过实例预设快照注入，自动连接由宿主策略决定。聊天 `/chat` 只消费 Session/Flow 契约与实例端口；缺少正式会话视图时拒绝创建，旧单例回退留在 UI 兼容根入口。
+模型管理由 app-core 显式组合 `kernel-adapters/llm/core` 与可选 `kernel-adapters/llm/presets`。机制默认空目录，Provider/连接/Agent/定价通过实例预设快照注入，自动连接由宿主策略决定。聊天 `/chat` 只消费 Session/Flow 契约与实例端口；缺少正式会话视图时拒绝创建，旧单例回退留在 UI 的显式 /legacy 入口。
 
 本轮边界补全验收：全仓 typecheck、架构守卫与 docs:check 通过；Kernel adapters 199、Session 208、LLM UI 64、app-core 231 项测试通过。Session/UI/Flow/Adapters 与 Web 构建通过，构建后的 `/llm/core` 导入图不含产品目录，`/chat` 导入图不含 Session 单例或设置实现。宿主定向回归 25 项中 23 项通过，2 项仍为此前确认的外部草稿刷新问题；这不代表完整 app-shell 矩阵通过。
 
@@ -316,3 +316,7 @@ DirectAgentPolicy 从 ApplicationRuntimeOptions 经 ConversationSystemOptions、
 设置 UI 的配置解析/导出已改为 kernel-adapters/llm/config，Tauri 桥通过 /llm/mcp-host 创建本地 transport 工厂，经 ApplicationRuntimeOptions.mcp 注入驱动；设置 UI 通过服务 supportsMCPStdio() 查询同一实例能力。机制核心不读取全局桥，旧 /llm 构造器仅取兼容注册快照。composeLlmPresets 纯合并模型目录并显式选择冲突策略，不写 VFS、不修改全局预设，驱动只消费注入的快照；旧全局 registerLLMConfig 仅作为兼容路径。
 
 执行策略收尾：DirectAgentPolicy.llmRetry/toolTimeoutMs 冻结到显式 Agent Task；Flow 从节点或 Flow defaults 接入相同参数。Tasks 取消重试次数的固定 3 次上限，工具超时可覆盖且跨持久恢复保持一致。MCP 日志和客户端身份由实例选项注入，机制默认空日志及 mcp-client 身份，app-core 提供 MindOS 身份与日志。driver-llm 的连接测试要求调用方模型或注入目录；Codex 缺省不覆盖宿主模型。
+
+宿主入口收尾：CLI 显式注入 MindOS 预设与自动连接策略；app-core 的模型导航从实例管理接口读取 Provider 默认值，app-shell 的模板仅加载可选预设。生产宿主禁止使用 /llm 兼容聚合。llm-ui 根入口现在等同 /chat，不加载设置或 Session 单例；旧 API 在 /legacy，设置工厂在 /settings。
+
+UI 发布收尾：driver-llm、tools、kernel-adapters、llm-tasks 改为开发契约依赖，JS 常量与声明内联，直接运行依赖从 12 个降到 8 个；Session/Flow 等传递依赖仍存在。Kernel 公开类保持外部类型身份。UI 默认根入口、/chat、/startup 不加载设置或 Session 单例，/legacy 保留旧行为。ui-common 与 durable-kernel 的 publishConfig.exports 已补齐实际产物路径。

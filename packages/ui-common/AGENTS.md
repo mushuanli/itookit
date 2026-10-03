@@ -60,3 +60,5 @@ pnpm --filter @itookit/ui-common build        # tsup
 | [开发模式](../../doc/dev-patterns.md) | i18n 与新增 UI 的流程 |
 
 `EditorOptions<TSubmission>` 与 `SessionDraftControls<TSubmission>` 通过泛型传递宿主提交数据，默认 unknown。本包不依赖 Flow 或 Session；LLM 编辑器适配层负责指定 SessionSubmission。
+
+发布出口使用 dist/index.js（ESM）、dist/index.cjs（CJS）及相应声明；publishConfig.exports 必须覆盖工作区的 src 出口。

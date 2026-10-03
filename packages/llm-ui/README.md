@@ -16,9 +16,9 @@ const factory = createLLMFactory(agentService, {
 
 `agentService` 接受公共 `IAgentConfigService`，无需创建 VFSAgentService；`sessionManager` 接受结构化 `SessionViewPort`（查询、事件与命令通道），可由宿主实现。提示词历史是可选的 `PromptHistoryPort`。仓储、OCR、工具授权、Skill 和特权命令由宿主接入。未传默认工具列表时，UI 不自行假定授权；真实授权由执行层校验。
 
-聊天入口不加载设置编辑器；需要设置界面时安装可选 peer `@itookit/llm-settings-ui`，再从 `@itookit/llm-ui/settings` 导入 `createAgentEditorFactory`、`createSkillsEditorFactory` 或设置编辑器。包根保留包含两部分的兼容入口。`/startup` 用于启动菜单与 Flow 模板安装接口，`/style.css` 提供聊天样式。
+聊天入口不加载设置编辑器；需要设置界面时安装可选 peer `@itookit/llm-settings-ui`，再从 `@itookit/llm-ui/settings` 导入 `createAgentEditorFactory`、`createSkillsEditorFactory` 或设置编辑器。包根现在等同于 `/chat`；旧聚合与单例回退移到显式 `/legacy` 入口。`/startup` 用于启动菜单与 Flow 模板安装接口，`/style.css` 提供聊天样式。
 
-`/chat` 创建正式会话编辑器时必须传入 `sessionManager`，或通过 `resolveSessionView` 延迟获取实例；缺少端口会明确报错。提示词历史通过实例上的可选 `promptHistory` 接入。只有包根入口为旧调用保留单例回退。当前 UI 仍消费 Session/Flow 契约和仓储能力，并非只依赖通用 UI 的展示组件包。
+`/chat` 创建正式会话编辑器时必须传入 `sessionManager`，或通过 `resolveSessionView` 延迟获取实例；缺少端口会明确报错。提示词历史通过实例上的可选 `promptHistory` 接入。只有 `/legacy` 入口为旧调用保留单例回退。当前 UI 仍消费 Session/Flow 契约和仓储能力，并非只依赖通用 UI 的展示组件包。
 
 验证：`pnpm --filter @itookit/llm-ui typecheck`、`build`、`test`。
 开发说明见 [AGENTS.md](./AGENTS.md)。
@@ -36,3 +36,7 @@ const menu = createFlowContextMenuConfig({ ...runOptions, library: hostTemplates
 Agent 设置工厂使用 `createAgentEditorFactory(service, { defaultToolIds: hostToolIds })` 显式注入宿主默认授权；不传则默认目录为空。UI 不选择 Read/Write/Bash 等工具。该默认列表仅用于展示与编辑，实际工具授权由执行层校验。
 
 SessionViewPort 可通过可选的 getDirectAgentPolicy 返回实际 Agent 策略。聊天编辑器据此显示 maxExchanges，独立 ChatInput 可直接传 maxAgentExchanges；没有该端口时沿用 llm-tasks 的通用默认预算。
+
+迁移：旧根入口的设置编辑器和工厂改从 `/settings` 导入；旧 VFSAgentService 转发或单例调用改从 `/legacy` 导入，独立运行时应提供实例端口。
+
+发布依赖：driver-llm、tools、kernel-adapters、llm-tasks 只作为开发契约依赖；声明在构建时内联，少量任务契约常量进入 UI 产物。直接运行依赖从 12 个降到 8 个。Session/Flow、VFS、common/ui-common 与 Kernel 仍有功能或公开类型依赖，传递依赖仍存在；Kernel 的类身份保留，宿主传入真实 Kernel 时类型兼容。

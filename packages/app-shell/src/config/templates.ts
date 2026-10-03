@@ -1,6 +1,6 @@
-import { DEFAULT_AGENTS } from '@itookit/kernel-adapters/llm';
+import { createMindosLlmPresets } from '@itookit/kernel-adapters/llm/presets';
 
-export const TPL_AGENT = JSON.stringify(DEFAULT_AGENTS, null, 2);
+export const TPL_AGENT = JSON.stringify(createMindosLlmPresets().agents, null, 2);
 
 
 export const TPL_ANKI = `### 挖空填词 (Cloze)

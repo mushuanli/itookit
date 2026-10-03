@@ -83,3 +83,5 @@ pnpm --filter @itookit/durable-kernel typecheck
 | [Durable Harness 证据映射](../../doc/design/durable-harness-evidence.md) | 五篇设计 → 实现 → 持久记录 → 故障证据 |
 | [Durable 协议](../../doc/design/durable-harness-protocol.md) | §2 不变量与 §15 kill 矩阵 |
 | [运行时架构](../../doc/runtime-architecture.md) | Kernel 在 app-core / CLI 中的装配位置 |
+
+发布出口：根入口和 `/core` 使用 dist 的 ESM/CJS 及对应类型声明，工作区继续使用 src；发布只包含 dist，唯一运行依赖为 vfs-core。

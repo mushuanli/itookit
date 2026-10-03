@@ -116,7 +116,8 @@ test('chat uses session contracts and isolates singleton compatibility', () => {
     const check = (file, expression) => sourceErrors(ui, ui.dir + '/src/' + file, expression, [ui, session]);
     assert.match(check('chat.ts', "import { getSessionManager } from '@itookit/llm-session'")[0], /compatibility entry/);
     assert.equal(check('chat.ts', "import { SessionCommand } from '@itookit/llm-session/contracts'").length, 0);
-    assert.equal(check('index.ts', "import { getSessionManager } from '@itookit/llm-session'").length, 0);
+    assert.match(check('index.ts', "import { getSessionManager } from '@itookit/llm-session'")[0], /compatibility entry/);
+    assert.equal(check('legacy.ts', "import { getSessionManager } from '@itookit/llm-session'").length, 0);
 });
 
 
@@ -144,4 +145,10 @@ test('settings cannot load the model management aggregate for config conversion'
 test('settings use service capabilities instead of process-global MCP state', () => {
     const ui = pkg('llm-settings-ui');
     assert.match(inspect(ui, "import { hasMCPStdioHost } from '@itookit/kernel-adapters/llm/mcp-host'")[0], /service instance capabilities/);
+});
+
+
+test('production hosts cannot rely on implicit LLM presets through the compatibility aggregate', () => {
+    for (const source of [pkg('app-core'), pkg('app-shell'), pkg('cli', true)])
+        assert.match(inspect(source, "import { LLMDeviceDriver } from '@itookit/kernel-adapters/llm'")[0], /explicit LLM/);
 });

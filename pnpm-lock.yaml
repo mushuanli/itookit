@@ -869,27 +869,15 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/driver-llm':
-        specifier: workspace:*
-        version: link:../driver-llm
       '@itookit/durable-kernel':
         specifier: workspace:*
         version: link:../durable-kernel
-      '@itookit/kernel-adapters':
-        specifier: workspace:*
-        version: link:../kernel-adapters
       '@itookit/llm-flow':
         specifier: workspace:*
         version: link:../llm-flow
       '@itookit/llm-session':
         specifier: workspace:*
         version: link:../llm-session
-      '@itookit/llm-tasks':
-        specifier: workspace:*
-        version: link:../llm-tasks
-      '@itookit/tools':
-        specifier: workspace:*
-        version: link:../tools
       '@itookit/ui-common':
         specifier: workspace:*
         version: link:../ui-common
@@ -903,15 +891,27 @@ importers:
         specifier: ^16.4.2
         version: 16.4.2
     devDependencies:
+      '@itookit/driver-llm':
+        specifier: workspace:*
+        version: link:../driver-llm
+      '@itookit/kernel-adapters':
+        specifier: workspace:*
+        version: link:../kernel-adapters
       '@itookit/llm-settings-ui':
         specifier: workspace:*
         version: link:../llm-settings-ui
+      '@itookit/llm-tasks':
+        specifier: workspace:*
+        version: link:../llm-tasks
       '@itookit/mdx-adapter':
         specifier: workspace:*
         version: link:../mdx-adapter
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../mdx
+      '@itookit/tools':
+        specifier: workspace:*
+        version: link:../tools
       '@types/js-yaml':
         specifier: ^4.0.9
         version: 4.0.9
@@ -921,6 +921,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^1.6.1
         version: 1.6.1(vitest@1.6.1(@types/node@20.19.25)(jsdom@27.2.0))
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@20.19.25))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

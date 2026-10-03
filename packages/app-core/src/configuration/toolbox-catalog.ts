@@ -1,5 +1,4 @@
 import { createFileSystemSource, MemoryBackend, type FileSystemSourceOwner } from '@itookit/vfs-core';
-import { LLM_PROVIDERS } from '@itookit/kernel-adapters/llm';
 import { ENTITY_ICONS, t } from '@itookit/common';
 import { type SystemPromptDefinition } from '@itookit/llm-tasks/contracts';
 import { type MCPServer } from '@itookit/tools/mcp-contracts';
@@ -48,11 +47,12 @@ export class ToolboxInventory {
     }
     private async refreshModels(): Promise<void> {
         const providers = this.models?.getProviders() ?? [];
+        const defaults = this.models?.getProviderDefaults() ?? {};
         const connections = await this.models?.getConnections() ?? [];
         this.defaultConnectionId = (await this.models?.getDefaultConnection())?.id;
         this.providers.clear(); this.connections.clear();
         for (const item of providers) this.providers.set(item.id, { id: item.id, name: item.name,
-            icon: item.icon === LLM_PROVIDERS[item.id]?.icon ? undefined : item.icon, enabled: item.enabled !== false,
+            icon: item.icon === defaults[item.id]?.icon ? undefined : item.icon, enabled: item.enabled !== false,
             configured: item.id === 'codex' || !!this.models?.getFullProvider(item.id)?.apiKey?.trim() });
         for (const item of connections) this.connections.set(item.id, { providerId: item.providerId, enabled: item.enabled !== false });
         await this.replace('providers', providers.map(item => ({ id: item.id, name: item.name,

@@ -27,6 +27,11 @@
       "types": "./src/settings.ts",
       "import": "./src/settings.ts",
       "default": "./src/settings.ts"
+    },
+    "./legacy": {
+      "types": "./src/legacy.ts",
+      "import": "./src/legacy.ts",
+      "default": "./src/legacy.ts"
     }
   },
   "publishConfig": {
@@ -52,6 +57,10 @@
       "./settings": {
         "types": "./dist/settings.d.ts",
         "import": "./dist/settings.js"
+      },
+      "./legacy": {
+        "types": "./dist/legacy.d.ts",
+        "import": "./dist/legacy.js"
       }
     }
   },
@@ -61,7 +70,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "vite build && vite build --config vite.startup.config.ts && vite build --config vite.entries.config.ts",
+    "build": "vite build && vite build --config vite.startup.config.ts && vite build --config vite.entries.config.ts && tsup --config tsup.types.config.ts && node ../../scripts/check-llm-ui-entrypoints.mjs",
     "dev": "vite build --watch",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
@@ -95,17 +104,13 @@
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/durable-kernel": "workspace:*",
     "@itookit/llm-session": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
     "js-yaml": "^4.1.1",
     "marked": "^16.4.2",
     "@itookit/ui-common": "workspace:*",
     "@itookit/llm-flow": "workspace:*",
-    "@itookit/llm-tasks": "workspace:*",
-    "@itookit/driver-llm": "workspace:*",
-    "@itookit/tools": "workspace:*",
-    "@itookit/kernel-adapters": "workspace:*"
+    "@itookit/durable-kernel": "workspace:*"
   },
   "peerDependencies": {
     "@itookit/mdxeditor": "workspace:*",
@@ -123,7 +128,12 @@
     "vite-plugin-dts": "^3.9.1",
     "vitest": "^1.6.1",
     "@itookit/mdx-adapter": "workspace:*",
-    "@itookit/llm-settings-ui": "workspace:*"
+    "@itookit/llm-settings-ui": "workspace:*",
+    "@itookit/driver-llm": "workspace:*",
+    "@itookit/tools": "workspace:*",
+    "@itookit/kernel-adapters": "workspace:*",
+    "@itookit/llm-tasks": "workspace:*",
+    "tsup": "^8.5.1"
   },
   "peerDependenciesMeta": {
     "@itookit/llm-settings-ui": {

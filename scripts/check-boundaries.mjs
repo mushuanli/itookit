@@ -44,7 +44,9 @@ function ownerOf(file, packages) {
 }
 
 export function importError(source, file, specifier, packages) {
-    if (source.name === '@itookit/llm-ui' && !['src/index.ts', 'src/settings.ts'].some(path => file === resolve(source.dir, path))) {
+    if (specifier === '@itookit/kernel-adapters/llm' && (source.host || ['@itookit/app-core', '@itookit/app-shell'].includes(source.name)))
+        return 'hosts must select explicit LLM core, presets or config entries';
+    if (source.name === '@itookit/llm-ui' && !['src/legacy.ts', 'src/settings.ts'].some(path => file === resolve(source.dir, path))) {
         if (specifier.startsWith('@itookit/llm-settings-ui') || (specifier.startsWith('.') && resolve(file, '..', specifier).replace(/\.ts$/, '') === resolve(source.dir, 'src/settings')))
             return 'chat and shared UI must not load optional settings implementations';
     }
@@ -54,7 +56,7 @@ export function importError(source, file, specifier, packages) {
         return 'settings UI must use config codecs, contracts or explicit host ports; not the management aggregate';
     if (source.name === '@itookit/llm-ui' && /\.flow(?:\?raw)?$/.test(specifier))
         return 'UI must receive Flow template catalogs from the host';
-    if (source.name === '@itookit/llm-ui' && file !== resolve(source.dir, 'src/index.ts') && specifier === '@itookit/llm-session')
+    if (source.name === '@itookit/llm-ui' && file !== resolve(source.dir, 'src/legacy.ts') && specifier === '@itookit/llm-session')
         return 'chat UI must use session contracts and injected views; globals belong to the compatibility entry';
     if (source.name === '@itookit/app-core' && (specifier.startsWith('node:') || builtinModules.includes(specifier))) return 'app-core must receive native capabilities through injected ports';
     if (specifier.startsWith('.')) {
