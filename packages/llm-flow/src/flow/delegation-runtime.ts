@@ -1,8 +1,8 @@
 // @file: llm-flow/src/flow/delegation-runtime.ts
 // Dynamic delegation runtime: parses a parent Agent's delegation declaration,
 // materializes a bounded child group (fan-out / join / failure / budget), and
-// injects the declarative subtask tool. Kept separate from executor.ts so the
-// DAG scheduler stays about loop/route/spawn/compensation only.
+// injects the declarative subtask tool. DelegationController handles group lifecycle;
+// executor.ts owns scheduling, checkpoints, leases, and workspace finalization.
 
 import type { DagEdgeDefinition, DagNodeDefinition, JsonValue } from '../contracts';
 import type { ToolDefinition } from '@itookit/llm-context';

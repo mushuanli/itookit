@@ -27,7 +27,9 @@ src/
     ├── validation.ts         Flow 校验（环检测、预算校验）
     ├── graph.ts              泛型 findCycles
     ├── commands.ts           DagCommandService
-    ├── delegation-runtime.ts 动态委派（fan-out / join / 预算）
+    ├── delegation-runtime.ts 委派声明解析与图成员构造（fan-out / join / 预算）
+    ├── delegation-controller.ts 委派等待、超时、失败与绑定继承
+    ├── node-instance.ts      节点轮次身份编码与解析
     ├── parameters.ts         运行参数模板解析与校验
     ├── connections.ts        节点连接槽解析
     ├── run-members.ts        运行成员读取与重试准备
@@ -60,3 +62,5 @@ pnpm --filter @itookit/llm-flow test
 Scheduler 就绪判定在 flow/scheduler-readiness.ts，以显式运行状态消费循环、路由、join 与 return 范围；跳过状态仍由调度器持有，不改变 checkpoint 或租约边界。
 
 GraphMutationRuntime 只持有单次运行的显式图状态；宿主通过 bindNode 解析动态节点身份。整批绑定和校验完成后才发布节点、边与幂等记录，checkpoint 和租约仍由 executor 管理，不在此模块新增持久化或产品策略。
+
+DelegationController 消费单次运行的显式状态，执行已声明的 wait/failure 策略；agent.spawned 通过宿主回调发出。它不提交任务、不写 checkpoint、不取得租约。detached 工作的持久恢复、所有权保持与工作区收尾继续由 executor 协调。

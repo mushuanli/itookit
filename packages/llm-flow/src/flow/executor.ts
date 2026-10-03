@@ -1,3 +1,5 @@
+import { DelegationController } from './delegation-controller';
+import { instanceKey, parseInstanceKey } from './node-instance';
 import { GraphMutationRuntime } from './graph-mutations';
 import { readyFlowNodes } from './scheduler-readiness';
 import { FlowVariableStore, validateVariableGraph, variableDefinitions, variableCurrent } from './variables';
@@ -60,8 +62,6 @@ import { resolveNodeConnection } from './connections';
 import { bindFlowTaskCapabilities } from './task-capabilities';
 import { resolveFlowParameters, prepareFlowParameters } from './parameters';
 import {
-    delegationPlan,
-    materializeDelegation,
     subtaskToolDef,
     subtaskToolDescription,
     subtaskToolName,
@@ -461,103 +461,19 @@ export class DurableFlowExecutor {
             });
             const applyEffects = (output: unknown, parentId: string) => graphMutations.applyEffects(output, parentId);
 
-            // Dynamic delegation: parse the declaration once, then materialize a
-            // bounded child group with explicit runtime metadata and control edges.
-            const applyDelegation = async (key: string, output: unknown): Promise<void> => {
-                const { nodeId, iteration: parentIteration } = parseInstanceKey(key);
-                const node = nodes.find(n => String(n.id) === nodeId);
-                if (!node) return;
-                const depth = delegationDepth.get(nodeId) ?? 0;
-                const plan = delegationPlan(node, key, parentIteration, depth, output);
-                if (!plan) return;
-                if (plan.detached && !plan.waitTimeoutMs) {
-                    throw new Error(`Detached delegation requires wait.timeoutMs: ${plan.groupId}`);
-                }
-                const additions = plan.payloads.filter((_, index) =>
-                    !nodes.some(existing => existing.id === `${plan.parentId}:delegate:${plan.parentIteration}:${index}`));
-                if (nodes.length + additions.length > maxNodes) {
-                    throw new Error(`Flow node limit exceeded by delegation ${plan.groupId}: ${nodes.length + additions.length}/${maxNodes}`);
-                }
-                materializeDelegation(node, plan, {
-                    nodes, edges, edgeState, depths: delegationDepth,
-                    groups: delegationGroups, groupByChild: delegationGroupByChild,
-                });
-                plugins.addNodes(nodes.filter(item => delegationGroups.get(plan.groupId)?.children.has(item.id)));
-                await this.emitHook('agent.spawned', sessionId, { parentNodeId: node.id, groupId: plan.groupId, count: plan.payloads.length });
-                const group = delegationGroups.get(plan.groupId);
-                const defaults = nodeDefaults.get(node.id);
-                if (defaults && group) for (const child of group.children) nodeDefaults.set(child, defaults);
-                const connection = nodeConnections.get(node.id);
-                if (connection && group) for (const child of nodes.filter(item => group.children.has(item.id))) {
-                    nodeConnections.set(child.id, connection);
-                    resolveNodeConnection(child.config as CommonJsonValue,
-                        connection.connections, connection.defaultConnection, connection.fallbackConnectionId, connection.runConnectionId);
-                }
-                if (group?.detached) {
-                    if (workspace && workspacePolicy?.cleanup !== 'keep') {
-                        throw new Error('Detached delegation requires workspace.cleanup=keep when using an isolated workspace');
-                    }
-                    for (const child of group.children) detachedNodes.add(child);
-                }
-            };
-
-            const settleDelegationGroup = async (key: string, succeeded: boolean): Promise<void> => {
-                const { nodeId } = parseInstanceKey(key);
-                const groupId = delegationGroupByChild.get(nodeId);
-                const group = groupId ? delegationGroups.get(groupId) : undefined;
-                if (!group) return;
-                group.completed.add(nodeId);
-                if (succeeded) group.succeeded.add(nodeId);
-                const satisfied = group.waitMode === 'all'
-                    ? group.completed.size >= group.children.size
-                    : group.waitMode === 'any'
-                        ? group.completed.size >= 1
-                        : group.succeeded.size >= group.quorum;
-                if (!satisfied && group.completed.size >= group.children.size
-                    && (group.waitMode === 'first-success' || group.waitMode === 'quorum')) {
-                    throw new Error(`Delegation ${group.waitMode} condition could not be satisfied`);
-                }
-                if (!satisfied || group.waitMode === 'all' || group.remaining === 'continue') return;
-                const cancellations: Promise<void>[] = [];
-                for (const childId of group.children) {
-                    if (group.completed.has(childId)) continue;
-                    skipped.add(childId);
-                    for (const handle of instances.get(childId) ?? []) {
-                        cancellations.push(handle.cancel(`Delegation ${group.waitMode} condition satisfied`));
-                    }
-                }
-                await Promise.allSettled(cancellations);
-            };
-
+            const delegation = new DelegationController({
+                nodes, edges, edgeState, depths: delegationDepth, groups: delegationGroups,
+                groupByChild: delegationGroupByChild, maxNodes, plugins, nodeDefaults, nodeConnections,
+                instances, completed, skipped, detachedNodes, isolatedWorkspace: Boolean(workspace),
+                workspaceCleanup: workspacePolicy?.cleanup,
+                spawned: event => this.emitHook('agent.spawned', sessionId, event),
+            });
             const enforceDeadlines = async (): Promise<void> => {
                 if (timeoutMs && Date.now() - startedAt >= timeoutMs) {
                     await cancelPending(instances, completed, 'Flow timeout exceeded');
                     throw new Error(`Flow timeout exceeded after ${timeoutMs}ms`);
                 }
-                for (const [groupId, group] of delegationGroups) {
-                    if (!group.deadline || Date.now() < group.deadline) continue;
-                    await cancelGroup(group, instances, completed, skipped, `Delegation timeout: ${groupId}`);
-                    if (!group.detached) throw new Error(`Delegation group timed out: ${groupId}`);
-                }
-            };
-
-            const failDelegationGroup = async (key: string, message?: string): Promise<void> => {
-                const { nodeId } = parseInstanceKey(key);
-                const groupId = delegationGroupByChild.get(nodeId);
-                const group = groupId ? delegationGroups.get(groupId) : undefined;
-                if (!group || group.policy === 'continue') return;
-                const cancellations: Promise<void>[] = [];
-                for (const childId of group.children) {
-                    if (childId === nodeId) continue;
-                    skipped.add(childId);
-                    for (const [index, handle] of (instances.get(childId) ?? []).entries()) {
-                        if (!completed.has(instanceKey(childId, index + 1))) {
-                            cancellations.push(handle.cancel(`Delegation sibling failed: ${nodeId}`));
-                        }
-                    }
-                }
-                await Promise.allSettled(cancellations);
-                throw new Error(message ?? `Delegated task failed: ${nodeId}`);
+                await delegation.enforceDeadlines();
             };
 
             // Saga 补偿链：节点失败时，先补偿失败节点自身，再沿依赖链反向补偿
@@ -587,18 +503,9 @@ export class DurableFlowExecutor {
                         tolerated.add(String(node.id));
                     }
                 }
-                for (const group of delegationGroups.values()) {
-                    // continue 组保留兄弟失败；any/first-success/quorum 组会主动取消
-                    // 未获胜兄弟，这些终态也不应让整个 Run 失败。
-                    if (group.policy !== 'continue' && group.waitMode === 'all') continue;
-                    for (const child of group.children) tolerated.add(child);
-                }
+                for (const child of delegation.toleratedChildren()) tolerated.add(child);
                 return tolerated;
             };
-
-            // A restored host lost the old process's detached-delegation timers; re-arm
-            // them from the persisted absolute deadline before scheduling resumes.
-
 
             /**
              * Consume pending graph-retry intents: the retry becomes the node's newest
@@ -818,7 +725,7 @@ export class DurableFlowExecutor {
                     await cancelPending(instances, completed, 'Flow token budget exceeded');
                     throw new Error(`Flow token budget exceeded: ${consumedTokens}/${maxTokens}`);
                 }
-                await settleDelegationGroup(settled.key, settled.exit.status === 'succeeded');
+                await delegation.settle(settled.key, settled.exit.status === 'succeeded');
                 await this.emitHook(settled.exit.status === 'failed' ? 'task.failed' : 'task.completed', sessionId, {
                     nodeId: parseInstanceKey(settled.key).nodeId,
                     taskId: pending.find(item => item.key === settled.key)?.handle.id,
@@ -832,10 +739,10 @@ export class DurableFlowExecutor {
                 }
                 if (settled.exit.status === 'failed') {
                     await compensateChain(settled.key);
-                    await failDelegationGroup(settled.key, settled.exit.error?.message);
+                    await delegation.fail(settled.key, settled.exit.error?.message);
                 }
                 await applyEffects(settled.exit.output, parseInstanceKey(settled.key).nodeId);
-                await applyDelegation(settled.key, settled.exit.output);
+                await delegation.apply(settled.key, settled.exit.output);
                 await saveCheckpoint();
             }
 
@@ -1098,21 +1005,6 @@ export class DurableFlowExecutor {
 }
 
 
-function instanceKey(nodeId: string, iteration: number): string {
-    return `${nodeId}#${iteration}`;
-}
-
-function parseInstanceKey(key: string): { nodeId: string; iteration: number } {
-    const separator = key.lastIndexOf('#');
-    if (separator < 0) return { nodeId: key, iteration: 1 };
-    const iteration = Number(key.slice(separator + 1));
-    return {
-        nodeId: key.slice(0, separator),
-        iteration: Number.isInteger(iteration) && iteration > 0 ? iteration : 1,
-    };
-}
-
-
 /** 收集 route 节点声明的出边 id（含默认边；这些边默认 pending，等 route 决定激活/禁用）。 */
 function collectRouteEdgeIds(spec: DagRunSpec): Set<string> {
     const ids = new Set<string>();
@@ -1190,23 +1082,6 @@ async function cancelPending(
     const failures = results.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
     if (failures.length) throw new AggregateError(failures,
         `Flow task cancellation failed: ${failures.map(String).join('; ')}`);
-}
-
-async function cancelGroup(
-    group: DelegationGroup,
-    instances: Map<string, TaskHandle[]>,
-    completed: Set<string>,
-    skipped: Set<string>,
-    reason: string,
-): Promise<void> {
-    const cancellations: Promise<void>[] = [];
-    for (const childId of group.children) {
-        skipped.add(childId);
-        for (const [index, handle] of (instances.get(childId) ?? []).entries()) {
-            if (!completed.has(instanceKey(childId, index + 1))) cancellations.push(handle.cancel(reason));
-        }
-    }
-    await Promise.allSettled(cancellations);
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {

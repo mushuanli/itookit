@@ -224,10 +224,15 @@ flowchart LR
     Scheduler[DurableFlowExecutor] -->|已完成节点的输出| Mutation
     Mutation -->|校验后修改| State[单次运行图状态]
     Mutation --> Validation[端口 / 容量 / 变量校验]
+    Scheduler --> Delegation[DelegationController]
+    Delegation -->|成员 / 等待 / 取消| State
+    Delegation -->|spawned 回调| Scheduler
     Scheduler --> Readiness[readyFlowNodes]
     Readiness --> State
     Scheduler -->|保存 checkpoint / 租约条件| Store[Kernel Session shared]
 ```
+
+`delegation-runtime.ts` 保留委派声明解析和成员图构造；`DelegationController` 管理绑定继承、all/any/first-success/quorum 等待、剩余成员取消、失败与超时。它只执行已固定的运行声明，通过 spawned 回调通知调度器，不选择产品策略或安装全局回调。节点轮次身份统一在 `node-instance.ts`，恢复仍使用原有编码。
 
 checkpoint、恢复、任务提交和工作区清理由执行器协调；图修改组件不自行写存储或取得租约。循环 back-edge 的派发顺序约束，以及 join 只能取消已观察依赖的约束保持原行为。
 
@@ -255,6 +260,8 @@ packages/llm-flow/src/
     ├── executor.ts            DurableFlowExecutor + DurableFlowExecutorOptions/FlowExecutionHandle + upstreamOf（未根导出）
     ├── scheduler-readiness.ts readyFlowNodes（包内就绪判定）
     ├── graph-mutations.ts     GraphMutationRuntime（包内图状态修改与节点身份绑定端口）
+    ├── delegation-controller.ts DelegationController（包内委派组生命周期）
+    ├── node-instance.ts       instanceKey/parseInstanceKey（包内轮次身份）
     ├── commands.ts            DagCommandService + DagCommandServiceOptions/DurableFlowSnapshot
     ├── programs.ts            FlowValueProgram/FlowHumanProgram/FlowAggregateProgram + 输入类型
     ├── operations.ts          transformOutcome/spawnOutcome/reduceOutcome/routeOutcome（纯操作，未根导出）
