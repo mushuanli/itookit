@@ -104,6 +104,9 @@ export function sourceErrors(source, file, text, packages) {
                 report(node, 'driver-llm may only use neutral message contracts through type imports');
             }
         }
+        if (['@itookit/kernel-adapters', '@itookit/llm-session', '@itookit/llm-ui', '@itookit/llm-settings-ui'].includes(source.name) &&
+            ts.isIdentifier(node) && node.text === 'DEFAULT_HARNESS_TOOL_IDS')
+            report(node, 'MindOS default tool grants belong to the host; capabilities receive injected policy');
         if (source.name === '@itookit/app-core' && browserReference(node)) report(node, 'app-core must not reference DOM or browser storage');
         if (source.name === '@itookit/app-core' && file === resolve(source.dir, 'src/index.ts') &&
             ts.isExportDeclaration(node) && !node.exportClause) report(node, 'app-core public exports must be explicit');

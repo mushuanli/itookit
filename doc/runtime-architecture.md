@@ -308,3 +308,5 @@ LLM UI 分为 `/chat` 与 `/settings` 子入口；设置包是可选 peer，聊�
 本轮边界补全验收：全仓 typecheck、架构守卫与 docs:check 通过；Kernel adapters 199、Session 208、LLM UI 64、app-core 231 项测试通过。Session/UI/Flow/Adapters 与 Web 构建通过，构建后的 `/llm/core` 导入图不含产品目录，`/chat` 导入图不含 Session 单例或设置实现。宿主定向回归 25 项中 23 项通过，2 项仍为此前确认的外部草稿刷新问题；这不代表完整 app-shell 矩阵通过。
 
 业务 Flow 模板由 app-core 的 `createMindosFlowLibrary` 提供。llm-ui 的安装/恢复 API 必须接收显式模板数组，命令调用会复制输入以保护宿主目录；菜单仅在提供非空 `library` 时暴露恢复入口。Web/Tauri 在 UI 装配时注入 MindOS 目录，其他宿主可注入自己的 FlowDraft。原 UI 导出的 builtinFlowLibrary 已移除，迁移时需向 installFlowLibrary/restoreFlowLibrary 显式传目录。
+
+MindOS 默认工具授权已从 kernel-adapters/contracts 与 llm-session/contracts 移到 app-core 宿主预设。AgentConfigEditor 和 createAgentEditorFactory 接收 defaultToolIds，实例保存独立副本。app-shell 使用同一宿主列表装配聊天与设置界面；Web/Tauri 透传该参数。通用设置 UI 默认目录为空，继承与显式空授权语义保持不同。

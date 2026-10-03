@@ -1,4 +1,5 @@
-import { DEFAULT_HARNESS_TOOL_IDS, type AgentDefinition } from '@itookit/kernel-adapters/contracts';
+import type { AgentDefinition } from '@itookit/kernel-adapters/contracts';
+import { DEFAULT_HARNESS_TOOL_IDS } from '../presets/harness-tools';
 import { FSError } from '@itookit/vfs-core';
 export interface ToolGrantTarget { id: string; serverId?: string }
 export interface AgentGrantStore { getAgents(): Promise<AgentDefinition[]>; saveAgent(agent: AgentDefinition): Promise<void> }

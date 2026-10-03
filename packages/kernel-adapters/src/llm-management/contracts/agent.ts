@@ -7,8 +7,6 @@ import type { SystemPromptDefinition, PromptPreset } from '@itookit/tools/contra
 
 // ─── Agent ────────────────────────────────────────────────────────────────────
 
-export const DEFAULT_HARNESS_TOOL_IDS: readonly string[] = ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash'];
-
 export type AgentType = 'agent' | 'composite' | 'tool' | 'workflow';
 
 export interface AgentConfig {

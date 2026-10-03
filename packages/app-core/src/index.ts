@@ -96,3 +96,5 @@ export type { ProjectFavorite, ProjectFavoriteTarget, ProjectFavoriteStore } fro
 export { resolveProjectFavorite } from './projects/favorites/routes';
 
 export { createMindosFlowLibrary } from './presets/flow-library';
+
+export { DEFAULT_HARNESS_TOOL_IDS } from './presets/harness-tools';

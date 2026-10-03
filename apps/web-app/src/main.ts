@@ -32,8 +32,8 @@ async function main() {
     const ui: AppUI = {
         createChatEditor: (service, deps) => lazyEditorFactory(async () =>
             (await import('@itookit/llm-ui/chat')).createLLMFactory(service, deps)),
-        createAgentEditor: service => lazyEditorFactory(async () =>
-            (await import('@itookit/llm-ui/settings')).createAgentEditorFactory(service)),
+        createAgentEditor: (service, capabilities) => lazyEditorFactory(async () =>
+            (await import('@itookit/llm-ui/settings')).createAgentEditorFactory(service, capabilities)),
         createFlowEditor: deps => lazyEditorFactory(async () =>
             (await import('@itookit/llm-ui/chat')).createFlowsEditorFactory(deps)),
         createFlowContextMenu: deps => createFlowContextMenuConfig({ ...deps, library: createMindosFlowLibrary() }),

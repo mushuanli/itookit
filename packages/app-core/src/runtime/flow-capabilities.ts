@@ -1,7 +1,7 @@
 import { bindStandaloneFlowNode, type FlowIdentityResolver } from '@itookit/llm-session';
 import { resolveSessionSelectedSkills } from '@itookit/kernel-adapters';
 import { buildSkillContexts } from '@itookit/llm-session';
-import { DEFAULT_HARNESS_TOOL_IDS } from '@itookit/kernel-adapters/contracts';
+import { DEFAULT_HARNESS_TOOL_IDS } from '../presets/harness-tools';
 import { type FlowNodeDefinition } from '@itookit/llm-flow/contracts';
 import type { HeadlessKernelRuntime } from './create-kernel-runtime';
 

@@ -1,4 +1,4 @@
-import { DEFAULT_HARNESS_TOOL_IDS } from '@itookit/kernel-adapters/contracts';
+import { DEFAULT_HARNESS_TOOL_IDS } from '@itookit/app-core';
 import { RemoteFilesSettingsEditor } from './files/RemoteFilesSettingsEditor';
 import { createFileChatHandler } from './projects/file-chat';
 import { createOcrControls } from './configuration/ocr-controls';
@@ -139,7 +139,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const llmFactory = options.ui.createChatEditor(agentService, {
         defaultHarnessToolIds: DEFAULT_HARNESS_TOOL_IDS, sessionManager, sessionRepository, ocr, commandBus, kernel: kernel.kernel, privilegedCommands, sessionSkills,
     });
-    const agentFactory = options.ui.createAgentEditor(agentService);
+    const agentFactory = options.ui.createAgentEditor(agentService, { defaultToolIds: DEFAULT_HARNESS_TOOL_IDS });
 
     // Skills workspace: VFSUIShell list (SkillsEngine) + form editor (SkillSettingsEditor)
     const skillsEngine  = new SkillsEngine(agentService);

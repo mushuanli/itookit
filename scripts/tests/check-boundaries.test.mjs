@@ -124,3 +124,12 @@ test('chat must receive business flow templates from the host', () => {
     const ui = pkg('llm-ui');
     assert.match(inspect(ui, "import template from './library/product.flow?raw'", ui.dir + '/src/chat.ts')[0], /template catalogs/);
 });
+
+
+test('public LLM capabilities cannot choose MindOS default tool grants', () => {
+    for (const name of ['kernel-adapters', 'llm-session', 'llm-ui', 'llm-settings-ui']) {
+        const source = pkg(name);
+        assert.match(inspect(source, "export const DEFAULT_HARNESS_TOOL_IDS = ['Bash'];")[0], /injected policy/);
+    }
+    assert.equal(inspect(core, "export const DEFAULT_HARNESS_TOOL_IDS = ['Bash'];").length, 0);
+});

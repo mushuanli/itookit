@@ -12,13 +12,14 @@ import { IEditor, EditorOptions, EditorEvent, EditorEventMap, EditorEventCallbac
 import type { AgentType, AgentDefinition, IAgentManagementService } from '@itookit/kernel-adapters/contracts';
 import type { PromptPreset } from '@itookit/tools/contracts';
 import { EventBus } from '@itookit/vfs-core';
-import { bindAgentCapabilities, readAgentCapabilities, renderAgentCapabilities } from './agent-capabilities';
+import { bindAgentCapabilities, readAgentCapabilities, renderAgentCapabilities, type AgentCapabilityOptions } from './agent-capabilities';
 
 /**
  * Agent 配置编辑器
  * 需要完整的 CRUD 能力，因此依赖 IAgentManagementService
  */
 export class AgentConfigEditor implements IEditor {
+    private readonly defaultToolIds: readonly string[];
     private autoSave?: SettingsAutoSave;
     private rendering?: Promise<void>;
     private promptLibrary: import('@itookit/tools/contracts').SystemPromptDefinition[] = [];
@@ -32,8 +33,9 @@ export class AgentConfigEditor implements IEditor {
     constructor(
         _container: HTMLElement,
         private readonly options: EditorOptions,
-        private service: IAgentManagementService
-    ) { }
+        private service: IAgentManagementService,
+        capabilities: AgentCapabilityOptions = {},
+    ) { this.defaultToolIds = [...new Set(capabilities.defaultToolIds ?? [])]; }
 
     async init(container: HTMLElement, initialContent?: string) {
         this.container = container;
@@ -246,7 +248,7 @@ export class AgentConfigEditor implements IEditor {
                     </div>
                 </div>
 
-                ${renderAgentCapabilities(agent, allSkills)}
+                ${renderAgentCapabilities(agent, allSkills, this.defaultToolIds)}
 
                 <!-- MCP Tools -->
                 <div class="agent-section" id="mcp-section" style="${agent.type !== 'agent' ? 'display:none' : ''}">
@@ -378,7 +380,7 @@ export class AgentConfigEditor implements IEditor {
             this.container.querySelectorAll<HTMLInputElement>('input, select, textarea, button').forEach(field => { field.disabled = true; });
             return;
         }
-        bindAgentCapabilities(this.container);
+        bindAgentCapabilities(this.container, this.defaultToolIds);
         // 全局变更监听
         const handleChange = () => {
             this._isDirty = true;

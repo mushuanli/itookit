@@ -111,3 +111,5 @@ pnpm --filter @itookit/app-core typecheck
 - `contextEngineOptions` 与 `agentResolution` 由应用装配透传；Conversation 系统的清理使用返回实例的 dispose，不重置进程单例。
 
 - UI 模板目录位于 `src/presets/essay-review-isolated.json`，公共 `createMindosFlowLibrary()` 返回副本；Web/Tauri 显式接入 UI 的安装、恢复和菜单机制。产品提示词不进入 llm-ui 包。
+
+MindOS 默认工具列表属于 `src/presets/harness-tools.ts`，通过 app-core 公共出口供 app-shell 装配聊天与 Agent 设置 UI；禁止从公共配置契约读取产品默认授权。

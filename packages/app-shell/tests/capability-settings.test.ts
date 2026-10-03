@@ -7,7 +7,7 @@ import type { AgentDefinition } from '@itookit/kernel-adapters/contracts';
 import type { MCPServer } from '@itookit/tools/mcp-contracts';
 
 const service = () => ({ getConnections: async () => [], getProviders: () => [],
-    listSystemPrompts: async () => [], getMCPServers: async () => [], getSkills: async () => [] });
+    listSystemPrompts: async () => [], getMCPServers: async () => [], getSkills: async () => [], saveAgent: vi.fn(async () => {}) });
 afterEach(() => vi.restoreAllMocks());
 
 it('round trips policies and hidden configuration through the rendered Agent form', async () => {
@@ -83,4 +83,33 @@ it('shows the required protocol and keeps legacy configurations visibly unsuppor
     expect(select.value).toBe('sse'); expect(select.selectedOptions[0].disabled).toBe(true);
     expect(Array.from(select.options).filter(option => !option.disabled).map(option => option.value)).not.toContain('sse');
     expect(host.textContent).toContain('2026-07-28');
+});
+
+it('uses isolated host defaults and preserves explicit empty grants', async () => {
+    const defaults = ['ReadCustom', 'ReadCustom'];
+    const host = document.createElement('div');
+    const editor = new AgentConfigEditor(host, {}, service() as never, { defaultToolIds: defaults });
+    defaults.push('Bash');
+    try {
+        await editor.init(host, JSON.stringify({ id: 'custom', name: 'Custom', type: 'agent', config: {}, capabilityPolicy: { toolIds: [] } }));
+        const choices = [...host.querySelectorAll<HTMLInputElement>('[name="toolGrant"]')];
+        expect(choices.map(input => input.value)).toEqual(['ReadCustom']);
+        expect(choices.every(input => !input.checked)).toBe(true);
+        expect(JSON.parse(editor.getText()).capabilityPolicy.toolIds).toEqual([]);
+        const inherit = host.querySelector<HTMLInputElement>('[name="defaultTools"]')!;
+        inherit.checked = true;
+        inherit.dispatchEvent(new Event('input', { bubbles: true }));
+        expect(choices[0].checked).toBe(true);
+        expect(JSON.parse(editor.getText()).capabilityPolicy.toolIds).toBeUndefined();
+    } finally { await editor.destroy(); }
+});
+
+it('does not invent tool grants when the host supplies no defaults', async () => {
+    const host = document.createElement('div');
+    const editor = new AgentConfigEditor(host, {}, service() as never);
+    try {
+        await editor.init(host, JSON.stringify({ id: 'custom', name: 'Custom', type: 'agent', config: {} }));
+        expect(host.querySelectorAll('[name="toolGrant"]')).toHaveLength(0);
+        expect(JSON.parse(editor.getText()).capabilityPolicy.toolIds).toBeUndefined();
+    } finally { await editor.destroy(); }
 });

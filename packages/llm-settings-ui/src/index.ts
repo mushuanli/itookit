@@ -18,3 +18,5 @@ export {
     type ConflictItem,
     type ImportStats,
 } from './editors/llm-import';
+
+export type { AgentCapabilityOptions } from './editors/agent-capabilities';

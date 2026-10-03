@@ -293,8 +293,8 @@ async function bootstrap(): Promise<void> {
             (await import('@itookit/llm-ui/chat')).createLLMFactory(agents, {
                 ...deps, onLoadMetrics: metrics => { void recordDiagnostic('session.load.ready', metrics); },
             })),
-        createAgentEditor: agents => lazyEditorFactory(async () =>
-            (await import('@itookit/llm-ui/settings')).createAgentEditorFactory(agents)),
+        createAgentEditor: (agents, capabilities) => lazyEditorFactory(async () =>
+            (await import('@itookit/llm-ui/settings')).createAgentEditorFactory(agents, capabilities)),
         createFlowEditor: deps => lazyEditorFactory(async () =>
             (await import('@itookit/llm-ui/chat')).createFlowsEditorFactory(deps)),
         createFlowContextMenu: deps => createFlowContextMenuConfig({ ...deps, library: createMindosFlowLibrary() }),

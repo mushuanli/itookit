@@ -112,7 +112,7 @@ export interface AppUI {
         navigate(sessionId: string): void | Promise<void>;
     }): ContextMenuConfig<TNode>;
     createChatEditor(agentService: VFSAgentService, deps: ChatEditorDeps): EditorFactory;
-    createAgentEditor(agentService: VFSAgentService): EditorFactory;
+    createAgentEditor(agentService: VFSAgentService, options?: { defaultToolIds?: readonly string[] }): EditorFactory;
     createFlowEditor(deps: FlowEditorDeps): EditorFactory;
     createSkillEditor(agentService: IAgentManagementService): EditorFactory;
     createAIContextMenu<TNode extends AIContextMenuNode>(deps: AIContextMenuDeps): ContextMenuConfig<TNode>;
