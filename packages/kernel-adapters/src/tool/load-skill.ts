@@ -4,7 +4,8 @@
 // Handler is a factory (not a plain export) because it needs a live ISkillService
 // reference, which is only available after services are wired up in the factory.
 
-import type { ToolMeta, ToolDefinition, ToolHandler, ISkillService } from '@itookit/common';
+import type { ISkillService } from '@itookit/tools/contracts';
+import type { ToolMeta, ToolDefinition, ToolHandler } from '@itookit/tools/contracts';
 
 export const loadSkillMeta: ToolMeta = {
     id: 'load_skill',

@@ -1,5 +1,5 @@
 // @file: kernel-adapters/src/tool/human-input.ts
-import type { ToolDefinition, ToolMeta } from '@itookit/common';
+import type { ToolDefinition, ToolMeta } from '@itookit/tools/contracts';
 
 export const humanInputMeta: ToolMeta = {
     id: 'human_input',

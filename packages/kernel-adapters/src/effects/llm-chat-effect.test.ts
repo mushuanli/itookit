@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ILLMService } from '@itookit/common';
+import type { ILLMService } from '@itookit/driver-llm/contracts';
 import type { EffectExecutionContext } from '@itookit/durable-kernel';
 import { LlmChatEffectAdapter } from './llm-chat-effect';
 

@@ -1,4 +1,4 @@
-import type { FlowInputConfig, FlowInputField, JsonValue } from '@itookit/common';
+import type { FlowInputConfig, FlowInputField, JsonValue } from '../../contracts';
 import type { Decision, DurableTaskProgram, TaskInputEvent } from '@itookit/durable-kernel';
 import { collectDependency, dependenciesReady, dependencyWait } from '@itookit/llm-tasks';
 import type { FlowDependencyBinding } from '../programs';

@@ -1,5 +1,5 @@
-import { remapFlowNodeReferences } from '@itookit/llm-common';
-import type { DagNodeDefinition, DagEdgeDefinition, DispatchBranch, DispatchConfig, SerializableExpression } from '@itookit/common';
+import { remapFlowNodeReferences } from '../../contracts';
+import type { DagNodeDefinition, DagEdgeDefinition, DispatchBranch, DispatchConfig, SerializableExpression } from '../../contracts';
 import { compileCondition, conditionOperand } from './condition';
 import { object } from './value';
 import { validateDispatch } from './validation';
@@ -104,7 +104,7 @@ function compileScope(scope: Scope): DagNodeDefinition {
     const route = object(scope.route.config), judge = object(scope.judge.config), aggregate = object(scope.aggregate.config);
     if (aggregate.strategy !== undefined && !['latest', 'append'].includes(String(aggregate.strategy))) throw new Error('Unsupported aggregate strategy');
     const branches = scope.checks.map(node => compileCheck(node, judge));
-    const until = (judge.condition ? compileCondition(judge.condition as import('@itookit/llm-common').FlowCondition) : judge.until) ?? { kind: 'and', args: branches.map(branch => criterion(branch.key, judge)) };
+    const until = (judge.condition ? compileCondition(judge.condition as import('../../contracts').FlowCondition) : judge.until) ?? { kind: 'and', args: branches.map(branch => criterion(branch.key, judge)) };
     const config = { ...route, branches, until, maxRounds: judge.maxRounds,
         logicNodes: { aggregate: { id: scope.aggregate.id, name: scope.aggregate.name },
             judge: { id: scope.judge.id, name: scope.judge.name } },

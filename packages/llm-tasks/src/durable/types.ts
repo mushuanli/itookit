@@ -1,11 +1,6 @@
-import type {
-    ChatMessage,
-    OutputValidationPolicy,
-    ResponseFormat,
-    TokenUsage,
-    ToolCall,
-    ToolDefinition,
-} from '@itookit/common';
+import type { ChatMessage, ToolCall, ToolDefinition } from '@itookit/llm-context';
+import type { OutputValidationPolicy } from '../contracts';
+import type { ResponseFormat, TokenUsage } from '@itookit/driver-llm/contracts';
 import type { JsonValue } from '@itookit/durable-kernel';
 
 export interface DurableDependencyBinding {
@@ -35,7 +30,7 @@ export interface DurableProgramInput {
     webSearch?: boolean;
     responseFormat?: ResponseFormat;
     outputValidation?: OutputValidationPolicy;
-    contextCompaction?: import('@itookit/common').ContextCompactionPolicy;
+    contextCompaction?: import('@itookit/llm-context').ContextCompactionPolicy;
     dependencyBindings?: DurableDependencyBinding[];
     /** False keeps scheduling dependencies but does not append their outputs to messages. */
     includeDependencyOutputs?: boolean;
@@ -43,13 +38,13 @@ export interface DurableProgramInput {
 
 export interface DurableAgentInput extends DurableProgramInput {
     /** Host-resolved memory authority frozen at submission; absence grants no memory access. */
-    memoryPolicy?: import('@itookit/common').MemoryPolicy;
+    memoryPolicy?: import('../contracts').MemoryPolicy;
     /**
      * Skill snapshots activated when the Task was created (initial Skill selection). They
      * behave exactly like runtime `load_skill` results: their critical rules are re-injected
      * every round and their tool definitions are exposed within `allowedToolIds` only.
      */
-    skillContexts?: Array<NonNullable<import('@itookit/common').ToolInvokeResult['skillContext']>>;
+    skillContexts?: Array<NonNullable<import('@itookit/tools/contracts').ToolInvokeResult['skillContext']>>;
     maxExchanges?: number;
     workingDirectory?: string;
     approval?: 'none' | 'external' | 'all';
@@ -79,7 +74,7 @@ export interface DurableAgentOutput extends DurableChatOutput {
 
 export interface DurableAgentState {
     /** Successful Skill-load snapshots, independent of prunable tool messages. */
-    skillContexts?: Array<NonNullable<import('@itookit/common').ToolInvokeResult['skillContext']>>;
+    skillContexts?: Array<NonNullable<import('@itookit/tools/contracts').ToolInvokeResult['skillContext']>>;
     input: DurableAgentInput;
     phase: 'collecting' | 'llm' | 'approval' | 'tool' | 'human';
     messages: ChatMessage[];

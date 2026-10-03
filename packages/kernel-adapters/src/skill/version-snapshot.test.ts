@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { Kernel } from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend, type IDeviceDriver } from '@itookit/vfs-core';
-import type { SkillDefinition, SkillVersionPolicy } from '@itookit/common';
+import type { SkillDefinition, SkillVersionPolicy } from '@itookit/tools/contracts';
 import { createKernelAdaptersRuntime } from '../runtime/create-kernel-adapters-runtime';
 import { createSessionSkillControls } from './session-skill-controls';
 import { resolveSessionSkillContext, resolveSessionSelectedSkills } from './session-prompt-context';

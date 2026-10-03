@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { Artifact, BranchContextProfile, ContextPlan, ContextSnapshot } from '@itookit/common';
+import type { BranchContextProfile, ContextPlan, ContextSnapshot } from '@itookit/llm-context';
+
+type Artifact = { id: string; content: unknown; contentHash?: string; [key: string]: unknown };
 import { ContextAssembler } from '../src/core/context-assembler';
 
 async function hash(content: string): Promise<string> {

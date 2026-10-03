@@ -1,9 +1,5 @@
-import { remapFlowNodeReferences } from '@itookit/llm-common';
-import type {
-    DagRunSpec,
-    FlowRevision,
-    FlowNodeDefinition,
-} from '@itookit/common';
+import { remapFlowNodeReferences } from '../contracts';
+import type { DagRunSpec, FlowRevision, FlowNodeDefinition } from '../contracts';
 import { resolveNodeConnection } from './connections';
 import { resolveFlowParameters, flowParameterValues } from './parameters';
 import { compileReferenceGraph } from './structured/references';
@@ -154,7 +150,7 @@ async function expandCompositeNodes(
         const outgoing = new Set(child.edges.map(edge => edge.from));
         const entries = child.nodes.filter(node => !incoming.has(node.id)).map(node => `${prefix}${node.id}`);
         const exits = child.nodes.filter(node => !outgoing.has(node.id)).map(node => `${prefix}${node.id}`);
-        const parameters = isRecord(config.parameters) ? config.parameters as Record<string, import('@itookit/common').JsonValue> : {};
+        const parameters = isRecord(config.parameters) ? config.parameters as Record<string, import('../contracts').JsonValue> : {};
         parameterScopes[prefix] = { parent: composite.id.slice(0, composite.id.lastIndexOf('/') + 1), defaults: flowParameterValues(child.parameterSchema), values: parameters, schema: child.parameterSchema };
         if (entry) parameterScopes[prefix].source = entry.id;
         for (const [id, scope] of Object.entries(child.parameterScopes ?? {})) parameterScopes[`${prefix}${id}`] = { ...scope, parent: `${prefix}${scope.parent}`, ...(scope.source ? { source: `${prefix}${scope.source}` } : {}) };
@@ -240,5 +236,5 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parametersForDefaults(defaults: Record<string, unknown>, parameters: unknown): Record<string, unknown> {
-    return isRecord(parameters) ? resolveFlowParameters(defaults, parameters as Record<string, import('@itookit/common').JsonValue>) as Record<string, unknown> : defaults;
+    return isRecord(parameters) ? resolveFlowParameters(defaults, parameters as Record<string, import('../contracts').JsonValue>) as Record<string, unknown> : defaults;
 }

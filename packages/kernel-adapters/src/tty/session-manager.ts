@@ -1,4 +1,4 @@
-import type { ITTYSession, ITTYSessionManager } from '@itookit/common';
+import type { ITTYSession, ITTYSessionManager } from '@itookit/tools/contracts';
 
 export class TTYSessionManager implements ITTYSessionManager {
     private readonly sessions = new Map<string, ITTYSession>();

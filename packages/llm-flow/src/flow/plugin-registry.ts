@@ -1,12 +1,6 @@
 import { FlowSchemaRegistry } from './schema-registry';
-import type { JsonSchemaRef, JsonValue } from '@itookit/common';
-import type {
-    DagPlugin,
-    DagPluginCatalog,
-    DagPluginManifest,
-    DagRuntimeContribution,
-    DagUIContribution,
-} from '@itookit/common';
+import type { JsonSchemaRef, JsonValue } from '../contracts';
+import type { DagPlugin, DagPluginCatalog, DagPluginManifest, DagRuntimeContribution, DagUIContribution } from '../contracts';
 
 export class DagPluginRegistry implements DagPluginCatalog {
     private readonly schemas = new FlowSchemaRegistry();

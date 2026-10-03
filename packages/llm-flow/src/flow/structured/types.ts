@@ -1,4 +1,4 @@
-import type { DispatchBranch, DispatchConfig, JsonValue } from '@itookit/common';
+import type { DispatchBranch, DispatchConfig, JsonValue } from '../../contracts';
 import type { TaskSpec } from '@itookit/durable-kernel';
 import type { FlowDependencyBinding } from '../programs';
 

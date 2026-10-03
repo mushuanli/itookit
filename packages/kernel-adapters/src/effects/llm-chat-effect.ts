@@ -8,10 +8,10 @@ import type {
     ChatCompletionResponse,
     Citation,
     FinishReason,
-    ILLMService,
     TokenUsage,
     ToolCall,
 } from '@itookit/common';
+import type { ILLMService } from '@itookit/driver-llm/contracts';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/durable-kernel';
 import { expandMessagesAttachments } from '@itookit/driver-llm';
 import { resolveCapability, type CapabilitySource } from '../ports/capabilities';

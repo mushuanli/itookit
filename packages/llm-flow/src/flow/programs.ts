@@ -1,4 +1,4 @@
-import type { DagNodeOutcome } from '@itookit/common';
+import type { DagNodeOutcome } from '../contracts';
 import type {
     Decision,
     DurableTaskProgram,
@@ -12,7 +12,7 @@ import {
 } from '@itookit/llm-tasks';
 import { aggregateOutcome, reduceOutcome, routeOutcome, spawnOutcome, transformOutcome } from './operations';
 import { FlowReducerRegistry, projectSummary } from './structured/join';
-import type { FlowJoinConfig } from '@itookit/llm-common';
+import type { FlowJoinConfig } from '../contracts';
 import type { ResultSlot } from './structured/types';
 import { returnOutcome } from './function-outputs';
 

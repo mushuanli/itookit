@@ -9,7 +9,8 @@ export interface ChatAttachment {
 }
 
 /** Per-conversation UI execution preferences. */
-export type ChatExecutionMode = 'chat' | 'agent';
+import type { ChatExecutionMode } from '@itookit/llm-tasks/contracts';
+export type { ChatExecutionMode } from '@itookit/llm-tasks/contracts';
 
 export interface ChatSessionSettings {
     /** Omitted means follow the global default connection. */

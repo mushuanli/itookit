@@ -1,7 +1,7 @@
 // @file: tools/src/core/types.ts
 // Shared types for the tools package.
 
-import type { ToolVFSContext } from '@itookit/common';
+import type { ToolVFSContext } from '../contracts';
 
 // ── Native shell abstraction ──
 
@@ -73,7 +73,7 @@ export interface PermissionResult {
  * Tool execution context passed to Tool.call().
  */
 export interface ToolUseContext {
-  onProgress?: (progress: import('@itookit/common').ToolProgress) => Promise<void>;
+  onProgress?: (progress: import('../contracts').ToolProgress) => Promise<void>;
   /** Working directory (real path for Node.js, module path for VFS). */
   cwd: string;
   /** Abort signal for cancellation. */

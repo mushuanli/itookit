@@ -5,13 +5,13 @@
 // 不直接感知 device driver 的 open/write/readStream 模式。
 
 import type {
-    ILLMService,
     ChatCompletionParams,
     ChatCompletionResponse,
     ChatCompletionChunk,
     ConnectionMeta,
     LLMProvider,
 } from '@itookit/common';
+import type { ILLMService } from '@itookit/driver-llm/contracts';
 import type {
     IDeviceDriver,
     DeviceContext,

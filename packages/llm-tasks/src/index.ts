@@ -31,3 +31,5 @@ export type {
     DurableProgramInput,
 } from './durable/types';
 export type { DurablePlanInput, DurablePlanOutput } from './durable/plan-program';
+
+export * from './contracts';

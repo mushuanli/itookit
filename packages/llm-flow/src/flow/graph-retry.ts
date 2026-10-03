@@ -5,7 +5,7 @@
 // `flow.run.<rootTaskId>.graph-retry`，由下一次调度回合（resume/新宿主）消费。
 // 这样控制服务与调度进程可以分离，且崩溃不会丢掉已受理的重算请求。
 
-import type { DagEdgeDefinition, DagNodeDefinition } from '@itookit/common';
+import type { DagEdgeDefinition, DagNodeDefinition } from '../contracts';
 import type { JsonValue, SessionHandle } from '@itookit/durable-kernel';
 import { readFlowRunMembers } from './run-members';
 import { retryFlowTask } from './retry-task';

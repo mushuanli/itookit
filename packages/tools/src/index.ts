@@ -1,6 +1,8 @@
 // @file: tools/src/index.ts
 // Public API for @itookit/tools
 
+export type * from './contracts';
+
 // ── Core ──
 export { buildTool, toolMatchesName, findToolByName } from './core/Tool';
 export type { Tool, ToolDef, AnyObject } from './core/Tool';

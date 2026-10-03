@@ -2,7 +2,7 @@ import { nodePortSchemas } from './node-port-schemas';
 import { assertFlowSchema, flowSchemaIssue } from './schema-registry';
 import { schemaCompatibilityIssue } from './schema-compat';
 import { extractNodeOutput } from '@itookit/llm-tasks';
-import type { DagEdgeDefinition, DagNodeDefinition, DagPluginCatalog } from '@itookit/common';
+import type { DagEdgeDefinition, DagNodeDefinition, DagPluginCatalog } from '../contracts';
 
 /**
  * Ports declare an exact `id@version` contract. Edges between different versions

@@ -1,5 +1,6 @@
 import { assertEffectGrant } from '@itookit/durable-kernel';
-import type { ISkillService, IToolService, ToolInvokeResult } from '@itookit/common';
+import type { ISkillService } from '@itookit/tools/contracts';
+import type { IToolService, ToolInvokeResult } from '@itookit/tools/contracts';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/durable-kernel';
 import { forgetLoadedSkill, rollbackFailedLoad } from '../skill/loaded-state';
 import { InFlightEffects } from './in-flight';
@@ -10,8 +11,8 @@ export type SkillLoadTracker = Pick<ISkillService, 'getLoadedSkills' | 'unloadSk
 
 /** Host tools requiring Kernel-owned execution identity rather than model arguments. */
 export interface EffectToolBinding {
-    meta: import('@itookit/common').ToolMeta;
-    definition: import('@itookit/common').ToolDefinition;
+    meta: import('@itookit/tools/contracts').ToolMeta;
+    definition: import('@itookit/tools/contracts').ToolDefinition;
     invoke(args: Record<string, unknown>, context: EffectExecutionContext): Promise<string>;
 }
 
@@ -41,7 +42,7 @@ export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectReques
     }
 
     executeWithOutputAdmission(request: ToolCallEffectRequest, context: EffectExecutionContext,
-        admit: import('@itookit/common').ToolInvokeRequest['admitOutput']): Promise<ToolInvokeResult> {
+        admit: import('@itookit/tools/contracts').ToolInvokeRequest['admitOutput']): Promise<ToolInvokeResult> {
         return this.inFlight.track(context, this.run(request, context, admit));
     }
 
@@ -51,7 +52,7 @@ export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectReques
     }
 
     private async run(request: ToolCallEffectRequest, context: EffectExecutionContext,
-        admitOutput?: import('@itookit/common').ToolInvokeRequest['admitOutput']): Promise<ToolInvokeResult> {
+        admitOutput?: import('@itookit/tools/contracts').ToolInvokeRequest['admitOutput']): Promise<ToolInvokeResult> {
         try { return await this.invoke(request, context, admitOutput); }
         catch (error) {
             console.error('[tool.call] Execution failed', { sessionId: context.sessionId, taskId: context.taskId,
@@ -62,7 +63,7 @@ export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectReques
     }
 
     private async invoke(request: ToolCallEffectRequest, context: EffectExecutionContext,
-        admitOutput?: import('@itookit/common').ToolInvokeRequest['admitOutput']): Promise<ToolInvokeResult> {
+        admitOutput?: import('@itookit/tools/contracts').ToolInvokeRequest['admitOutput']): Promise<ToolInvokeResult> {
         assertEffectGrant(context, request.resourceHandleId, 'tool');
         const service = await (typeof this.service === 'function' ? this.service(context, request) : this.service);
         const bound = this.effectTools.find(tool => tool.meta.id === request.toolId);
@@ -87,7 +88,7 @@ export class ToolCallEffectAdapter implements EffectAdapter<ToolCallEffectReques
         // introduced may be undone when identity persistence fails.
         const tracker = loadsSkill ? await this.resolveSkillTracker?.(context) : undefined;
         const wasLoaded = tracker ? tracker.getLoadedSkills().some(item => item.id === skillId) : true;
-        const onProgress: import('@itookit/common').ToolInvokeRequest['onProgress'] = request.callId ? async progress => {
+        const onProgress: import('@itookit/tools/contracts').ToolInvokeRequest['onProgress'] = request.callId ? async progress => {
             context.abortSignal.throwIfAborted();
             await context.emit?.({ type: 'agent.event', payload: { type: 'tool:progress', call: {
                 toolId: request.callId!, name: request.toolId, input: request.args,

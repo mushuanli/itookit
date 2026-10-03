@@ -1,4 +1,4 @@
-import type { DagNodeOutcome, JsonValue, SerializableExpression } from '@itookit/common';
+import type { DagNodeOutcome, JsonValue, SerializableExpression } from '../contracts';
 import { mergeResults } from './structured/results';
 
 export function aggregateOutcome(_config: Record<string, unknown>, inputs: Record<string, unknown>): DagNodeOutcome {

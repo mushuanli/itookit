@@ -1,4 +1,4 @@
-import type { FlowRevision, FlowNodeDefinition, JsonValue, DagNodeOutcome } from '@itookit/common';
+import type { FlowRevision, FlowNodeDefinition, JsonValue, DagNodeOutcome } from '../contracts';
 import { assertFlowSchema, flowSchemaIssue } from './schema-registry';
 
 export const RETURN_NODE = '__flow_return';

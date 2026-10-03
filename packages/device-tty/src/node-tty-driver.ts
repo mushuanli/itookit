@@ -13,8 +13,8 @@
 // Upgrade path: replace NodeTTYSession internals with node-pty for a real PTY.
 // The ITTYDriver/ITTYSession interface remains unchanged.
 
-import { generateId } from '@itookit/common';
-import type { ITTYDriver, ITTYSession, ITTYSpawnOptions, ITTYSessionEvents } from '@itookit/common';
+import { randomUUID } from 'node:crypto';
+import type { ITTYDriver, ITTYSession, ITTYSpawnOptions, ITTYSessionEvents } from '@itookit/tools/contracts';
 
 // Pre-load spawn asynchronously so the synchronous spawn() method can use it.
 // undefined = still loading, null = unavailable (browser), function = ready.
@@ -47,7 +47,7 @@ export class NodeTTYSession implements ITTYSession {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     constructor(private readonly proc: any, command: string, args: string[]) {
-        this.id      = `tty_${generateId()}`;
+        this.id      = `tty_${randomUUID()}`;
         this.command = [command, ...args].join(' ');
         this.pid     = proc.pid;
 

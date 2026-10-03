@@ -1,4 +1,4 @@
-import type { DagRunSpec, JsonValue } from '@itookit/common';
+import type { DagRunSpec, JsonValue } from './contracts';
 import { bindCapabilities, type CapabilityBinding, type Kernel, type TaskHandle, type TaskSpec } from '@itookit/durable-kernel';
 import type { DurableFlowExecutor, FlowExecutionHandle } from './flow/executor';
 

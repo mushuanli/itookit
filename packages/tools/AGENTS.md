@@ -33,6 +33,10 @@ src/
     └── tool-device-driver.ts    ← ToolDeviceDriver — Tool[] → IToolService
 ```
 
+## 公共契约
+
+`@itookit/tools/contracts` 提供 Tool/TTY、Skill 和子代理执行契约与最小 `SkillLoaderPort`、`AgentDelegationPort`，入口没有运行时初始化。实现不依赖 common 或 llm-common；消息与内容引用类型来自 llm-context，模型层级类型来自 driver-llm/contracts；MCP 协议版本、发现类型与超时规范化在 tools/mcp-contracts，入口不加载 MCP SDK。Skill/Agent 工厂仅接收其使用的操作，宿主不必实现完整的管理服务。
+
 ## 核心模式
 
 ### buildTool() 工厂
@@ -49,7 +53,7 @@ src/
 ### 静态 vs 工厂工具
 - **静态工具**：无运行时依赖，直接 `export const XxxTool = buildTool({...})`，注册进 `BUILTIN_TOOLS`
 - **工厂工具**：需要运行时服务或外部注入，`createXxxTool(service)` 返回 Tool，由宿主通过 `ToolDeviceDriver.registerToolInstance()` 注册
-  - `createSkillTool(ISkillService)`、`createAgentTool(ISubAgentRouter)`、`createWebSearchTool(IWebSearchProvider)`、`createBashTool(INativeShell)`、`createAskUserQuestionTool(callback)`
+  - `createSkillTool(SkillLoaderPort)`、`createAgentTool(AgentDelegationPort)`、`createWebSearchTool(IWebSearchProvider)`、`createBashTool(INativeShell)`、`createAskUserQuestionTool(callback)`
   - `createMCPTools` / `createSingleMCPTool(IMCPClient)`、`createTaskOutputTool` / `createTaskStopTool(ITaskStore)`、`createSendMessageTool(IMessageRouter)`、`createToolSearchTool(getTools)`
 
 ### Tool 接口可选成员

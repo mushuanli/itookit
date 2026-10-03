@@ -1,11 +1,7 @@
-import type {
-    AgentEvent,
-    ChatCompletionResponse,
-    ChatMessage,
-    TokenUsage,
-    ToolCall,
-} from '@itookit/common';
-import { DEFAULT_EFFECT_TIMEOUT_MS } from '@itookit/common';
+import type { AgentEvent } from '../contracts';
+import type { ChatCompletionResponse, TokenUsage } from '@itookit/driver-llm/contracts';
+import type { ChatMessage, ToolCall } from '@itookit/llm-context';
+import { DEFAULT_EFFECT_TIMEOUT_MS } from '../contracts';
 import type {
     JsonValue,
     KernelAction,
@@ -78,7 +74,7 @@ export function llmEffect(
     input: DurableProgramInput,
     messages: ChatMessage[],
     handleId: string,
-    tools?: import('@itookit/common').ToolDefinition[],
+    tools?: import('@itookit/llm-context').ToolDefinition[],
     effectId?: string,
 ): KernelAction {
     const retries = input.llmRetry?.retries ?? 3;

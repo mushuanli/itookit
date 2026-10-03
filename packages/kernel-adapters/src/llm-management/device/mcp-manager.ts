@@ -2,7 +2,7 @@
 //
 // MCPManager — MCP server config storage and active connection lifecycle.
 
-import { mcpTimeoutMs, type MCPServer, type MCPDiscovery } from '@itookit/llm-common';
+import { mcpTimeoutMs, type MCPServer, type MCPDiscovery } from '@itookit/tools/mcp-contracts';
 import type { IVFSManager, IFileSystem } from '@itookit/vfs-core';
 import { MCPServerConnection } from '../skills/mcp-client';
 import type { MCPServerConfig } from '../skills/types';

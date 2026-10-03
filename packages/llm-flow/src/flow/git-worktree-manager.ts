@@ -1,5 +1,5 @@
 import type { JsonValue } from '@itookit/durable-kernel';
-import type { FlowWorkspacePolicy } from '@itookit/common';
+import type { FlowWorkspacePolicy } from '../contracts';
 import type { FlowWorkspaceLease, FlowWorkspaceManager, FlowWorkspaceRestoreOptions } from './executor';
 
 export interface WorkspaceCommandRunner {

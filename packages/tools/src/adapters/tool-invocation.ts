@@ -1,4 +1,4 @@
-import type { ToolInvokeResult } from '@itookit/common';
+import type { ToolInvokeResult } from '../contracts';
 import type { Tool } from '../core/Tool';
 import type { ToolUseContext } from '../core/types';
 import { ToolInputError } from '../core/tool-error';
@@ -27,7 +27,7 @@ export async function prepareToolInput(tool: Tool, args: Record<string, unknown>
 }
 
 export async function toolSuccess(tool: Tool, data: unknown, started: number,
-  admit?: import('@itookit/common').ToolInvokeRequest['admitOutput']): Promise<ToolInvokeResult> {
+  admit?: import('../contracts').ToolInvokeRequest['admitOutput']): Promise<ToolInvokeResult> {
   const block = tool.mapToolResultToToolResultBlockParam(data, tool.name);
   const text = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
   if (admit) {

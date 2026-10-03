@@ -8,7 +8,8 @@
 // bundlers do not statically resolve the native module. In browser environments
 // the import fails and spawn() throws a clear "not available" error.
 
-import { generateId, type ITTYDriver, type ITTYSession, type ITTYSpawnOptions, type ITTYSessionEvents } from '@itookit/common';
+import { randomUUID } from 'node:crypto';
+import type { ITTYDriver, ITTYSession, ITTYSpawnOptions, ITTYSessionEvents } from '@itookit/tools/contracts';
 import { safeEnvironment } from './node-tty-driver';
 
 // Pre-load node-pty asynchronously so the synchronous spawn() method can use it.
@@ -44,7 +45,7 @@ export class NodePtySession implements ITTYSession {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     constructor(private readonly pty: any, command: string, args: string[]) {
-        this.id = `tty_${generateId()}`;
+        this.id = `tty_${randomUUID()}`;
         this.command = [command, ...args].join(' ');
         this.pid = pty.pid;
 

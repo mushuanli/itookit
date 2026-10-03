@@ -1,4 +1,4 @@
-import type { JsonValue } from '@itookit/common';
+import type { JsonValue } from '../contracts';
 
 /** Keep declared grants and scheduling policy while accepting resolved identity content. */
 export function patchIdentityConfig(originalValue: unknown, boundValue: unknown, allowed: string[]): JsonValue {

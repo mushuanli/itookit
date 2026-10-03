@@ -1,9 +1,5 @@
-import type {
-    SkillDefinition,
-    SkillFrontmatter,
-    SkillScopeLevel,
-    ToolVFSContext,
-} from '@itookit/common';
+import type { SkillDefinition, SkillFrontmatter, SkillScopeLevel } from '@itookit/tools/contracts';
+import type { ToolVFSContext } from '@itookit/tools/contracts';
 import { extractCompactInstructions } from './compact-extractor';
 import type { SkillScopeSnapshot, SkillSource } from '../ports/capabilities';
 

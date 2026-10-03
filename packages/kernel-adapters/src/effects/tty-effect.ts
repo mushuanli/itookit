@@ -1,5 +1,5 @@
 import { assertEffectGrant } from '@itookit/durable-kernel';
-import type { IToolService, ToolInvokeResult } from '@itookit/common';
+import type { IToolService, ToolInvokeResult } from '@itookit/tools/contracts';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/durable-kernel';
 import { resolveCapability, type CapabilitySource } from '../ports/capabilities';
 import { InFlightEffects } from './in-flight';

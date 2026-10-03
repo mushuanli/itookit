@@ -1,4 +1,4 @@
-import type { DagPlugin, DagPluginManifest, JsonValue } from '@itookit/llm-common';
+import type { DagPlugin, DagPluginManifest, JsonValue } from '../../contracts';
 import { object } from '../structured/value';
 import { validateWaitPolicy } from './join-program';
 
@@ -39,7 +39,7 @@ function joinPlugin(): DagPlugin {
         keys: { type: 'object' },
     }, { mode: 'all', remaining: 'continue', failure: 'fail', result: 'collect' });
     return { ...presentation(manifest), runtime: async () => ({ createTask(context) {
-        const policy = { mode: 'all', ...object(context.config) } as import('@itookit/llm-common').FlowWaitPolicy;
+        const policy = { mode: 'all', ...object(context.config) } as import('../../contracts').FlowWaitPolicy;
         const dependencies = context.dependencies.filter(item => item.injectOutput !== false);
         validateWaitPolicy(policy, dependencies.length);
         const keys = object(object(context.config).keys);

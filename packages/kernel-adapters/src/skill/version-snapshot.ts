@@ -1,4 +1,5 @@
-import { sha256HexSync, type SkillDefinition, type SkillVersionSnapshot } from '@itookit/common';
+import { sha256HexSync } from '@itookit/common';
+import { type SkillDefinition, type SkillVersionSnapshot } from '@itookit/tools/contracts';
 
 /** Object key order and catalog timestamps do not define a Skill version. */
 function canonical(value: unknown): unknown {

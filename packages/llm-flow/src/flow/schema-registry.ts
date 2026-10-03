@@ -1,4 +1,4 @@
-import type { JsonSchemaRef, JsonValue } from '@itookit/common';
+import type { JsonSchemaRef, JsonValue } from '../contracts';
 
 type Schema = Record<string, JsonValue>;
 const keywords = new Set(['type', 'properties', 'required', 'items', 'additionalProperties', 'enum', 'title', 'description', 'minimum', 'maximum']);

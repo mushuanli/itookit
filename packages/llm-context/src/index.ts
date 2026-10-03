@@ -17,3 +17,5 @@ export type { ContextRoundSource } from './assembly/round-history';
 export type * from './gc/types';
 export { createContextGc } from './gc/collector';
 export { scheduleContextGc, validateContextGcSchedule, type ContextGcScheduleOptions } from './gc/scheduler';
+
+export { simpleHash } from './content/fingerprint';

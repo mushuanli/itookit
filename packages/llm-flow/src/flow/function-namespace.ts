@@ -1,5 +1,5 @@
-import type { DagNodeDefinition, DagRunSpec } from '@itookit/common';
-import { remapFlowNodeReferences } from '@itookit/llm-common';
+import type { DagNodeDefinition, DagRunSpec } from '../contracts';
+import { remapFlowNodeReferences } from '../contracts';
 import { object } from './structured/value';
 
 /** Rename control identities while preserving user data and public join result keys. */

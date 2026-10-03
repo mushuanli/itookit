@@ -1,5 +1,5 @@
 import { assertEffectGrant } from '@itookit/durable-kernel';
-import type { ISkillService } from '@itookit/common';
+import type { ISkillService } from '@itookit/tools/contracts';
 import type { EffectAdapter, EffectExecutionContext, EffectReconcileResult } from '@itookit/durable-kernel';
 import { resolveCapability, type CapabilitySource } from '../ports/capabilities';
 import { forgetLoadedSkill } from '../skill/loaded-state';

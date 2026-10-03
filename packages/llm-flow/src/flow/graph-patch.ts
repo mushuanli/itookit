@@ -1,5 +1,5 @@
 import { createRunCatalog } from './run-catalog';
-import type { DagEdgeDefinition, DagNodeDefinition, DagPluginCatalog, GraphPatch } from '@itookit/common';
+import type { DagEdgeDefinition, DagNodeDefinition, DagPluginCatalog, GraphPatch } from '../contracts';
 import { findCycles } from './graph';
 import { dataEdgeSchemaIssue } from './port-contract';
 

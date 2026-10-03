@@ -1,6 +1,6 @@
 import { resolveExecutionNode, scopedParameters } from '../src/flow/structured/references';
 import { describe, expect, it } from 'vitest';
-import type { FlowConnection, FlowId, FlowNodeDefinition, FlowNodeId, FlowRevision } from '@itookit/common';
+import type { FlowConnection, FlowId, FlowNodeDefinition, FlowNodeId, FlowRevision } from '../src/contracts';
 import { resolveConnectionId } from '../src/flow/connections';
 import { flowToDag } from '../src/flow/to-dag';
 import { validateFlowRevision } from '../src/flow/validation';

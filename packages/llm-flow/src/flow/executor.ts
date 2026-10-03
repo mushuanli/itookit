@@ -15,15 +15,8 @@ import { acquireSchedulerLease, isSchedulerOwnershipLost, type SchedulerLease } 
 import { graphRetryKey, type FlowGraphRetryIntent } from './graph-retry';
 import { beginWorkspaceFinalization, workspaceFinalizationKey, type WorkspaceFinalization } from './workspace-finalization';
 import { createRunCatalog } from './run-catalog';
-import type {
-    DagEdgeDefinition,
-    DagNodeDefinition,
-    DagPluginCatalog,
-    DagRunSpec,
-    GraphEffect,
-    JsonValue as CommonJsonValue,
-    ToolDefinition,
-} from '@itookit/common';
+import type { DagEdgeDefinition, DagNodeDefinition, DagPluginCatalog, DagRunSpec, GraphEffect, JsonValue as CommonJsonValue } from '../contracts';
+import type { ToolDefinition } from '@itookit/llm-context';
 import {
     type Kernel,
     type JsonValue,
@@ -31,7 +24,7 @@ import {
     type TaskHandle,
     type TaskSpec,
 } from '@itookit/durable-kernel';
-import type { FlowWorkspacePolicy, HarnessHookEvent, HarnessHookRunner } from '@itookit/common';
+import type { FlowWorkspacePolicy, HarnessHookEvent, HarnessHookRunner } from '../contracts';
 import type { SkillContext } from '@itookit/llm-tasks';
 
 export interface FlowWorkspaceLease {
@@ -86,7 +79,7 @@ export interface FlowExecutionHandle {
     childTasks?: Map<string, TaskHandle>;
     /** 每个节点实际执行的实例数（Loop 节点会大于 1）。 */
     iterations: Map<string, number>;
-    goal?: import('@itookit/common').FlowRunGoal;
+    goal?: import('../contracts').FlowRunGoal;
     detachedNodes: Set<string>;
     taskIds: Set<string>;
     /** Host workspace finalization; rejection is observable without an unhandled background promise. */
@@ -515,7 +508,7 @@ export class DurableFlowExecutor {
                 if (published) await saveCheckpoint();
             };
 
-            const applyPatch = async (patch: import('@itookit/common').GraphPatch, parentId: string): Promise<void> => {
+            const applyPatch = async (patch: import('../contracts').GraphPatch, parentId: string): Promise<void> => {
                 const fingerprint = graphPatchFingerprint(patch);
                 const previous = appliedPatches.get(patch.idempotencyKey);
                 if (previous !== undefined) {
@@ -1044,7 +1037,7 @@ export class DurableFlowExecutor {
         instances: Map<string, TaskHandle[]>,
         nodes: DagNodeDefinition[],
         detachedNodes: Set<string> = new Set(),
-        goal?: import('@itookit/common').FlowRunGoal,
+        goal?: import('../contracts').FlowRunGoal,
         usage: FlowExecutionHandle['usage'] = { tokens: 0, startedAt: Date.now(), elapsedMs: 0 },
         delegationGroups: Map<string, DelegationGroup> = new Map(),
         completionOrder: string[] = [],
@@ -1077,8 +1070,8 @@ export class DurableFlowExecutor {
     private async taskSpec(
         sessionId: string,
         node: DagNodeDefinition,
-        task: import('@itookit/common').DagTaskDefinition,
-        dependencies: import('@itookit/common').DagTaskDependencyBinding[],
+        task: import('../contracts').DagTaskDefinition,
+        dependencies: import('../contracts').DagTaskDependencyBinding[],
         parameters?: Record<string, CommonJsonValue>,
         requestId?: string,
         contextProgramVersion: '1' | '2' = '1',
@@ -1176,7 +1169,7 @@ export class DurableFlowExecutor {
         detachedNodes: Set<string>,
         delegationGroups: Map<string, DelegationGroup>,
         completionOrder: string[],
-        run: { goal?: import('@itookit/common').FlowRunGoal; usage: FlowExecutionHandle['usage'] },
+        run: { goal?: import('../contracts').FlowRunGoal; usage: FlowExecutionHandle['usage'] },
         existing?: TaskHandle<JsonValue>,
         awaitingSchedule = false,
         toleratedFailures: Set<string> = new Set(),

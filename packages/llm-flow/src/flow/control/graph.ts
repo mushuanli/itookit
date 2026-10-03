@@ -1,4 +1,4 @@
-import type { DagNodeDefinition, DagEdgeDefinition } from '@itookit/llm-common';
+import type { DagNodeDefinition, DagEdgeDefinition } from '../../contracts';
 import { object } from '../structured/value';
 
 type Graph = { nodes: DagNodeDefinition[]; edges: Array<Omit<DagEdgeDefinition, 'input' | 'output'> & { input?: string; output?: string }> };

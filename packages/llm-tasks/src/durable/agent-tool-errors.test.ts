@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import type { ToolInvokeResult } from '@itookit/common';
+import type { ToolInvokeResult } from '@itookit/tools/contracts';
 import { DurableAgentProgram } from './agent-program';
 
 function pending(maxExchanges = 4) {

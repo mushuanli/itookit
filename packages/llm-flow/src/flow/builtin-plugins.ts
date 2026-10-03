@@ -1,10 +1,5 @@
-import type {
-    DagNodeContext,
-    DagPlugin,
-    DagPluginManifest,
-    JsonValue,
-} from '@itookit/common';
-import { DELEGATION_DEFAULTS } from '@itookit/common';
+import type { DagNodeContext, DagPlugin, DagPluginManifest, JsonValue } from '../contracts';
+import { DELEGATION_DEFAULTS } from '../contracts';
 import { buildLlmTaskInput, type LlmTaskInputOptions } from '@itookit/llm-tasks';
 import { delegationSchema } from './delegation-schema';
 import { DagPluginRegistry } from './plugin-registry';

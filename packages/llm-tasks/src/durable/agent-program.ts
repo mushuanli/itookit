@@ -1,4 +1,6 @@
-import { DEFAULT_AGENT_MAX_EXCHANGES, type ChatMessage, type ToolCall, type ToolInvokeResult } from '@itookit/common';
+import { DEFAULT_AGENT_MAX_EXCHANGES } from '../contracts';
+import { type ChatMessage, type ToolCall } from '@itookit/llm-context';
+import { type ToolInvokeResult } from '@itookit/tools/contracts';
 import {
     interactionApproved,
     type Decision,

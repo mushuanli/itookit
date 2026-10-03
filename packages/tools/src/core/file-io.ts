@@ -1,4 +1,4 @@
-import type { ToolVFSContext } from '@itookit/common';
+import type { ToolVFSContext } from '../contracts';
 import { ToolInputError } from './tool-error';
 
 function errorCode(error: unknown): unknown {

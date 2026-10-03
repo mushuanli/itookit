@@ -1,4 +1,4 @@
-import type { ToolProgress } from '@itookit/common';
+import type { ToolProgress } from '../contracts';
 
 /** Coalesce fast producers into one pending replacement snapshot and one in-flight write. */
 export function createToolProgressReporter(emit?: (progress: ToolProgress) => Promise<void>, intervalMs = 250) {

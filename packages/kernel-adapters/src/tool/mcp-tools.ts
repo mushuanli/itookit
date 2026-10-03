@@ -1,4 +1,5 @@
-import type { IToolService, ToolDefinition, ToolExecutionContext, MCPDiscovery } from '@itookit/common';
+import type { MCPDiscovery } from '@itookit/tools/mcp-contracts';
+import type { IToolService, ToolDefinition, ToolExecutionContext } from '@itookit/tools/contracts';
 import type { DeviceContext, IDeviceDriver } from '@itookit/vfs-core';
 import { createToolProgressReporter } from '@itookit/tools';
 import { LLM_IOCTL } from '../llm-management/index';

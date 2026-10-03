@@ -15,7 +15,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 | Package | Role |
 |---|---|
 | `@itookit/common` | 共享接口、类型、i18n、工具。跨包契约之源，依赖 `@itookit/llm-common`（兼容契约）及 `@itookit/llm-context`（hash 与 Context 契约）。 |
-| `@itookit/llm-common` | LLM 领域共享接口/类型；通信类型与纯协议函数兼容转发 driver-llm/contracts，Context 类型来自 llm-context。 |
+| `@itookit/llm-common` | LLM 领域共享接口/类型；通信类型与纯协议函数兼容转发 driver-llm/contracts，Context 类型来自 llm-context，Tool/TTY 契约兼容转发 tools/contracts。执行事件和节点配置转发 llm-tasks/contracts，Flow/DAG 转发 llm-flow/contracts；剩余 Agent 管理、连接/定价策略和 Conversation/Session 契约尚待迁移。 |
 | `@itookit/llm-context` | 零运行时依赖的上下文领域：Profile、装配、窗口预算、Notes、原始历史、不可变请求与内容存储端口。详见 [Context API](context-api.md)。 |
 | `@itookit/durable-kernel` | 持久化执行内核：`DurableTaskProgram`（init/reduce 状态机）、`EffectAdapter`、Task/Resource/Budget/Interaction 调度与恢复。 |
 | `@itookit/llm-tasks` | 平台无关的 LLM Durable Program 层：`llm.agent`/`llm.chat`/`llm.plan` 状态机、依赖收集（`collectDependency`/`dependenciesReady`/`dependencyWait`）、`extractNodeOutput`、`buildLlmTaskInput`、ContextTaskProgram v2 bridge。 |
@@ -23,9 +23,9 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 | `@itookit/llm-session` | 用户可见的会话语义 + 持久化：SessionManager、Round/Branch、SessionRepository（会话资产）、FlowEngine（Flow 定义存储）、RoundLog、SessionEventBus、UI projections。依赖 llm-flow。 |
 | `@itookit/kernel-adapters` | Kernel 能力适配器：Effect、Exec/ApprovedEffect 程序与运行时装配；`/llm` 子入口提供 VFS 模型设备、配置、费用、Skill 和 MCP 管理。 |
 | `@itookit/driver-llm` | 独立模型通信：OpenAI/Responses/Anthropic/Gemini/Codex、SSE、取消与注入式网络/日志/重试；发布产物零运行时依赖。 |
-| `@itookit/device-tty` | TTY 设备驱动：node-pty 交互 shell 会话。 |
+| `@itookit/device-tty` | TTY 设备驱动：node-pty 交互 shell 会话；只从 tools/contracts 取中立接口，使用 Node crypto 生成会话 ID。 |
 | `@itookit/sanbox` | Seatbelt / Bubblewrap 策略与启动计划；根入口平台无关，`/node` 负责真实路径与启动探测，`native/` Rust crate 已接入 Tauri Session/Flow Bash，见 [系统沙箱](design/system-sandbox.md)。 |
-| `@itookit/tools` | 内置工具实现（`buildTool()` 工厂）：File/Search/Shell/Task/Agent/Bash/Skill 等。 |
+| `@itookit/tools` | 内置工具实现（`buildTool()` 工厂）：File/Search/Shell/Task/Agent/Bash/Skill 等；拥有 Tool/TTY 公共执行契约，Skill/子代理契约和 MCP 纯协议入口也归本包；外部 Skill/Agent 经最小端口注入。 |
 | `@itookit/vfs-core` | VFS 引擎核心：协议层 + 引擎实现 + 事件总线 + 通用 IO（IIOStream/pipe）。 |
 | `@itookit/vfsdriver-indexeddb` | IndexedDB 存储后端（浏览器）。 |
 | `@itookit/vfsdriver-http` | HTTP 外挂文件驱动（Web/Tauri/CLI），可取消批量读取与条件写入；服务端为 `tools/fs-server`。 |

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import type { DagRunSpec, DagNodeDefinition, JsonValue } from '@itookit/llm-common';
+import type { DagRunSpec, DagNodeDefinition, JsonValue } from '../src/contracts';
 import { Kernel } from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend, type IVFSManager, type IFileSystem } from '@itookit/vfs-core';
 import { createBuiltinDagPluginRegistry, DurableFlowExecutor, registerDurablePrograms, flowToDag, validateFlowRevision } from '../src/flow';

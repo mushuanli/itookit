@@ -1,4 +1,4 @@
-import type { FlowRevision, FlowDependencyLock } from '@itookit/common';
+import type { FlowRevision, FlowDependencyLock } from '../contracts';
 
 /** Resolve transitive dependencies at publication, never again against latest on rerun. */
 export async function lockFlowDependencies(flow: Pick<FlowRevision, 'id' | 'nodes' | 'dependencyLocks'>,

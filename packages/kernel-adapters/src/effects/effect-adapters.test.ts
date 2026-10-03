@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { IToolService, ToolInvokeResult } from '@itookit/common';
+import type { IToolService, ToolInvokeResult } from '@itookit/tools/contracts';
 import type { EffectExecutionContext } from '@itookit/durable-kernel';
 import { ToolCallEffectAdapter } from './tool-call-effect';
 import { TtyEffectAdapter } from './tty-effect';

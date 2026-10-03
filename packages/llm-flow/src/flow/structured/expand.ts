@@ -1,4 +1,4 @@
-import type { FlowDraft, FlowNodeDefinition, FlowEdgeDefinition, DispatchBranch } from '@itookit/common';
+import type { FlowDraft, FlowNodeDefinition, FlowEdgeDefinition, DispatchBranch } from '../../contracts';
 import { object } from './value';
 
 /** Editable expansion of legacy scopes; persistence changes only on an explicit save. */

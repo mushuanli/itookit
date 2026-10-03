@@ -3,7 +3,7 @@ import { DagCommandService } from '../src/flow/commands';
 import { FlowCommand } from '../src/flow/command-names';
 import { createBuiltinDagPluginRegistry } from '../src/flow/builtin-plugins';
 import { describe, expect, it } from 'vitest';
-import type { FlowDraft, FlowRevision } from '@itookit/common';
+import type { FlowDraft, FlowRevision } from '../src/contracts';
 import type { FlowStore } from '../src/flow-definition-store';
 import { FlowDefinitionStore } from '../src/flow-definition-store';
 import { flowRevisionDigest } from '../src/flow/validation';

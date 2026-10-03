@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { compileDispatchGraph, expandDispatchDraft, flowToDag, validateFlowRevision, createBuiltinDagPluginRegistry } from '../src/flow';
-import type { FlowDraft } from '@itookit/common';
+import type { FlowDraft } from '../src/contracts';
 
 function example(): FlowDraft {
     return JSON.parse(readFileSync(new URL('./fixtures/essay-review-legacy.flow', import.meta.url), 'utf8'));

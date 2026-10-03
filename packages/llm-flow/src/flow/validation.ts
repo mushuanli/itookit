@@ -1,13 +1,7 @@
 import { createRunCatalog } from './run-catalog';
-import type {
-    DagPluginCatalog,
-    FlowRevision,
-    FlowConnection,
-    JsonValue,
-    FlowEdgeDefinition,
-    FlowNodeDefinition,
-} from '@itookit/common';
-import { DELEGATION_LIMITS, simpleHash } from '@itookit/common';
+import type { DagPluginCatalog, FlowRevision, FlowConnection, JsonValue, FlowEdgeDefinition, FlowNodeDefinition } from '../contracts';
+import { DELEGATION_LIMITS } from '../contracts';
+import { simpleHash } from '@itookit/llm-context';
 import { findCycles } from './graph';
 import { validateDispatch } from './structured/validation';
 import { compileReferenceGraph } from './structured/references';
@@ -127,9 +121,9 @@ function validateNodes(
         validateSpawnPatch(node, issues);
         validateHarnessLimits(node, issues);
         try {
-            if (node.plugin === 'builtin.join') validateWaitPolicy({ mode: 'all', ...node.config as object } as import('@itookit/llm-common').FlowWaitPolicy);
-            if (node.plugin === 'builtin.route' && node.pluginVersion === '2.0.0') validateDispatch(node.config as unknown as import('@itookit/common').DispatchConfig, true);
-            if (node.plugin === 'builtin.input') validateFields((node.config as unknown as import('@itookit/common').FlowInputConfig).fields);
+            if (node.plugin === 'builtin.join') validateWaitPolicy({ mode: 'all', ...node.config as object } as import('../contracts').FlowWaitPolicy);
+            if (node.plugin === 'builtin.route' && node.pluginVersion === '2.0.0') validateDispatch(node.config as unknown as import('../contracts').DispatchConfig, true);
+            if (node.plugin === 'builtin.input') validateFields((node.config as unknown as import('../contracts').FlowInputConfig).fields);
         } catch (error) { add(issues, 'invalid-structured-config', String(error), node.id); }
     }
     return nodes;

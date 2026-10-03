@@ -6,3 +6,5 @@ export type { NodeTTYSession } from './node-tty-driver';
 export { NodePtyDriver } from './node-pty-driver';
 export type { NodePtySession } from './node-pty-driver';
 export { TTYSessionManager, collectOutput } from './session-manager';
+
+export type { ITTYSpawnOptions, ITTYSessionEvents, ITTYSession, ITTYDriver, ITTYSessionManager, TTYOutputResult } from '@itookit/tools/contracts';

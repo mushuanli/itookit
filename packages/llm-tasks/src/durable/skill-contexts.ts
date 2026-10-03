@@ -1,4 +1,5 @@
-import type { SkillDefinition, ToolDefinition } from '@itookit/common';
+import type { SkillDefinition } from '@itookit/tools/contracts';
+import type { ToolDefinition } from '@itookit/llm-context';
 import type { DurableAgentInput } from './types';
 
 /** One activated Skill snapshot, exactly the shape a runtime `load_skill` result carries. */

@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
-import type { SkillDefinition, ToolExecutionContext } from '@itookit/common';
+import type { SkillDefinition } from '@itookit/tools/contracts';
+import type { ToolExecutionContext } from '@itookit/tools/contracts';
 import type { INativeShell } from '@itookit/tools';
 import { createSkillToolHandlers } from './tool-handlers';
 import { MCPToolAdapter, mcpToolId } from '../tool/mcp-tools';

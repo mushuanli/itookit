@@ -1,6 +1,6 @@
 import { nodePortSchemas, assertNodePortSchemas } from './node-port-schemas';
 import { assertFlowSchema } from './schema-registry';
-import type { DagNodeDefinition, DagPluginCatalog, DagPluginManifest, JsonSchemaRef, JsonValue } from '@itookit/common';
+import type { DagNodeDefinition, DagPluginCatalog, DagPluginManifest, JsonSchemaRef, JsonValue } from '../contracts';
 
 export interface RunCatalogSnapshot {
     manifests: [string, DagPluginManifest | null][];

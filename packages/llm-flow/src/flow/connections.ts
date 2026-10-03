@@ -4,7 +4,7 @@
 // pass a raw global connectionId through unchanged, or omit it (inherits the
 // workflow default slot).
 
-import type { FlowConnection, JsonValue } from '@itookit/common';
+import type { FlowConnection, JsonValue } from '../contracts';
 
 /**
  * Resolve a raw `connectionId` value to a global connection id:

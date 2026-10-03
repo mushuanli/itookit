@@ -1,7 +1,7 @@
 {
   "name": "@itookit/llm-common",
   "version": "0.4.1",
-  "description": "LLM-domain shared interfaces, types, and utilities",
+  "description": "Compatibility exports and remaining LLM management, policy, conversation and session contracts",
   "type": "module",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
@@ -15,14 +15,19 @@
   },
   "publishConfig": {
     "access": "public",
-    "main": "./dist/index.js",
-    "module": "./dist/index.mjs",
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "exports": {
       ".": {
-        "types": "./dist/index.d.ts",
-        "import": "./dist/index.mjs",
-        "require": "./dist/index.js"
+        "import": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.js"
+        },
+        "require": {
+          "types": "./dist/index.d.cts",
+          "default": "./dist/index.cjs"
+        }
       }
     }
   },
@@ -54,6 +59,9 @@
   },
   "dependencies": {
     "@itookit/llm-context": "workspace:*",
-    "@itookit/driver-llm": "workspace:*"
+    "@itookit/driver-llm": "workspace:*",
+    "@itookit/tools": "workspace:*",
+    "@itookit/llm-tasks": "workspace:*",
+    "@itookit/llm-flow": "workspace:*"
   }
 }

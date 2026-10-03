@@ -1,4 +1,4 @@
-import type { DagRunSpec, DagNodeDefinition, DagEdgeDefinition, JsonValue } from '@itookit/common';
+import type { DagRunSpec, DagNodeDefinition, DagEdgeDefinition, JsonValue } from '../contracts';
 import type { DelegationGroup, EdgeState } from './delegation-runtime';
 
 /** Scheduler state saved at an explicit human-interaction boundary. */

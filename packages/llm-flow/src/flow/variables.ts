@@ -1,5 +1,5 @@
-import { flowTemplateReferences, renderFlowTemplate, type FlowTemplateContext } from '@itookit/llm-common';
-import type { DagNodeDefinition, DagRunSpec, FlowVariables, JsonValue } from '@itookit/common';
+import { flowTemplateReferences, renderFlowTemplate, type FlowTemplateContext } from '../contracts';
+import type { DagNodeDefinition, DagRunSpec, FlowVariables, JsonValue } from '../contracts';
 import { extractNodeOutput } from '@itookit/llm-tasks';
 
 export interface VariableCommit { taskId: string; nodeId: string; scope: string; updates: Record<string, JsonValue> }
@@ -103,7 +103,7 @@ function nodeAccess(node: DagNodeDefinition, definitions: FlowVariables) {
     const refs = flowTemplateReferences([node.config, node.inputs, node.assign]);
     const read = new Set(refs.filter(ref => ref.root === 'vars').map(ref => ref.path[0]));
     const write = new Set(Object.keys(node.assign ?? {}));
-    const config = node.config as import('@itookit/common').DispatchConfig;
+    const config = node.config as import('../contracts').DispatchConfig;
     if (node.plugin === 'builtin.route' && node.pluginVersion === '2.0.0') {
         const batchWrites = new Set<string>();
         for (const branch of config.branches) for (const key of Object.keys(branch.assign ?? {})) {

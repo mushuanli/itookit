@@ -1,7 +1,4 @@
-import {
-    DELEGATION_DEFAULTS,
-    type JsonValue,
-} from '@itookit/common';
+import { DELEGATION_DEFAULTS, type JsonValue } from '../contracts';
 
 /** Editor schema kept separate from the runtime plugin manifest. */
 export function delegationSchema(): JsonValue {

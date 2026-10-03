@@ -1,4 +1,4 @@
-import type { DispatchConfig, SerializableExpression } from '@itookit/common';
+import type { DispatchConfig, SerializableExpression } from '../../contracts';
 import { assertFlowSchema } from '../schema-registry';
 import { assertKey } from './value';
 import { validateFields } from './input';
@@ -71,7 +71,7 @@ function validateContext(context: DispatchConfig['context'], requireNone?: boole
     }
 }
 
-function validateContract(contract: import('@itookit/llm-common').FlowOutputContract | undefined): void {
+function validateContract(contract: import('../../contracts').FlowOutputContract | undefined): void {
     if (!contract) return;
     if (contract.onInvalid && !['fail', 'repair'].includes(contract.onInvalid)) throw new Error('Invalid output failure policy');
     if (contract.retries !== undefined && (!Number.isInteger(contract.retries) || contract.retries < 0 || contract.retries > 3)) throw new Error('Output repair retries must be between 0 and 3');

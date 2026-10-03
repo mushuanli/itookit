@@ -1,4 +1,4 @@
-import type { DagNodeDefinition } from '@itookit/llm-common';
+import type { DagNodeDefinition } from '../../contracts';
 import type { SessionHandle, TaskHandle, TaskRecord } from '@itookit/durable-kernel';
 import { bindFlowTaskCapabilities } from '../task-capabilities';
 import { object } from '../structured/value';

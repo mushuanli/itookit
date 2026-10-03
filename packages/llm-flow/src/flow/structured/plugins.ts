@@ -1,4 +1,4 @@
-import type { DagPlugin, DagPluginManifest, DispatchConfig } from '@itookit/common';
+import type { DagPlugin, DagPluginManifest, DispatchConfig } from '../../contracts';
 import { validateDispatch } from './validation';
 
 export function structuredPlugins(): DagPlugin[] {

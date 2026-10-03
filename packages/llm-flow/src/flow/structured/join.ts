@@ -1,4 +1,4 @@
-import type { FlowJoinConfig, JsonValue } from '@itookit/llm-common';
+import type { FlowJoinConfig, JsonValue } from '../../contracts';
 import { resolve } from '../operations';
 import type { ResultSlot } from './types';
 

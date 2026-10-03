@@ -3,7 +3,7 @@
 // 消除 llm-conversation（directTaskSpec）与 builtin-plugins（agentTask）两处重复的
 // compact({ sessionId/roundId/messages/model/... }) 模板。
 
-import type { ChatMessage, ToolDefinition } from '@itookit/common';
+import type { ChatMessage, ToolDefinition } from '@itookit/llm-context';
 import type {
     DurableAgentInput,
     DurableDependencyBinding,

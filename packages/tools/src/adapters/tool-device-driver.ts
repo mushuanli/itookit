@@ -12,7 +12,7 @@ import type {
   ToolBatchResult,
   ToolVFSContext,
   ToolHandler,
-} from '@itookit/common';
+} from '../contracts';
 import type {
   DeviceContext,
   IDeviceDriver,

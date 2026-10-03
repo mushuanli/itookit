@@ -7,14 +7,9 @@ import { restoreLoadedSkills } from '../skill/restore-loaded-skills';
 import { createUnloadSkillHandler, unloadSkillDefinition, unloadSkillMeta } from '../tool/unload-skill';
 import { SkillUnloadEffectAdapter } from '../effects/skill-unload-effect';
 import { rememberLoadedSkill, withSkillDriftPersistence, requireLoadedSkillVersions } from '../skill/loaded-state';
-import type {
-    ILLMService,
-    ISkillService,
-    IToolService,
-    ITTYDriver,
-    SkillDefinition,
-    ToolVFSContext,
-} from '@itookit/common';
+import type { ISkillService, SkillDefinition } from '@itookit/tools/contracts';
+import type { IToolService, ITTYDriver, ToolVFSContext } from '@itookit/tools/contracts';
+import type { ILLMService } from '@itookit/driver-llm/contracts';
 import type { IDeviceDriver } from '@itookit/vfs-core';
 import { BUILTIN_TOOLS, ToolDeviceDriver } from '@itookit/tools';
 import type { INativeShell, Tool } from '@itookit/tools';

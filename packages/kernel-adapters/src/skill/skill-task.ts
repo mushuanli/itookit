@@ -1,4 +1,4 @@
-import type { SkillDefinition } from '@itookit/common';
+import type { SkillDefinition } from '@itookit/tools/contracts';
 import type { JsonValue, RetryPolicy, TaskSpec } from '@itookit/durable-kernel';
 
 export interface SkillTaskInput<T extends JsonValue = JsonValue> {

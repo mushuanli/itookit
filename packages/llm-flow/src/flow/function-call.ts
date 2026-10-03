@@ -1,4 +1,4 @@
-import type { DagNodeDefinition, DagRunSpec, FlowRevision } from '@itookit/common';
+import type { DagNodeDefinition, DagRunSpec, FlowRevision } from '../contracts';
 import { RETURN_NODE } from './function-outputs';
 
 /** A durable value task evaluates parent bindings exactly once before the child starts. */

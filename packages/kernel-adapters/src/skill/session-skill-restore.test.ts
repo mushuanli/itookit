@@ -5,7 +5,7 @@ import { parseLoadedSkillIds } from './loaded-state';
 // message no longer matches. An explicit unload is not resurrected by that restore.
 import { expect, it } from 'vitest';
 import type { IDeviceDriver } from '@itookit/vfs-core';
-import type { SkillDefinition } from '@itookit/common';
+import type { SkillDefinition } from '@itookit/tools/contracts';
 import { Kernel } from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { createKernelAdaptersRuntime } from '../runtime/create-kernel-adapters-runtime';

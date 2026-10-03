@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SkillDefinition } from '@itookit/common';
+import type { SkillDefinition } from '@itookit/tools/contracts';
 import { Kernel, type DurableTaskProgram } from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { createSkillTaskSpec } from './skill-task';

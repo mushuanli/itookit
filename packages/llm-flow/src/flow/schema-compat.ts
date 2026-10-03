@@ -9,7 +9,7 @@
 // an incompatible graph fails at publish/patch time instead of mid-run.
 
 import { assertFlowSchema } from './schema-registry';
-import type { JsonValue } from '@itookit/common';
+import type { JsonValue } from '../contracts';
 
 type Schema = Record<string, JsonValue>;
 type TypeName = 'object' | 'array' | 'string' | 'number' | 'integer' | 'boolean' | 'null';

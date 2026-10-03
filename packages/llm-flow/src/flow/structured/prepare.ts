@@ -1,4 +1,4 @@
-import type { DagNodeDefinition, DagPluginCatalog, DispatchBranch, DispatchConfig, FlowInvocationDefaults, JsonValue } from '@itookit/common';
+import type { DagNodeDefinition, DagPluginCatalog, DispatchBranch, DispatchConfig, FlowInvocationDefaults, JsonValue } from '../../contracts';
 import type { TaskSpec } from '@itookit/durable-kernel';
 import { validateSchema } from '../validation';
 import type { DispatchInput, PreparedBranch } from './types';

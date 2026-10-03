@@ -3,7 +3,7 @@ import { Kernel } from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { createBuiltinDagPluginRegistry, DurableFlowExecutor, registerDurablePrograms, flowToDag } from '../src/flow';
 import { lockFlowDependencies } from '../src/flow/dependency-locks';
-import type { FlowRevision, FlowNodeDefinition } from '@itookit/common';
+import type { FlowRevision, FlowNodeDefinition } from '../src/contracts';
 
 const value = (id: string, content: unknown): FlowNodeDefinition => ({ id: id as never, name: id, plugin: 'builtin.transform', pluginVersion: '1.0.0', inputs: {}, config: { value: content } as never });
 const definition = (id: string, nodes: FlowNodeDefinition[]): FlowRevision => ({ id: id as never, name: id, revision: 1, digest: id, createdAt: 0, nodes, edges: [] });

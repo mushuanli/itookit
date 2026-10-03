@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { FlowId, FlowNodeDefinition, FlowNodeId, FlowRevision } from '@itookit/common';
+import type { FlowId, FlowNodeDefinition, FlowNodeId, FlowRevision } from '../src/contracts';
 import { createBuiltinDagPluginRegistry } from '../src/flow/builtin-plugins';
 import { validateFlowRevision } from '../src/flow/validation';
 

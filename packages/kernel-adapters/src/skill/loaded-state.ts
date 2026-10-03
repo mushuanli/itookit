@@ -1,4 +1,4 @@
-import type { ISkillService, SkillVersionSnapshot, SkillVersionDrift } from '@itookit/common';
+import type { ISkillService, SkillVersionSnapshot, SkillVersionDrift } from '@itookit/tools/contracts';
 import type { EffectExecutionContext } from '@itookit/durable-kernel';
 import { KernelError, KernelErrorCode } from '@itookit/durable-kernel';
 import { validateSkillVersionSnapshot } from './version-snapshot';

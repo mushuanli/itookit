@@ -1,4 +1,5 @@
-import type { SkillDefinition, SkillToolBinding, ToolExecutionContext } from '@itookit/common';
+import type { SkillDefinition, SkillToolBinding } from '@itookit/tools/contracts';
+import type { ToolExecutionContext } from '@itookit/tools/contracts';
 import type { INativeShell } from '@itookit/tools';
 import type { SkillToolHandlerFactory } from '../ports/capabilities';
 import type { MCPToolAdapter } from '../tool/mcp-tools';

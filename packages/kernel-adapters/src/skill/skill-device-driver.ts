@@ -1,19 +1,8 @@
 // @file: kernel-adapters/src/skill/skill-device-driver.ts
 // Skill 设备驱动：包装 ISkillService，实现 IDeviceDriver。
 
-import type {
-    ISkillService,
-    IToolService,
-    SkillDefinition,
-    SkillToolBinding,
-    SkillLoadResult,
-    SkillRouteLayer,
-    SkillMatchContext,
-    SkillScopeLevel,
-    ParsedCompactInstructions,
-    SkillVersionSnapshot,
-    SkillVersionDrift,
-} from '@itookit/common';
+import type { ISkillService, SkillDefinition, SkillToolBinding, SkillLoadResult, SkillRouteLayer, SkillMatchContext, SkillScopeLevel, ParsedCompactInstructions, SkillVersionSnapshot, SkillVersionDrift } from '@itookit/tools/contracts';
+import type { IToolService } from '@itookit/tools/contracts';
 import type {
     IDeviceDriver,
     DeviceContext,
@@ -481,7 +470,7 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
     }
 }
 
-function toolMeta(skill: SkillDefinition, binding: SkillToolBinding): import('@itookit/common').ToolMeta {
+function toolMeta(skill: SkillDefinition, binding: SkillToolBinding): import('@itookit/tools/contracts').ToolMeta {
     return {
         id: binding.toolId,
         name: binding.definition.function?.name ?? binding.definition.name ?? binding.toolId,

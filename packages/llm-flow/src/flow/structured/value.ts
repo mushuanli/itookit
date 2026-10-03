@@ -1,4 +1,4 @@
-import type { JsonValue } from '@itookit/common';
+import type { JsonValue } from '../../contracts';
 
 export function object(value: unknown): Record<string, unknown> {
     return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};

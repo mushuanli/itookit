@@ -1,12 +1,12 @@
 import { validateVariableGraph, nodeUsesVariables } from '../variables';
 import { prepareFlowParameters } from '../parameters';
-import { flowTemplateReferences, renderFlowTemplate, renderFlowText, type FlowTemplateContext } from '@itookit/llm-common';
-import type { DagNodeDefinition, DagEdgeDefinition, DagRunSpec, JsonValue } from '@itookit/common';
+import { flowTemplateReferences, renderFlowTemplate, renderFlowText, type FlowTemplateContext } from '../../contracts';
+import type { DagNodeDefinition, DagEdgeDefinition, DagRunSpec, JsonValue } from '../../contracts';
 import { extractNodeOutput } from '@itookit/llm-tasks';
 import { findCycles } from '../graph';
 import { object } from './value';
 
-type Graph = { variables?: import('@itookit/common').FlowVariables; nodes: DagNodeDefinition[]; edges: Array<Omit<DagEdgeDefinition, 'input' | 'output'> & { input?: string; output?: string }> };
+type Graph = { variables?: import('../../contracts').FlowVariables; nodes: DagNodeDefinition[]; edges: Array<Omit<DagEdgeDefinition, 'input' | 'output'> & { input?: string; output?: string }> };
 
 /** References create explicit scheduling dependencies without injecting extra model history. */
 export function compileReferenceGraph<T extends Graph>(source: T): T {

@@ -10,3 +10,5 @@ pnpm --filter @itookit/llm-flow test
 - 开发说明：[AGENTS.md](./AGENTS.md)
 - API：[doc/llm-flow-api.md](../../doc/llm-flow-api.md)
 - 设计：[doc/design/flow-execution-model.md](../../doc/design/flow-execution-model.md)
+
+公共契约入口 `@itookit/llm-flow/contracts` 提供Flow/DAG、委派、模板和 Hook 契约，不会初始化运行时。新代码从所属模块导入；llm-common 的旧入口保留兼容转发。本包实现已移除 common/llm-common 依赖。

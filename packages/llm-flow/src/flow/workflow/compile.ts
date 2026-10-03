@@ -2,7 +2,7 @@
 // 工作流 DSL → DagRunSpec 的图编译：depends_on/inputs 边、route/spawn/supervisor 展开、
 // 循环与 Saga 补偿引用。agent 节点编译通过 agentFactory 注入，保持与入口解耦。
 
-import type { DagEdgeDefinition, DagNodeDefinition } from '@itookit/common';
+import type { DagEdgeDefinition, DagNodeDefinition } from '../../contracts';
 import { compileRouteCondition } from './route-expression';
 import type {
     AgentNodeFactory,

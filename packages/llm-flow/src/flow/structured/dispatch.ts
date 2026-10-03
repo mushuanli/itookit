@@ -1,6 +1,6 @@
-import { flowTemplateReferences } from '@itookit/llm-common';
+import { flowTemplateReferences } from '../../contracts';
 import { assignmentUpdates } from '../variables';
-import type { JsonValue } from '@itookit/common';
+import type { JsonValue } from '../../contracts';
 import type { Decision, DurableTaskProgram, KernelAction, TaskInputEvent } from '@itookit/durable-kernel';
 import { collectDependency, dependenciesReady, dependencyWait } from '@itookit/llm-tasks';
 import { evaluate } from '../operations';

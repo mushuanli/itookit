@@ -1,4 +1,4 @@
-import type { DagPluginCatalog, FlowConnection, FlowDraft, FlowRevision } from '@itookit/common';
+import type { DagPluginCatalog, FlowConnection, FlowDraft, FlowRevision } from './contracts';
 import { flowRevisionDigest, hasValidationErrors, validateFlowRevision } from './flow/validation';
 
 /**

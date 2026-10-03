@@ -1,4 +1,4 @@
-import type { DagPlugin, DagPluginManifest, JsonValue } from '@itookit/common';
+import type { DagPlugin, DagPluginManifest, JsonValue } from '../../contracts';
 import { object } from './value';
 
 export function splitGraphPlugins(agent: DagPluginManifest): DagPlugin[] {

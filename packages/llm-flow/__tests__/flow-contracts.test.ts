@@ -1,6 +1,6 @@
 import { flowToDag } from '../src/flow/to-dag';
 import { describe, expect, it } from 'vitest';
-import { renderFlowTemplate } from '@itookit/llm-common';
+import { renderFlowTemplate } from '../src/contracts';
 import { compileReferenceGraph, invocationReferenceContext, resolveExecutionNode, scopedParameters } from '../src/flow/structured/references';
 import { compileCondition } from '../src/flow/structured/condition';
 import { FlowReducerRegistry, orderedUpdates } from '../src/flow/structured/join';
@@ -8,7 +8,7 @@ import { schemaCompatibilityIssue } from '../src/flow/schema-compat';
 import { flowSchemaIssue } from '../src/flow/schema-registry';
 import { evaluate } from '../src/flow/operations';
 import { invalidFields } from '../src/flow/structured/input';
-import type { DagRunSpec } from '@itookit/common';
+import type { DagRunSpec } from '../src/contracts';
 
 function graph(): DagRunSpec {
     return { nodes: [

@@ -1,5 +1,5 @@
 import type { JsonValue, SessionHandle, TaskRecord } from '@itookit/durable-kernel';
-import type { FlowWorkspacePolicy } from '@itookit/common';
+import type { FlowWorkspacePolicy } from '../contracts';
 import type { SchedulerCheckpoint } from './scheduler-checkpoint';
 import { readFlowRunMembers } from './run-members';
 

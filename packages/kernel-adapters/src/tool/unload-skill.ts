@@ -1,4 +1,5 @@
-import type { ISkillService, ToolDefinition, ToolHandler, ToolMeta } from '@itookit/common';
+import type { ISkillService } from '@itookit/tools/contracts';
+import type { ToolDefinition, ToolHandler, ToolMeta } from '@itookit/tools/contracts';
 
 export const unloadSkillMeta: ToolMeta = {
     id: 'unload_skill', name: 'Unload Skill',

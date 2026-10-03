@@ -1,10 +1,10 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: { index: 'src/index.ts', contracts: 'src/contracts.ts', 'mcp-contracts': 'src/mcp-contracts.ts' },
   format: ['cjs', 'esm'],
   dts: true,
   clean: true,
   sourcemap: true,
-  external: ['@itookit/common', '@itookit/vfs-core', /^node:/],
+  external: ['@itookit/llm-context', '@itookit/vfs-core', /^node:/],
 });

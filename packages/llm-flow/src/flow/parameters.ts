@@ -2,7 +2,7 @@
 // Workflow runtime parameters: template resolution (${params.name}) and
 // declared-schema validation. The "framework + variable inputs" split.
 
-import type { FlowParameter, JsonValue } from '@itookit/common';
+import type { FlowParameter, JsonValue } from '../contracts';
 import type { ValidationIssue } from './validation';
 
 export function flowParameterValues(schema: FlowParameter[] | undefined, values?: Record<string, JsonValue>): Record<string, JsonValue> {

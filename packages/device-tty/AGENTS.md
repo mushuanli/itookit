@@ -1,6 +1,6 @@
 # @itookit/device-tty 开发说明
 
-TTY 设备驱动 — Node.js 交互式 shell 会话，实现 `ITTYDriver` / `ITTYSession` / `ITTYSessionManager`（定义在 `@itookit/common`）。
+TTY 设备驱动 — Node.js 交互式 shell 会话，实现 `ITTYDriver` / `ITTYSession` / `ITTYSessionManager`（定义在 `@itookit/tools/contracts`，本包也转发这些类型）。
 
 Node-only：`node:child_process` / `node-pty` 通过模块级异步 IIFE 预加载，浏览器环境不会被打包进静态依赖，此时 `spawn()` 抛出明确错误。
 

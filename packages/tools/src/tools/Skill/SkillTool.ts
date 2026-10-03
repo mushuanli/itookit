@@ -5,7 +5,7 @@
 import { z } from 'zod/v4';
 import { buildTool, type ToolDef } from '../../core/Tool';
 import { lazySchema } from '../../core/lazySchema';
-import type { ISkillService } from '@itookit/common';
+import type { SkillLoaderPort } from '../../contracts';
 import { SKILL_TOOL_NAME, DESCRIPTION } from './prompt';
 
 const inputSchema = lazySchema(() =>
@@ -27,7 +27,7 @@ type OutputSchema = ReturnType<typeof outputSchema>;
 
 export type Output = z.infer<OutputSchema>;
 
-export function createSkillTool(skillService: ISkillService) {
+export function createSkillTool(skillService: SkillLoaderPort) {
   return buildTool({
     name: SKILL_TOOL_NAME,
     searchHint: 'load specialized agent skills',

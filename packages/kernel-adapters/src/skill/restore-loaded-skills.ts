@@ -1,4 +1,4 @@
-import type { ISkillService } from '@itookit/common';
+import type { ISkillService } from '@itookit/tools/contracts';
 import { parseLoadedSkillIds, parseLoadedSkillVersions } from './loaded-state';
 
 /** Roll back only activations introduced by this restoration attempt. */

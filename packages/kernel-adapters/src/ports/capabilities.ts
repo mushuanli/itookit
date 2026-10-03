@@ -1,11 +1,5 @@
-import type {
-    ISkillService,
-    SkillDefinition,
-    SkillLoadResult,
-    SkillScopeLevel,
-    SkillToolBinding,
-    ToolHandler,
-} from '@itookit/common';
+import type { ISkillService, SkillDefinition, SkillLoadResult, SkillScopeLevel, SkillToolBinding } from '@itookit/tools/contracts';
+import type { ToolHandler } from '@itookit/tools/contracts';
 import type { EffectExecutionContext } from '@itookit/durable-kernel';
 
 export type CapabilityResolver<T> = (
@@ -36,7 +30,7 @@ export interface SkillToolHandlerFactory {
 export interface SessionCapabilityScope {
     resolveMCPToolIds?(profiles: string[]): Promise<string[]>;
     prepareTools?(ids: string[]): Promise<void>;
-    readonly toolService: import('@itookit/common').IToolService;
+    readonly toolService: import('@itookit/tools/contracts').IToolService;
     readonly skillService: ISkillService;
     dispose(): Promise<void>;
 }

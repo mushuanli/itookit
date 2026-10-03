@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatMessage } from '@itookit/common';
+import type { ChatMessage } from '@itookit/llm-context';
 import { compactMessages } from './context-compaction';
 import { DurableAgentProgram } from './agent-program';
 import { ProviderMessageAdapter } from '../core/provider-message-adapter';

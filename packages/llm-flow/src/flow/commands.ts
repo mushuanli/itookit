@@ -1,16 +1,7 @@
 import { hasLocalScheduler, withFlowControl } from './control-session';
 import { workspaceFinalizationKey, type WorkspaceFinalization } from './workspace-finalization';
-import type {
-    DagPluginCatalog,
-    DagPluginPresentation,
-    FlowDraft,
-    FlowNodeDefinition,
-    FlowRevision,
-    ICommandBus,
-    JsonValue,
-    FlowRunGoal,
-    ToolDefinition,
-} from '@itookit/common';
+import type { DagPluginCatalog, DagPluginPresentation, FlowDraft, FlowNodeDefinition, FlowRevision, FlowCommandRegistrar, JsonValue, FlowRunGoal } from '../contracts';
+import type { ToolDefinition } from '@itookit/llm-context';
 import type { Kernel, SessionHandle, TaskRecord, TaskSnapshot } from '@itookit/durable-kernel';
 import { createFlowRevision, type FlowDefinitionStore } from '../flow-definition-store';
 import { submitRun } from '../run-submission';
@@ -63,7 +54,7 @@ export class DagCommandService {
 
     constructor(private readonly options: DagCommandServiceOptions) {}
 
-    register(bus: ICommandBus): void {
+    register(bus: FlowCommandRegistrar): void {
         registerDraftCommands(bus, this.options.flowStore, this.options.plugins);
         bus.register(FlowCommand.Presentations, async () =>
             loadPresentations(this.options.plugins));
@@ -73,7 +64,7 @@ export class DagCommandService {
         });
         bus.register(FlowCommand.RunList, async args => this.listRuns((args as { sessionId?: string } | undefined)?.sessionId));
         bus.register(FlowCommand.RunStart, async args => {
-            const input = args as { connectionId?: string; fallbackConnectionId?: string | null; sessionId: string; flow: FlowRevision; parameters?: Record<string, JsonValue>; goal?: FlowRunGoal; invocation?: import('@itookit/common').DagRunSpec['invocation'] };
+            const input = args as { connectionId?: string; fallbackConnectionId?: string | null; sessionId: string; flow: FlowRevision; parameters?: Record<string, JsonValue>; goal?: FlowRunGoal; invocation?: import('../contracts').DagRunSpec['invocation'] };
             return this.start(input.sessionId, input.flow, input.parameters, input.goal, input.invocation, input.connectionId, input.fallbackConnectionId);
         });
         bus.register(FlowCommand.RunGet, async args => {
@@ -172,7 +163,7 @@ export class DagCommandService {
         flow: FlowRevision,
         parameters?: Record<string, JsonValue>,
         goal?: FlowRunGoal,
-        invocation?: import('@itookit/common').DagRunSpec['invocation'],
+        invocation?: import('../contracts').DagRunSpec['invocation'],
         connectionId?: string,
         fallbackConnectionId?: string | null,
     ) {
@@ -302,7 +293,7 @@ async function loadPresentations(
 }
 
 function registerDraftCommands(
-    bus: ICommandBus,
+    bus: FlowCommandRegistrar,
     store: FlowDefinitionStore,
     plugins: DagPluginCatalog,
 ): void {

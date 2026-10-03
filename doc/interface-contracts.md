@@ -1,6 +1,6 @@
 # 跨包接口契约
 
-调用方只依赖接口，不依赖实现。契约层分三处：`@itookit/common`（通用）、`@itookit/llm-common`（LLM 领域）、`@itookit/vfs-core`（VFS 协议层）。
+调用方只依赖接口，不依赖实现。契约按能力归属：driver-llm/contracts（模型通信与服务端口）、llm-context（消息与上下文）、tools/contracts（Tool/TTY 执行）、vfs-core（文件系统）；common/llm-common 保留未迁移业务契约和兼容入口。
 
 ## VFS 体系（@itookit/vfs-core）
 
@@ -21,7 +21,7 @@
 
 | 接口/类型 | 核心字段/方法 | 定义 | 实现 | 消费 |
 |---|---|---|---|---|
-| `ILLMService` | `chat()`、`chatStream()`、`abort()`、`getConnection()` | `llm-common/llm/llm-service.ts` | `kernel-adapters LLMServiceAdapter` | `llm-tasks`（经 effect）、`llm-session` |
+| `ILLMService` | `chat()`、`chatStream()`、`abort()`、`getConnection()` | `driver-llm/src/types/service.ts` | `kernel-adapters LLMServiceAdapter` | `llm-tasks`（经 effect）、`llm-session` |
 | `ChatMessage` | `role/content/attachments?` | `llm-common/llm/` | driver-llm | 全部 LLM 层 |
 | `ChatCompletionParams/ChatCompletionResponse/ChatCompletionChunk` | `messages/model/tools/stream/webSearch`… | `llm-common/llm/completion.ts` | driver-llm providers | `llm-tasks`、`kernel-adapters` |
 | `Citation` | `text/source/title/url`（联网搜索引用） | `llm-common/llm/completion.ts` | driver-llm providers | `kernel-adapters`、`llm-ui` |
@@ -33,9 +33,9 @@
 | `LLMProvider.supportedProtocols/defaultProtocol/modelsPath`、`LLMModel.preferredProtocol` | Provider 协议集合与默认、模型目录覆盖、模型首选；连接显式协议优先 | `llm-common/llm/connection.ts`、`provider-protocols.ts` | `driver-llm` registry / Driver / `.llm` 转换 | Provider / Connection 设置页 |
 | `LLMProvider.capabilities.serverSideWebSearch` | 服务端内置联网搜索能力（唯一事实源） | `llm-common/llm/connection.ts` | `kernel-adapters/src/llm-management/constants/providers.ts` | `resolveWebSearchStrategy` |
 | `ToolCall` / `ToolDefinition` | `id/name/arguments` | `llm-common/llm/` | driver-llm / `tools` | `llm-tasks` |
-| `ToolInvokeResult` | `success/output/durationMs`；可选 `data/errorCode/recoverable/truncated` | `llm-common/tools/tool-types.ts` | `tools`、`kernel-adapters` | `llm-tasks`：显式 recoverable 失败反馈模型，其余失败终止任务 |
-| `DagNodeDefinition/DagEdgeDefinition/DagRunSpec/DagNodeOutcome` | `id/plugin/config/outputs/effects` | `llm-common/agent/dag-plugin.ts` | `llm-flow` | `llm-session`、`cli` |
-| `FlowDraft/FlowRevision/FlowNodeDefinition` | `nodes/edges/layout` | `llm-common/agent/flow-definition.ts` | `llm-flow FlowDefinitionStore` | `llm-ui`、`llm-session` |
+| `ToolInvokeResult` | `success/output/durationMs`；可选 `data/errorCode/recoverable/truncated` | `tools/src/contracts/tool-types.ts` | `tools`、`kernel-adapters` | `llm-tasks`：显式 recoverable 失败反馈模型，其余失败终止任务 |
+| `DagNodeDefinition/DagEdgeDefinition/DagRunSpec/DagNodeOutcome` | `id/plugin/config/outputs/effects` | `llm-flow/src/contracts/dag-plugin.ts` | `llm-flow` | `llm-session`、`cli` |
+| `FlowDraft/FlowRevision/FlowNodeDefinition` | `nodes/edges/layout` | `llm-flow/src/contracts/flow-definition.ts` | `llm-flow FlowDefinitionStore` | `llm-ui`、`llm-session` |
 | `SerializableExpression` | `kind: eq/neq/in/and/or/not/…` | `llm-common/agent/` | `llm-flow operations` | `cli` 编译路由条件 |
 
 ## Kernel 执行内核（@itookit/durable-kernel）

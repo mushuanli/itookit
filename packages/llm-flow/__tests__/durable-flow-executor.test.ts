@@ -10,7 +10,8 @@ import { flowToDag } from '../src/flow/to-dag';
 import { DagCommandService } from '../src/flow/commands';
 import { FlowCommand } from '../src/flow/command-names';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChatCompletionResponse, DagRunSpec } from '@itookit/common';
+import type { DagRunSpec } from '../src/contracts';
+import type { ChatCompletionResponse } from '@itookit/driver-llm/contracts';
 import {
     Kernel,
     type EffectAdapter,

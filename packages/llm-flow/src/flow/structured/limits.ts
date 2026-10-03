@@ -1,4 +1,4 @@
-import type { DagNodeDefinition, DagRunSpec, JsonValue } from '@itookit/common';
+import type { DagNodeDefinition, DagRunSpec, JsonValue } from '../../contracts';
 import { findCycles } from '../graph';
 import { resolveFlowParameters } from '../parameters';
 import { object } from './value';
@@ -29,7 +29,7 @@ export function validateDispatchCapacity(spec: DagRunSpec, parameters?: Record<s
         if (node.plugin !== 'builtin.route' || node.pluginVersion !== '2.0.0') continue;
         const values = scopedParameters(spec, node.id, parameters ?? {});
         const config = object(resolveFlowParameters(node.config, values));
-        validateDispatch(config as unknown as import('@itookit/common').DispatchConfig);
+        validateDispatch(config as unknown as import('../../contracts').DispatchConfig);
         if (cycles.loopNodes.has(node.id) || (config.maxIterations !== undefined && config.maxIterations !== 1)) {
             throw new Error('Structured route owns its rounds and cannot participate in a legacy back-edge loop');
         }

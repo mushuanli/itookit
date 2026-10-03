@@ -32,6 +32,10 @@ src/
     └── workflow/             工作流 DSL：类型 + compile + route 表达式
 ```
 
+## 公共契约
+
+`@itookit/llm-flow/contracts` 拥有 Flow/DAG、委派、派发、Hook、控制流与模板契约及纯函数；入口不加载执行器或存储实现。实现只依赖 durable-kernel、llm-tasks 和 llm-context，不再依赖 common/llm-common。命令接入经最小 `FlowCommandRegistrar.register` 端口，宿主可直接传入现有 CommandBus。
+
 ## 约束
 
 - 只编排 DAG，不持有会话语义（Round/Branch/SessionRepository 属于 llm-session）。

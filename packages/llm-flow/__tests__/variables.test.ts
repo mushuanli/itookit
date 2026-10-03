@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Kernel } from '@itookit/durable-kernel';
 import { createVFS, MemoryBackend, type IVFSManager, type IFileSystem } from '@itookit/vfs-core';
-import type { DagNodeDefinition, DagRunSpec } from '@itookit/common';
+import type { DagNodeDefinition, DagRunSpec } from '../src/contracts';
 import { createBuiltinDagPluginRegistry, DurableFlowExecutor, registerDurablePrograms } from '../src/flow';
 import { FlowVariableStore, validateVariableGraph } from '../src/flow/variables';
 

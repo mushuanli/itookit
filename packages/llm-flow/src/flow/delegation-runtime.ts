@@ -4,8 +4,9 @@
 // injects the declarative subtask tool. Kept separate from executor.ts so the
 // DAG scheduler stays about loop/route/spawn/compensation only.
 
-import type { DagEdgeDefinition, DagNodeDefinition, JsonValue, ToolDefinition } from '@itookit/common';
-import { DELEGATION_DEFAULTS, DELEGATION_LIMITS } from '@itookit/common';
+import type { DagEdgeDefinition, DagNodeDefinition, JsonValue } from '../contracts';
+import type { ToolDefinition } from '@itookit/llm-context';
+import { DELEGATION_DEFAULTS, DELEGATION_LIMITS } from '../contracts';
 
 export type EdgeState = 'active' | 'inactive' | 'pending';
 export type DelegationFailurePolicy = 'fail-fast' | 'continue' | 'retry';

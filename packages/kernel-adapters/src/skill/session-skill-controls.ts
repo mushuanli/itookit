@@ -1,5 +1,5 @@
 import { runSessionSkillOperation } from './operation-queue';
-import type { SessionSkillControls, ISkillService } from '@itookit/common';
+import type { SessionSkillControls, ISkillService } from '@itookit/tools/contracts';
 import type { Kernel } from '@itookit/durable-kernel';
 import type { SessionCapabilityRegistry } from '../ports/capabilities';
 import { forgetLoadedSkill, parseLoadedSkillIds, parseLoadedSkillVersions, rememberLoadedSkill, rollbackFailedLoad } from './loaded-state';

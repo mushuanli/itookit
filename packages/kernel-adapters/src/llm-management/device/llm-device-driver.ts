@@ -13,13 +13,9 @@ import { listProviderModels } from '@itookit/driver-llm';
 //  6. 维护 Chat / MCP / Skill Session 生命周期
 //  7. 创建 /dev/llm/connection/<id>、/dev/llm/mcp/<id>、/dev/llm/skills/<id> 设备节点
 
-import type {
-    ILLMManagementService,
-    LLMConnection, LLMProvider, ConnectionMeta, ChatMessage, ChatCompletionChunk,
-    ChatCompletionParams, ChatCompletionResponse, TokenUsage,
-    MCPServer, LLMSkill, ToolDefinition,
-    ConnectionTestResult, InitialAgentDef,
-} from '@itookit/common';
+import type { ILLMManagementService, LLMConnection, LLMProvider, ConnectionMeta, ChatMessage, ChatCompletionChunk, ChatCompletionParams, ChatCompletionResponse, TokenUsage, LLMSkill, ConnectionTestResult, InitialAgentDef } from '@itookit/common';
+import type { MCPServer } from '@itookit/tools/mcp-contracts';
+import type { ToolDefinition } from '@itookit/tools/contracts';
 import type {
     IDeviceDriver, DeviceContext, IVFSManager, FileContent, IFileSystem,
 } from '@itookit/vfs-core';

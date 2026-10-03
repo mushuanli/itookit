@@ -1,4 +1,4 @@
-import type { DagNodeOutcome, FlowWaitPolicy, JsonValue } from '@itookit/llm-common';
+import type { DagNodeOutcome, FlowWaitPolicy, JsonValue } from '../../contracts';
 import type { Decision, DurableTaskProgram, TaskInputEvent } from '@itookit/durable-kernel';
 import { extractNodeOutput } from '@itookit/llm-tasks';
 

@@ -1,4 +1,4 @@
-import type { SkillDefinition } from '@itookit/common';
+import type { SkillDefinition } from '@itookit/tools/contracts';
 
 export function validateSkillIndexLimit(limit: number): void {
     if (!Number.isSafeInteger(limit) || limit < 0) throw new Error('Skill index byte limit must be a nonnegative safe integer');

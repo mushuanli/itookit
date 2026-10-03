@@ -1,5 +1,5 @@
 import { readFlowRunMembers } from './run-members';
-import type { FlowRunGoal } from '@itookit/common';
+import type { FlowRunGoal } from '../contracts';
 import type { SessionHandle, JsonValue } from '@itookit/durable-kernel';
 import type { FlowExecutionHandle } from './executor';
 

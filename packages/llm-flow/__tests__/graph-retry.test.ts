@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DagEdgeDefinition, DagNodeDefinition } from '@itookit/common';
+import type { DagEdgeDefinition, DagNodeDefinition } from '../src/contracts';
 import { downstreamNodes } from '../src/flow/graph-retry';
 
 function node(id: string): DagNodeDefinition {

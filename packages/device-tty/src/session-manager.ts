@@ -1,7 +1,7 @@
 // @file: device-tty/src/session-manager.ts
 // TTY session registry — tracks active sessions across tool calls.
 
-import type { ITTYSession, ITTYSessionManager } from '@itookit/common';
+import type { ITTYSession, ITTYSessionManager } from '@itookit/tools/contracts';
 
 export class TTYSessionManager implements ITTYSessionManager {
     private sessions = new Map<string, ITTYSession>();

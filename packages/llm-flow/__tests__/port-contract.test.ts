@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { DagNodeDefinition, DagPluginCatalog, FlowRevision, JsonSchemaRef, JsonValue } from '@itookit/common';
+import type { DagNodeDefinition, DagPluginCatalog, FlowRevision, JsonSchemaRef, JsonValue } from '../src/contracts';
 import { dataEdgeSchemaIssue } from '../src/flow/port-contract';
 import { validateFlowRevision } from '../src/flow/validation';
 import { validateGraphPatch } from '../src/flow/graph-patch';

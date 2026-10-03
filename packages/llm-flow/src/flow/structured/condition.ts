@@ -1,4 +1,4 @@
-import type { FlowCondition, SerializableExpression } from '@itookit/llm-common';
+import type { FlowCondition, SerializableExpression } from '../../contracts';
 
 /** A UI-friendly condition compiles to the existing serializable expression language. */
 export function compileCondition(condition: FlowCondition, depth = 0): SerializableExpression {

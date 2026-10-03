@@ -2,7 +2,7 @@
 // 工作流 DSL 类型：声明式多 Agent 图（agent/route/spawn/supervisor + 控制流）。
 // 字段保持 YAML 风格（snake_case），与 apps/cli 的配置直接兼容。
 
-import type { DagEdgeDefinition, DagNodeDefinition } from '@itookit/common';
+import type { DagEdgeDefinition, DagNodeDefinition } from '../../contracts';
 import type { RouteCondition } from './route-expression';
 
 export type { RouteCondition } from './route-expression';

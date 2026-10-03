@@ -1,4 +1,4 @@
-import type { DagNodeDefinition, DagPluginCatalog, NodePortSchemas, JsonValue } from '@itookit/common';
+import type { DagNodeDefinition, DagPluginCatalog, NodePortSchemas, JsonValue } from '../contracts';
 import { assertFlowSchema } from './schema-registry';
 import { schemaCompatibilityIssue } from './schema-compat';
 

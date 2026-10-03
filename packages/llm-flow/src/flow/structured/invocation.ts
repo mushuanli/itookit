@@ -1,6 +1,6 @@
 import { extractNodeOutput } from '@itookit/llm-tasks';
-import { renderFlowText, renderFlowTemplate } from '@itookit/llm-common';
-import type { JsonValue } from '@itookit/common';
+import { renderFlowText, renderFlowTemplate } from '../../contracts';
+import type { JsonValue } from '../../contracts';
 import type { TaskSpec } from '@itookit/durable-kernel';
 import { resolve } from '../operations';
 import type { DispatchState, PreparedBranch } from './types';

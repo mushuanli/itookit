@@ -21,6 +21,10 @@ src/
     └── plan-program.ts             DurablePlanProgram
 ```
 
+## 公共契约
+
+`@itookit/llm-tasks/contracts` 拥有执行事件、节点配置、输出校验/Memory 策略类型及执行默认值。入口不加载 Program 实现。机制直接依赖 driver-llm、llm-context、tools 的公开接口与 durable-kernel，不再依赖 common/llm-common。宿主负责解析配置引用、授权和选择策略。
+
 ## 约束
 
 - 新运行模式实现 `DurableTaskProgram`。

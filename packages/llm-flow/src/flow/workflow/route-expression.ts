@@ -2,7 +2,7 @@
 // 工作流 DSL 的路由条件编译：把声明式 RouteCondition 编译成可序列化表达式。
 // 供 apps/cli 与未来入口复用，消除 CLI 中重复的表达式编译。
 
-import type { JsonValue, SerializableExpression } from '@itookit/common';
+import type { JsonValue, SerializableExpression } from '../../contracts';
 
 /**
  * 路由条件：字符串为相等匹配；对象支持 eq/neq/in/exists/and/or/not 组合，

@@ -5,7 +5,7 @@
 import { z } from 'zod/v4';
 import { buildTool, type ToolDef } from '../../core/Tool';
 import { lazySchema } from '../../core/lazySchema';
-import type { ISubAgentRouter } from '@itookit/common';
+import type { AgentDelegationPort } from '../../contracts';
 import { AGENT_TOOL_NAME, DESCRIPTION } from './prompt';
 
 const inputSchema = lazySchema(() =>
@@ -35,7 +35,7 @@ type OutputSchema = ReturnType<typeof outputSchema>;
 
 export type Output = z.infer<OutputSchema>;
 
-export function createAgentTool(router: ISubAgentRouter) {
+export function createAgentTool(router: AgentDelegationPort) {
   return buildTool({
     name: AGENT_TOOL_NAME,
     searchHint: 'delegate tasks to sub-agents',
