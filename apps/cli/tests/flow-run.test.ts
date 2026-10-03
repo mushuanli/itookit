@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
@@ -33,7 +33,8 @@ it('rejects non-object parameter files before starting a run', async () => {
     cleanup.push(root);
     const paramsFile = path.join(root, 'params.json');
     await writeFile(paramsFile, '[]');
-    const file = path.resolve('../../packages/llm-ui/src/flows/library/essay-review-isolated.flow');
+    const file = path.join(root, 'host-template.flow');
+    await copyFile(path.resolve('../../packages/app-core/src/presets/essay-review-isolated.json'), file);
     await expect(runCommand({ file, paramsFile, profile: root })).rejects.toThrow('JSON object');
 });
 

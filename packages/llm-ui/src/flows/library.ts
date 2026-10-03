@@ -1,19 +1,14 @@
-/// <reference path="./flow-files.d.ts" />
 import type { FlowDraft } from '@itookit/llm-flow/contracts';
 import type { ICommandBus } from '@itookit/llm-session/contracts';
 import { FlowCommand } from '@itookit/llm-flow/contracts';
-import essayReview from './library/essay-review-isolated.flow?raw';
 
-/** Bundled definitions are copied once into the editable host Flow directory. */
-export const builtinFlowLibrary: readonly FlowDraft[] = [JSON.parse(essayReview) as FlowDraft];
-
-export async function installFlowLibrary(commands: ICommandBus, library = builtinFlowLibrary): Promise<void> {
-    for (const template of library) await commands.execute(FlowCommand.DraftInstall, template);
+export async function installFlowLibrary(commands: ICommandBus, library: readonly FlowDraft[]): Promise<void> {
+    for (const template of library) await commands.execute(FlowCommand.DraftInstall, structuredClone(template));
 }
 
 /** Explicit user action; restore only missing files and retain installation receipts. */
-export async function restoreFlowLibrary(commands: ICommandBus, library = builtinFlowLibrary): Promise<number> {
+export async function restoreFlowLibrary(commands: ICommandBus, library: readonly FlowDraft[]): Promise<number> {
     let restored = 0;
-    for (const template of library) if (await commands.execute<FlowDraft | null>(FlowCommand.DraftRestore, template)) restored++;
+    for (const template of library) if (await commands.execute<FlowDraft | null>(FlowCommand.DraftRestore, structuredClone(template))) restored++;
     return restored;
 }

@@ -1,3 +1,4 @@
+import { createMindosFlowLibrary } from '@itookit/app-core';
 import { configureAppCache } from './app-cache';
 import { createHttpSourceProvider } from '@itookit/vfsdriver-http';
 import { initApp, installMobileNavigation, windowSessionLeaseToken, type AppUI } from '@itookit/app-shell';
@@ -35,9 +36,9 @@ async function main() {
             (await import('@itookit/llm-ui/settings')).createAgentEditorFactory(service)),
         createFlowEditor: deps => lazyEditorFactory(async () =>
             (await import('@itookit/llm-ui/chat')).createFlowsEditorFactory(deps)),
-        createFlowContextMenu: createFlowContextMenuConfig,
-        installFlowLibrary,
-        restoreFlowLibrary,
+        createFlowContextMenu: deps => createFlowContextMenuConfig({ ...deps, library: createMindosFlowLibrary() }),
+        installFlowLibrary: commands => installFlowLibrary(commands, createMindosFlowLibrary()),
+        restoreFlowLibrary: commands => restoreFlowLibrary(commands, createMindosFlowLibrary()),
         createSkillEditor: service => lazyEditorFactory(async () =>
             (await import('@itookit/llm-ui/settings')).createSkillsEditorFactory(service)),
         createAIContextMenu: createAIContextMenuConfig,

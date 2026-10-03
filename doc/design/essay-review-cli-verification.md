@@ -24,8 +24,9 @@
 
 ```bash
 pnpm --filter @itookit/cli build
+cp packages/app-core/src/presets/essay-review-isolated.json /tmp/mindos-essay-review.flow
 node apps/cli/dist/cli.js run \
-  -f packages/llm-ui/src/flows/library/essay-review-isolated.flow \
+  -f /tmp/mindos-essay-review.flow \
   --params doc/design/fixtures/essay-review-input.json \
   --headless --json
 ```

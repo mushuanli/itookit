@@ -1,3 +1,4 @@
+import { createMindosFlowLibrary } from '@itookit/app-core';
 import { createHttpSourceProvider } from '@itookit/vfsdriver-http';
 import { installTauriMCP } from './shell/tauri-mcp-transport';
 import { recordDiagnostic, observeTools } from './log/desktop-diagnostics';
@@ -296,9 +297,9 @@ async function bootstrap(): Promise<void> {
             (await import('@itookit/llm-ui/settings')).createAgentEditorFactory(agents)),
         createFlowEditor: deps => lazyEditorFactory(async () =>
             (await import('@itookit/llm-ui/chat')).createFlowsEditorFactory(deps)),
-        createFlowContextMenu: createFlowContextMenuConfig,
-        installFlowLibrary,
-        restoreFlowLibrary,
+        createFlowContextMenu: deps => createFlowContextMenuConfig({ ...deps, library: createMindosFlowLibrary() }),
+        installFlowLibrary: commands => installFlowLibrary(commands, createMindosFlowLibrary()),
+        restoreFlowLibrary: commands => restoreFlowLibrary(commands, createMindosFlowLibrary()),
         createSkillEditor: agents => lazyEditorFactory(async () =>
             (await import('@itookit/llm-ui/settings')).createSkillsEditorFactory(agents)),
         createAIContextMenu: createAIContextMenuConfig,

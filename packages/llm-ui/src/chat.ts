@@ -136,6 +136,8 @@ export type { AIContextMenuOptions } from './context-menu/AIContextMenu';
 
 export { createFlowContextMenuConfig } from './flows/context-menu';
 export { FlowLauncher, type FlowRunOptions } from './flows/run-flow';
-export { installFlowLibrary, restoreFlowLibrary, builtinFlowLibrary } from './flows/library';
+export { installFlowLibrary, restoreFlowLibrary } from './flows/library';
 
 export type { SessionViewPort, PromptHistoryPort } from './domain/ports/SessionViewPort';
+
+export type { FlowContextMenuOptions } from './flows/context-menu';

@@ -25,7 +25,7 @@
 
 ## 2. 当前定义哪些 Flow
 
-本包提供通用定义、编译和执行设施，并提供可配置的 [作文评审示例](../../packages/llm-ui/src/flows/library/essay-review-isolated.flow)。示例使用通用节点配置，不在运行器中硬编码作文业务。
+本包提供通用定义、编译和执行设施，并提供可配置的 [作文评审示例](../../packages/app-core/src/presets/essay-review-isolated.json)。示例使用通用节点配置，不在运行器中硬编码作文业务。
 
 ### 2.1 三种表示与运行身份
 

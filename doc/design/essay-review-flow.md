@@ -6,7 +6,7 @@
 
 原来的 route@1 只选择边，回边按节点迭代，不能可靠表达跨轮选择不同类型、独立上下文和按类型保留结果。现新增可作为普通 DAG 节点使用的结构化派发控制器，复用 Kernel Task、spawn、interaction、持久状态与权限机制。保留旧插件版本和旧检查点行为。
 
-完整可运行定义见 [essay-review-isolated.flow](../../packages/llm-ui/src/flows/library/essay-review-isolated.flow)。编辑图包含九个节点：输入补全、路由、四个独立检查、汇总、判断、报告。
+完整可运行定义见 [essay-review-isolated.flow](../../packages/app-core/src/presets/essay-review-isolated.json)。编辑图包含九个节点：输入补全、路由、四个独立检查、汇总、判断、报告。
 
 ```mermaid
 flowchart LR

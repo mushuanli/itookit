@@ -1,3 +1,4 @@
+import { createMindosFlowLibrary } from '@itookit/app-core';
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ICommandBus } from '@itookit/llm-session/contracts';
@@ -122,7 +123,7 @@ describe('Flow parameter form', () => {
 
 describe('bundled Flow library', () => {
     it('installs missing templates without overwriting existing user drafts', async () => {
-        const { installFlowLibrary, builtinFlowLibrary } = await import('../../llm-ui/src/flows/library');
+        const { installFlowLibrary } = await import('../../llm-ui/src/flows/library');
         const stored = new Map();
         const execute = vi.fn(async (command: string, args: any) => {
             if (command === FlowCommand.DraftInstall) {
@@ -132,11 +133,11 @@ describe('bundled Flow library', () => {
             throw new Error(command);
         });
         const commands = { execute } as unknown as ICommandBus;
-        await installFlowLibrary(commands);
-        const id = builtinFlowLibrary[0].id;
+        await installFlowLibrary(commands, createMindosFlowLibrary());
+        const id = createMindosFlowLibrary()[0].id;
         expect(stored.get(id).parameters.find((param: any) => param.name === 'maxRounds').default).toBe(10);
         stored.get(id).name = 'User edited';
-        execute.mockClear(); await installFlowLibrary(commands);
+        execute.mockClear(); await installFlowLibrary(commands, createMindosFlowLibrary());
         expect(stored.get(id).name).toBe('User edited');
         expect(execute.mock.calls.map(call => call[0])).toEqual([FlowCommand.DraftInstall]);
     });
@@ -144,7 +145,7 @@ describe('bundled Flow library', () => {
     it('rejects invalid templates before creating a file', async () => {
         const { installFlowLibrary } = await import('../../llm-ui/src/flows/library');
         const execute = vi.fn(async () => { throw new Error('Invalid graph'); });
-        await expect(installFlowLibrary({ execute } as unknown as ICommandBus)).rejects.toThrow('Invalid graph');
+        await expect(installFlowLibrary({ execute } as unknown as ICommandBus, createMindosFlowLibrary())).rejects.toThrow('Invalid graph');
         expect(execute).toHaveBeenCalledTimes(1);
 
     });
@@ -205,7 +206,7 @@ it('offers explicit restore on the Flow directory and sends the dedicated restor
         expect(command).toBe(FlowCommand.DraftRestore);
         return { id: 'restored' } as never;
     });
-    const menu = createFlowContextMenuConfig(f);
+    const menu = createFlowContextMenuConfig({ ...f, library: createMindosFlowLibrary() });
     const directory = { id: '/@flows', type: 'directory' as const };
     const action = menu.items!(directory, []).find(item => 'id' in item && item.id === 'flow:restore');
     expect(action).toBeDefined();
@@ -283,4 +284,12 @@ it('edits input field names, types and widgets without retaining renamed fields'
     expect(value.param.score).toMatchObject({ type: 'number', widget: 'number' });
     expect(value.param.score).not.toHaveProperty('nonBlank');
     expect(value.param).toHaveProperty('field1');
+});
+
+
+it('does not offer template restoration without a host catalog', () => {
+    const f = fixture();
+    const menu = createFlowContextMenuConfig(f);
+    expect(menu.items!({ id: '/@flows', type: 'directory' }, [])).toEqual([]);
+    expect(f.execute).not.toHaveBeenCalled();
 });

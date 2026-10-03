@@ -16,7 +16,7 @@ join 的 mode 支持 all/any/first-success/quorum。any 等待首个终态；fir
 
 当前 taskGroup 是静态图分组：直接成员必须为普通节点，并连接同一个 join。它不提供独立的组级 Kernel 生命周期、动态 map、嵌套 taskGroup、重叠 loop 或独立 subRun；这些仍是扩展边界，不能据此认为 Harness 的所有资源与生命周期能力均已覆盖。loop 编译使用整个强连通分量，包含并行路径；各轮等待前轮成员结束，并使用同轮数据绑定。
 
-[作文评审模板](../../packages/llm-ui/src/flows/library/essay-review-isolated.flow) 已迁移为 loop → taskGroup → 四个普通 Agent → join → aggregate → route，改写也使用普通 Agent。Agent 的隔离调用保留 system 指令并排除会话历史。评审与改写使用 JSON Schema 和三次输出修复；达到评分条件或轮数上限后转入报告。
+[作文评审模板](../../packages/app-core/src/presets/essay-review-isolated.json) 已迁移为 loop → taskGroup → 四个普通 Agent → join → aggregate → route，改写也使用普通 Agent。Agent 的隔离调用保留 system 指令并排除会话历史。评审与改写使用 JSON Schema 和三次输出修复；达到评分条件或轮数上限后转入报告。
 
 实现：[控制图编译](../../packages/llm-flow/src/flow/control/graph.ts)、[插件](../../packages/llm-flow/src/flow/control/plugins.ts)、[join Program](../../packages/llm-flow/src/flow/control/join-program.ts)、[并发调度](../../packages/llm-flow/src/flow/control/scheduling.ts)。
 

@@ -1,6 +1,6 @@
 # Flow 定义库
 
-这里保存随 llm-ui 发布的 `.flow` 定义。新增 Flow 后在 ../library.ts 注册；宿主启动时通过 installFlowLibrary 将不存在的定义复制到 `/home/admin/flows`。已有用户版本不会被覆盖。
+UI 不附带业务模板。MindOS 模板位于 app-core 的 `src/presets/essay-review-isolated.json`，通过 `createMindosFlowLibrary()` 获取；宿主调用 `installFlowLibrary(commands, templates)` 或 `restoreFlowLibrary(commands, templates)`。已有用户版本不会被覆盖。
 
 - essay-review-isolated.flow：四类独立 Task 评审，默认最多 10 轮、9 分达标；`maxExchanges` 默认 3（至少 2），为每个检查节点预留一次结构化输出修复；运行前填写作文要求与作文内容。
 

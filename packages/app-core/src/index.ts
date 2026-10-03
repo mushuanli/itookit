@@ -94,3 +94,5 @@ export { ProjectFavorites, SeqProjectFavoriteStore } from './projects/favorites'
 export type { ProjectFavorite, ProjectFavoriteTarget, ProjectFavoriteStore } from './projects/favorites';
 
 export { resolveProjectFavorite } from './projects/favorites/routes';
+
+export { createMindosFlowLibrary } from './presets/flow-library';

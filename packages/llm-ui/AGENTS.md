@@ -49,7 +49,7 @@ Flow Session 标题栏「流程输出」挂接当前 Session 的持久 Run，显
 
 「重新运行」预填当前分支参数，经 SessionCommand.FlowRerun 创建新分支；History 直接展示 user/assistant 交互及独立流式输出，内部逻辑节点不展开。`message:updated.content` 表示替换最终内容，EventBatchProcessor 必须先刷新已缓存的 delta，再应用替换，避免旧增量回填。Flow 交互子卡片不提供普通消息的编辑/重新生成操作。
 
-- `src/flows/library/` 保存随包发布的 `.flow` 定义；在 `src/flows/library.ts` 注册。Web/Tauri 的 app-shell 启动装配调用 `installFlowLibrary`，只复制尚不存在的定义到 FlowEngine 的 `/home/admin/flows`，不覆盖用户草稿。
+- `src/flows/library.ts` 只提供安装/恢复机制，模板数组由宿主显式传入；不携带业务模板。MindOS 通过 app-core 的 `createMindosFlowLibrary` 提供模板，Web/Tauri 在装配时注入，保留安装记录和用户草稿。
 - `src/flows/context-menu.ts` 提供 `.flow` 文件右键「运行」菜单；`FlowLauncher` 与 FlowsEditor 工具栏共用参数 → 固定 revision → CreateFromFlow → 导航流程。
 - 参数校验在关闭对话框前执行；取消不创建 Session，草稿版本冲突不启动。新入口通过 CreateFromFlow 的 invocation 模式直接创建持久调用，旧 manifest.flow 会话保持兼容。
 - `/flow` 在当前 Session 启动独立调用；`InvocationPanel` 按 root Task 显示各调用及人工确认，结果可放入聊天草稿。`builtin.flow@2.0.0` 提供参数与命名返回值组合。契约见 [Flow 调用与组合](../../doc/design/flow-invocation-composition.md)。

@@ -118,3 +118,9 @@ test('chat uses session contracts and isolates singleton compatibility', () => {
     assert.equal(check('chat.ts', "import { SessionCommand } from '@itookit/llm-session/contracts'").length, 0);
     assert.equal(check('index.ts', "import { getSessionManager } from '@itookit/llm-session'").length, 0);
 });
+
+
+test('chat must receive business flow templates from the host', () => {
+    const ui = pkg('llm-ui');
+    assert.match(inspect(ui, "import template from './library/product.flow?raw'", ui.dir + '/src/chat.ts')[0], /template catalogs/);
+});
