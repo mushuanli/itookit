@@ -70,7 +70,7 @@ export interface AdditionalMount {
 
 export interface ChatEditorDeps {
     defaultHarnessToolIds?: readonly string[];
-    sessionManager?: import('@itookit/llm-session').SessionManager;
+    sessionManager: import('@itookit/llm-session').SessionManager;
     sessionRepository: ISessionRepository;
     ocr?: import('@itookit/ui-common').OcrControls;
     commandBus?: ICommandBus;

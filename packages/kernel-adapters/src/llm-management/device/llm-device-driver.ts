@@ -1,3 +1,4 @@
+import { validateLLMIoctlArgument, isConnection, isStoredProvider, isMCPServer, isChatMessage } from './argument-validation';
 import { snapshotMCPConnectionOptions, type MCPConnectionOptions } from '../contracts/mcp-transport';
 import type { ProviderConnectionTestParams } from '@itookit/driver-llm/contracts';
 import { listProviderModels } from '@itookit/driver-llm';
@@ -77,12 +78,12 @@ export interface LLMDeviceOpenOptions {
     systemPrompt?: string;
     completionDefaults?: Record<string, unknown>;
     /** 调用方的运行模式；kernel 强制走 anthropic-messages 协议。 */
-    runMode?: 'kernel' | 'kernel';
+    runMode?: 'kernel';
     /** 日志文件名标签（如聊天文件名），将转义后用于 /var/log/llm/{label}.json */
     sessionLabel?: string;
 }
 
-// ILLMManagementService 统一管理接口已定义在 @itookit/common
+// Management contracts are owned by kernel-adapters/contracts.
 
 // ─── 内部会话状态 ─────────────────────────────────────────────────────────────
 
@@ -229,9 +230,9 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
         // Pre-load all data directories in parallel
         const [preProviders, preConnections, preMcps, preSkills] = await Promise.all([
-            this.vfsHelpers.loadJsonFilesFromDir<LLMProvider>(PROVIDERS_DIR),
-            this.vfsHelpers.loadJsonFilesFromDir<LLMConnection>(CONNECTIONS_DIR),
-            this.vfsHelpers.loadJsonFilesFromDir<MCPServer>(MCP_DIR),
+            this.vfsHelpers.loadJsonFilesFromDir<LLMProvider>(PROVIDERS_DIR, undefined, isStoredProvider),
+            this.vfsHelpers.loadJsonFilesFromDir<LLMConnection>(CONNECTIONS_DIR, undefined, isConnection),
+            this.vfsHelpers.loadJsonFilesFromDir<MCPServer>(MCP_DIR, undefined, isMCPServer),
             this.skillManager.loadAllSkills(),
         ]);
         _log('preloadDirs');
@@ -423,6 +424,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     // ─── IDeviceDriver: ioctl ────────────────────────────────────────────────
     async ioctl(ctx: DeviceContext, command: string | number, arg?: unknown): Promise<unknown> {
+        validateLLMIoctlArgument(command, arg);
         if (typeof command === 'string' && Object.hasOwn(this.managementIoctl, command)) {
             return this.managementIoctl[command as keyof typeof this.managementIoctl]!(ctx, arg);
         }
@@ -992,9 +994,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             : new TextDecoder().decode(content instanceof Uint8Array ? content : new Uint8Array(content as ArrayBuffer));
         try {
             const parsed = JSON.parse(text);
-            if (parsed && typeof parsed.role === 'string' && parsed.content !== undefined) {
-                return parsed as ChatMessage;
-            }
+            if (isChatMessage(parsed)) return parsed;
         } catch { /* treat as plain text */ }
         return { role: 'user', content: text };
     }

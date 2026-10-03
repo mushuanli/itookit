@@ -1,3 +1,6 @@
+import { memberGroup } from './control/scheduling';
+import { decodeSchedulerCheckpoint } from './checkpoint-decoder';
+import { FlowScheduler } from './scheduler';
 import { FlowRunAggregation, runMembers } from './run-aggregation';
 import { FlowRunLifecycle, workspaceLeaseKey, cancelPendingFlowTasks } from './run-lifecycle';
 import type { FlowWorkspaceLease, FlowWorkspaceManager } from './run-lifecycle';
@@ -16,8 +19,6 @@ import type { SchedulerCheckpoint } from './scheduler-checkpoint';
 import { compileReferenceGraph, scopedParameters } from './structured/references';
 import { compileDispatchGraph } from './structured/graph';
 import { compileControlGraph } from './control/graph';
-import { memberGroup, startReservedWorkers } from './control/scheduling';
-import { reconcileDispatchChildren } from './structured/reconcile';
 import { validateDispatchCapacity } from './structured/limits';
 import { restoreFlowHandle } from './restore-handle';
 import { acquireSchedulerLease, isSchedulerOwnershipLost, type SchedulerLease } from './scheduler-lease';
@@ -37,7 +38,7 @@ import type { SkillContext } from '@itookit/llm-tasks';
 export { workspaceLeaseKey } from './run-lifecycle';
 export type { FlowWorkspaceLease, FlowWorkspaceManager, FlowWorkspaceRestoreOptions } from './run-lifecycle';
 import { findCycles } from './graph';
-import { assertNodeOutputs, dataEdgeSchemaIssue } from './port-contract';
+import { dataEdgeSchemaIssue } from './port-contract';
 import { bindFlowTaskCapabilities } from './task-capabilities';
 import { resolveFlowParameters, prepareFlowParameters } from './parameters';
 
@@ -104,7 +105,7 @@ export class DurableFlowExecutor {
         const deadline = Date.now() + timeoutMs;
         while (Date.now() < deadline) {
             const saved = await session.getShared(`flow.run.${rootTaskId}.scheduler`);
-            const checkpoint = saved?.value as SchedulerCheckpoint | undefined;
+            const checkpoint = decodeSchedulerCheckpoint(saved?.value);
             const ids = new Set<string>((checkpoint?.instances ?? []).flatMap(([, handles]) => handles));
             // Spawned tasks are persisted by Kernel, while the scheduler owns their ancestors.
             const tasks = await session.listTasks();
@@ -158,7 +159,7 @@ export class DurableFlowExecutor {
         const root = (await handle.root.status()).task;
         if (!record(root.state ?? root.input).awaitingSchedule) return handle;
         const saved = await session.getShared(`flow.run.${rootTaskId}.scheduler`);
-        const checkpoint = (saved?.value ?? record(root.input).initialScheduler) as unknown as SchedulerCheckpoint;
+        const checkpoint = decodeSchedulerCheckpoint(saved?.value ?? record(root.input).initialScheduler);
         if (!checkpoint) throw new Error('Flow scheduler checkpoint is missing');
         if (checkpoint.version !== 1) throw new Error('Unsupported Flow scheduler checkpoint');
         handle.attachedFromStorage = false;
@@ -225,7 +226,7 @@ export class DurableFlowExecutor {
             const { backEdges, loopNodes } = findCycles(spec.nodes, spec.edges);
             const collections = createSchedulerCollections(spec, saved, routeEdgeIds, workspace?.directory);
             const { nodes, edges, delegationDepth, delegationGroups, delegationGroupByChild, skipped,
-                detachedNodes, appliedPatches, completionOrder, dispatchOrder, variableStore, nodeGenerations, edgeState } = collections;
+                detachedNodes, appliedPatches, appliedGraphRetries, completionOrder, dispatchOrder, variableStore, nodeGenerations, edgeState } = collections;
             let consumedTokens = saved?.consumedTokens ?? 0;
             const callInputs: Record<string, unknown> = {};
             const refreshCallInputs = async () => {
@@ -401,7 +402,7 @@ export class DurableFlowExecutor {
             const graphRetries = new GraphRetryController({
                 session, run: published, nodes, edges, instances, completed, skipped, detachedNodes,
                 groups: delegationGroups, depths: delegationDepth, groupByChild: delegationGroupByChild,
-                nodeGenerations, nodeDefaults, nodeConnections, edgeState, routeEdgeIds, variables: variableStore,
+                nodeGenerations, appliedGraphRetries, nodeDefaults, nodeConnections, edgeState, routeEdgeIds, variables: variableStore,
                 refund: output => { consumedTokens = Math.max(0, consumedTokens - outputTokens(output)); },
                 persist: async () => {
                     await session.setShared(`flow.run.${published!.root.id}.members`, jsonValue(runMembers(instances, nodes, detachedNodes)));
@@ -409,104 +410,22 @@ export class DurableFlowExecutor {
                 },
             });
             await graphRetries.consume();
-            while (true) {
-                // Fencing: a host that lost the Run's scheduler lease must stop before its
-                // next step, even if its own event stream is still delivering. Stopping is
-                // not a Run failure — the new owner continues the same Run.
-                try { await lease?.assertOwned(); }
-                catch (error) {
-                    if (!isSchedulerOwnershipLost(error)) throw error;
-                    return published;
-                }
-                if (published && this.options.kernel.isDisposed) return published;
-                const rootState = published ? (await published.root.status()).task : undefined;
-                if (rootState?.status === 'cancelled') throw new Error('Flow run cancelled');
-                if (rootState?.control && rootState.control.mode !== 'run') {
-                    await new Promise(resolve => setTimeout(resolve, 25));
-                    continue;
-                }
-                await enforceDeadlines();
-                const scopedActive = await reconcileDispatchChildren(session, [...instances.values()].flat(), task => {
-                    published!.taskIds.add(task.id);
-                    (published!.childTasks ??= new Map()).set(task.id, task);
-                }, maxConcurrency);
-                const groupedActive = await startReservedWorkers(session, nodes, instances, maxConcurrency, detachedNodes);
-                const activeCount = groupedActive ?? scopedActive ?? [...instances.entries()].reduce((count, [nodeId, handles]) =>
-                    count + (detachedNodes.has(nodeId) ? 0 : handles.filter((_, index) =>
-                        !completed.has(instanceKey(nodeId, index + 1))).length), 0);
-                const capacity = Math.max(0, maxConcurrency - activeCount);
-                await refreshCallInputs();
-                const candidates = readyNodes();
-                const reserved = candidates.filter(node => memberGroup(nodes, node.id) || node.plugin === 'builtin.join');
-                const ready = [...reserved, ...candidates.filter(node => !reserved.includes(node)).slice(0, capacity)];
-                const historyGroup = ready.length > 1 ? `${published!.root.id}:${ready.map(node => `${node.id}#${instances.get(node.id)?.length ?? 0}@${nodeGenerations.get(node.id) ?? 0}`).join(',')}` : undefined;
-                for (const node of ready) await submitNode(node, historyGroup);
-                const pending = [...instances.entries()].flatMap(([nodeId, handles]) =>
-                    detachedNodes.has(nodeId) ? [] :
-                    handles.map((handle, index) => ({ key: instanceKey(nodeId, index + 1), handle }))
-                        .filter(({ key }) => !completed.has(key)));
-                if (!pending.length) {
-                    if (readyNodes().length) continue;
-                    break;
-                }
-                // Publish a waiting Run while keeping the scheduler alive for the response.
-                const settled = await Promise.race(pending.map(async ({ key, handle }) => {
-                    try {
-                        const exit = await handle.wait({ timeoutMs: 100 });
-                        return { key, exit };
-                    } catch {
-                        const snapshot = await handle.status();
-                        if (Object.values(snapshot.task.interactions ?? {}).some(record => record.status === 'pending')) {
-                            return { key, interaction: true as const };
-                        }
-                        return { key, tick: true as const };
+            const scheduler = new FlowScheduler({
+                session, run: published, lease, nodes, instances, completed, detachedNodes,
+                nodeGenerations, completionOrder, delegationGroupByChild, maxConcurrency,
+                variableStore, plugins, delegation, enforceDeadlines, refreshCallInputs,
+                readyNodes, submitNode, compensateChain, applyEffects, saveCheckpoint, publish,
+                isDisposed: () => this.options.kernel.isDisposed,
+                emitHook: (event, payload) => this.emitHook(event, sessionId, payload),
+                accountTokens: async output => {
+                    consumedTokens += outputTokens(output);
+                    if (maxTokens && consumedTokens > maxTokens) {
+                        await cancelPendingFlowTasks(instances, completed, 'Flow token budget exceeded');
+                        throw new Error(`Flow token budget exceeded: ${consumedTokens}/${maxTokens}`);
                     }
-                }));
-                if (published && this.options.kernel.isDisposed) return published;
-                if ('interaction' in settled) {
-                    // The root already exists; publishing here releases `submit` for
-                    // interactive Runs so the host can respond while the graph waits.
-                    await saveCheckpoint();
-                    publish(published);
-                    continue;
-                }
-                if ('tick' in settled) continue;
-                completed.add(settled.key);
-                completionOrder.push(parseInstanceKey(settled.key).nodeId);
-                if (settled.exit.status === 'succeeded') {
-                    const settledNode = nodes.find(candidate => candidate.id === parseInstanceKey(settled.key).nodeId);
-                    // Validate the producer contract even when consumers accept a wider schema.
-                    if (settledNode) {
-                        variableStore.prune(new Set([...instances.values()].flat().map(handle => handle.id)));
-                        assertNodeOutputs(settledNode, plugins, settled.exit.output);
-                        variableStore.commit(settledNode, pending.find(item => item.key === settled.key)!.handle.id, settled.exit.output);
-                    }
-                }
-                consumedTokens += outputTokens(settled.exit.output);
-                if (maxTokens && consumedTokens > maxTokens) {
-                    await cancelPendingFlowTasks(instances, completed, 'Flow token budget exceeded');
-                    throw new Error(`Flow token budget exceeded: ${consumedTokens}/${maxTokens}`);
-                }
-                await delegation.settle(settled.key, settled.exit.status === 'succeeded');
-                await this.emitHook(settled.exit.status === 'failed' ? 'task.failed' : 'task.completed', sessionId, {
-                    nodeId: parseInstanceKey(settled.key).nodeId,
-                    taskId: pending.find(item => item.key === settled.key)?.handle.id,
-                    status: settled.exit.status,
-                });
-                if (delegationGroupByChild.has(parseInstanceKey(settled.key).nodeId)) {
-                    await this.emitHook('agent.stopped', sessionId, {
-                        nodeId: parseInstanceKey(settled.key).nodeId,
-                        status: settled.exit.status,
-                    });
-                }
-                if (settled.exit.status === 'failed') {
-                    await compensateChain(settled.key);
-                    await delegation.fail(settled.key, settled.exit.error?.message);
-                }
-                await applyEffects(settled.exit.output, parseInstanceKey(settled.key).nodeId);
-                await delegation.apply(settled.key, settled.exit.output);
-                await saveCheckpoint();
-            }
+                },
+            });
+            if (await scheduler.run() === 'detached') return published;
 
             const result = await aggregate({ goal: spec.goal,
                 usage: { tokens: consumedTokens, startedAt, elapsedMs: Date.now() - startedAt },

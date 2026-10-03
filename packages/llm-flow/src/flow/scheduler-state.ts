@@ -18,6 +18,7 @@ export function createSchedulerCollections(spec: DagRunSpec, saved: SchedulerChe
         skipped: new Set<string>(saved?.skipped),
         detachedNodes: new Set<string>(saved?.detachedNodes),
         appliedPatches: new Map<string, string>(saved?.appliedPatches),
+        appliedGraphRetries: new Set<string>(saved?.appliedGraphRetries),
         completionOrder: saved?.completionOrder ?? [],
         dispatchOrder: saved?.dispatchOrder ?? [],
         nodeGenerations: new Map<string, number>(saved?.nodeGenerations ?? []),
@@ -37,6 +38,7 @@ export function snapshotSchedulerCollections(state: SchedulerCollections, instan
     return {
         ...header, version: 1, variables: state.variableStore.state,
         instances: [...instances].map(([id, handles]) => [id, handles.map(handle => handle.id)]),
+        appliedGraphRetries: [...state.appliedGraphRetries],
         completed: [...completed], nodes: state.nodes, edges: state.edges, edgeState: [...state.edgeState],
         delegationDepth: [...state.delegationDepth], delegationGroupByChild: [...state.delegationGroupByChild],
         delegationGroups: [...state.delegationGroups].map(([id, group]) => [id, { ...group,

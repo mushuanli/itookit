@@ -2,9 +2,7 @@
 import { expect, it, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
-import { Toast } from '@itookit/ui-common';
 import { SkillSettingsEditor } from '../../llm-settings-ui/src/editors/SkillSettingsEditor';
-import { saveCurrent } from '../../llm-settings-ui/src/editors/skill/SkillOperations';
 import type { LLMSkill } from '@itookit/kernel-adapters/contracts';
 
 // Use the editor's YAML dependency; this integration harness lives with app-shell's DOM tests.
@@ -53,12 +51,9 @@ it('round trips supporting files and hidden fields through the real form-only ed
         correctionLog: first.correctionLog, tools: first.tools, triggerPatterns: first.triggerPatterns, compact: first.compact, taskProgram: first.taskProgram };
     expect(dumped).toMatchObject(preserved);
 
-    const toast = vi.spyOn(Toast, 'success').mockImplementation(() => {});
-    try {
-        await saveCurrent({ selectedId: first.id, service: { getSkills: async () => [first], saveSkill },
-            val, chk, render: async () => {} } as never);
-        expect(saveSkill).toHaveBeenCalledWith(expect.objectContaining(preserved));
-    } finally { toast.mockRestore(); }
+    container.querySelector<HTMLInputElement>('[name="fsRoot"]')!.dispatchEvent(new Event('input', { bubbles: true }));
+    await editor.flushPendingSave();
+    expect(saveSkill).toHaveBeenCalledWith(expect.objectContaining(preserved));
 
     container.querySelector<HTMLInputElement>('[name="correctionLog"]')!.value = '';
     const cleared = yaml.load(editor.getText()) as LLMSkill;
@@ -84,4 +79,5 @@ it('round trips supporting files and hidden fields through the real form-only ed
         compact: second.compact,
         taskProgram: second.taskProgram,
     });
+    await editor.destroy();
 });

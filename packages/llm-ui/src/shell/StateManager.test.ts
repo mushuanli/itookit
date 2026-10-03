@@ -91,3 +91,14 @@ it('does not consume ambient host creation data while restoring a Session', () =
         expect(input.setConfig).toHaveBeenLastCalledWith({ text: 'saved', agentId: 'saved-agent', settings: undefined });
     } finally { vi.unstubAllGlobals(); }
 });
+
+it('does not overwrite external draft updates when disposing an unchanged loaded configuration', async () => {
+    const service = { saveSessionSettings: vi.fn(), saveUIState: vi.fn() };
+    const manager = new StateManager(service as unknown as StateService, { isGenerating: () => false } as SessionManager, 's', id => id);
+    const config = { text: 'loaded', agentId: 'default', settings: {} };
+    manager.rememberRestoredConfiguration(config);
+    await manager.saveInputConfiguration(config);
+    expect(service.saveUIState).not.toHaveBeenCalled();
+    await manager.saveInputConfiguration({ ...config, text: 'edited' });
+    expect(service.saveUIState).toHaveBeenCalledWith('s', expect.objectContaining({ input_text: 'edited' }), 'main');
+});

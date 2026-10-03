@@ -1,3 +1,4 @@
+import { isConnection } from './argument-validation';
 // @file: device-llm/device/connection-manager.ts
 //
 // ConnectionManager — CRUD for LLMConnection with VFS persistence.
@@ -92,6 +93,7 @@ export class ConnectionManager {
     }
 
     async saveConnection(conn: LLMConnection, systemFS?: IFileSystem): Promise<void> {
+        if (!isConnection(conn)) throw new TypeError('Invalid LLM connection');
         await this.writeToDisk(conn, systemFS);
         const idx = this._connections.findIndex(c => c.id === conn.id);
         if (idx >= 0) { this._connections[idx] = conn; } else { this._connections.push(conn); }
@@ -132,7 +134,7 @@ export class ConnectionManager {
     }
 
     setConnections(connections: LLMConnection[]): void {
-        this._connections = connections.map(c => this.normalizeConn(c));
+        this._connections = connections.filter(isConnection);
     }
 
     // ─── VFS reload (called from bindVFSEvents debounce) ──────────────────
@@ -178,8 +180,8 @@ export class ConnectionManager {
     }
 
     private async loadAll(systemFS?: IFileSystem): Promise<LLMConnection[]> {
-        const raw = await this.helpers.loadJsonFilesFromDir<LLMConnection>(CONNECTIONS_DIR, systemFS);
-        return raw.map(c => this.normalizeConn(c));
+        const raw = await this.helpers.loadJsonFilesFromDir<LLMConnection>(CONNECTIONS_DIR, systemFS, isConnection);
+        return raw;
     }
 
     private async writeToDisk(conn: LLMConnection, systemFS?: IFileSystem): Promise<void> {
@@ -212,10 +214,6 @@ export class ConnectionManager {
     private getProviderForConn(conn: LLMConnection) {
         const pid = conn.providerId;
         return this.providerManager.getFullProviderMap().get(pid);
-    }
-
-    private normalizeConn(raw: LLMConnection): LLMConnection {
-        return raw;
     }
 
     /** Aggregate all connection dailyCosts for a provider and persist */

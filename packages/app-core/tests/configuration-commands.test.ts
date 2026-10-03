@@ -9,7 +9,7 @@ afterEach(async () => { vi.restoreAllMocks(); await runtime?.dispose(); });
 async function setup() {
     runtime = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'web' });
     const store = runtime.agentService;
-    await store.saveProvider({ id: 'remove-me', name: 'Remove', implementation: 'openai-compatible', models: [] });
+    await store.saveProvider({ baseURL: '', id: 'remove-me', name: 'Remove', implementation: 'openai-compatible', models: [] });
     await store.saveConnection({ id: 'linked', name: 'Linked', providerId: 'remove-me' });
     await store.saveAgent({ id: 'dependent', name: 'Dependent', type: 'agent', config: {} });
     return { store, commands: new ModelConfigurationCommands(store) };

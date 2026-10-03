@@ -27,8 +27,8 @@ it('projects content while the model stream is still waiting for more data', asy
     const coordinator = new ConversationRunCoordinator({ kernel, dagPlugins: createBuiltinDagPluginRegistry(),
         eventBus: { emitSession, emitGlobal: vi.fn() }, engine: {}, loadArtifact: async () => null } as never);
     const internal = coordinator as any;
-    vi.spyOn(internal, 'resolveLocation').mockResolvedValue({ branchRef: 'main', branchHead: null });
-    vi.spyOn(internal, 'assembleContext').mockResolvedValue({ blocks: [], canonicalMessages: [] });
+    vi.spyOn(internal.contextBuilder, 'resolveLocation').mockResolvedValue({ branchRef: 'main', branchHead: null });
+    vi.spyOn(internal.contextBuilder, 'assemble').mockResolvedValue({ blocks: [], canonicalMessages: [] });
     for (const name of ['startRound', 'completeRound', 'failRound']) vi.spyOn(internal, name).mockResolvedValue(undefined);
     const running = coordinator.executeDag({ task: { sessionId: 's', input: { text: 'go', sendIntent: { execution: { kind: 'flow' } } } },
         rootNodeId: 'root', roundId: 'round', finalize, contextFiles: [], state: { updateNodeMeta() {}, appendToNode() {}, appendChildNode() {}, updateNodeOutput() {}, updateNodeStatus() {} } } as never,

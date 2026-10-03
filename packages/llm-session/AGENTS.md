@@ -39,7 +39,7 @@ Flow 重新运行通过 `FlowRerunService` 校验参数并创建替代分支，�
 ## 联网搜索
 
 - 三态 `ExecutorConfig.webSearchMode`（`WebSearchMode`）由 `AgentResolver.resolveWebSearch` 经 `resolveWebSearchStrategy` 解析。
-- `ConversationRunCoordinator.directTaskSpec` 派生 `webSearch` 布尔（仅 builtin）+ 按 mode 剥离客户端 WebSearchTool。
+- `session/direct-conversation.ts` 的 `directTaskSpec` 派生 `webSearch` 布尔（仅 builtin）+ 按 mode 剥离客户端 WebSearchTool。
 - `applyOverrides` 中 `webSearchEnabled=false` → `webSearchMode='disabled'`。
 - citations 投影为 `message:citations`（投影后不重复发射原始 citations）。
 - 详见 [web-search.md](../../doc/web-search.md)。
@@ -62,3 +62,5 @@ Agent 定义的 `capabilityPolicy` 位于顶层；`AgentResolver` 读取 `agentD
 Agent、连接管理、恢复与定价的权威契约位于 kernel-adapters/contracts。本包为既有 Session API 保留具名转发，构建必须内联其 JavaScript 与声明，发布产物不得保留对适配器包的导入；它仅列为开发依赖。
 
 DirectAgentPolicy 控制显式 Agent 模式的附加提示与 maxExchanges。构造时验证预算、复制并冻结；附加提示必须在 Context 装配前加入并参与 token 计量，不得在 Task 构造时绕过预算追加消息。实际预算写入 Task，Chat/Flow 与旧模式不消费附加提示。
+
+ConversationContextBuilder 负责 Round/Branch 选择、宿主材料与 Context 装配；direct-conversation 负责直接运行工具/MCP/Skill 准备和 TaskSpec。协调器保留提交、Round 持久化与事件投影。初始 Round 写入失败时取消已提交 Run，防止脱离历史的任务继续执行；产品策略仍通过已有宿主端口和 DirectAgentPolicy 注入。

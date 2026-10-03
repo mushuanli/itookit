@@ -127,6 +127,11 @@ export class StateManager {
         });
     }
 
+    /** Loaded preferences are already saved; unchanged disposal must not overwrite newer writes. */
+    rememberRestoredConfiguration(config: IChatInputConfig): void {
+        this.savedConfiguration = JSON.stringify({ payload: this.inputState(config), settings: config.settings, branch: this.branch });
+    }
+
     private inputState(config?: IChatInputConfig): UIState {
         return structuredClone({ collapse_states: this.collapseStatesCache, input_text: config?.text,
             input_agent_id: config?.agentId, history_visibility: this.historyVisibilityCache });

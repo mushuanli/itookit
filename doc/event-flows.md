@@ -115,3 +115,10 @@ FSEventBus（vfs-core/src/impl/event/event-bus.ts）：
 ## 执行取消的错误事件标记
 
 SessionRunCoordinator 在取消终态的 `error` 事件中保留 `code: ABORTED`。HistoryView 与 SessionEventHandler 据此呈现取消状态、取消提示及重新执行入口；缺失该码、TIMEOUT 或仅包含 aborted 文本的普通错误仍按失败显示。状态指示器的取消状态停止 loading，历史 aborted 节点仍保留持久原因。该标记描述执行取消，不替代 Kernel 控制面的外部停止确认。
+
+
+## 图重试恢复确认
+
+控制端经 requestFlowGraphRetry 把 intent 追加到 Session shared；GraphRetryController 在恢复调度前消费。图状态与 appliedGraphRetries 回执写入同一 scheduler checkpoint 后才确认队列。恢复遇到已有回执时只确认，不重复下游失效、代数推进或 token 退款；checkpoint 写入失败保留 pending 意图。完整序列图见 [运行时架构审查](runtime-architecture.md#集中实施调度会话ui-与解码边界)。
+
+UI 挂接恢复通过 EditorTaskControlPlane 获取状态和事件，每次异步返回后核验 Session、attachment revision 与关闭状态。编辑器销毁先阻止新挂接，再尝试保存、detach、解绑和视图释放；任一失败不会跳过后续清理，最终以 AggregateError 交给宿主。

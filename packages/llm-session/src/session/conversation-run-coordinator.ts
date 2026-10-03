@@ -1,7 +1,9 @@
+import { ConversationContextBuilder, type ConversationLocation } from './conversation-context';
+import { prepareDirectConversation, directTaskSpec, skillContextResolver } from './direct-conversation';
 import { createSessionHost, type SessionHost, type SessionHostPorts } from '../utils/host-ports';
-import { createContextAssembler, type IContextAssembler, type RetrievedMemoryEntry } from '@itookit/llm-context';
+import { type RetrievedMemoryEntry } from '@itookit/llm-context';
 import { FlowHistory } from './flow-history';
-import { CLIENT_WEB_SEARCH_TOOL, directExecutionMode, directToolIds } from './direct-execution-mode';
+import { directExecutionMode, directToolIds } from './direct-execution-mode';
 import { snapshotDirectAgentPolicy, type DirectAgentPolicy, type ResolvedDirectAgentPolicy } from '../contracts/direct-agent-policy';
 import { formatFlowOutput } from '@itookit/llm-flow/contracts';
 import type { AgentEvent, ToolCallInfo } from '@itookit/llm-tasks/contracts';
@@ -14,7 +16,6 @@ import {
     type Kernel,
     type JsonValue,
     type TaskHandle,
-    type TaskSpec,
 } from '@itookit/durable-kernel';
 import type {
     ChatAttachment,
@@ -24,14 +25,9 @@ import type {
     NodeStatus,
 } from '../core/types';
 import {
-    buildLlmTaskInput,
-    buildSkillContexts,
-    type DurableAgentInput,
     type DurableChatOutput as ChatProgramOutput,
-    type SkillContext,
 } from '@itookit/llm-tasks';
 import type { ISessionRepository } from '../persistence/types';
-import { ContextProfileStore } from '../persistence/context-profile-store';
 import { RoundLog } from '../persistence/round-log';
 import { formatErrorMessage } from '../utils/error-formatter';
 import { SessionEventBus } from './session-event-bus';
@@ -82,42 +78,23 @@ export interface ConversationRunCoordinatorOptions {
     workspaceManager?: import('@itookit/llm-flow').FlowWorkspaceManager;
 }
 
-interface ConversationLocation {
-    branchRef: string;
-    branchHead: string | null;
-}
-
 export class ConversationRunCoordinator {
     /** Session id → live root + task membership; DAG nodes can be added after submit. */
     private readonly active = new Map<string, RunExecution>();
 
     private readonly policy: ResolvedDirectAgentPolicy;
     private readonly host: SessionHost;
+    private readonly contextBuilder: ConversationContextBuilder;
     constructor(private readonly options: ConversationRunCoordinatorOptions) {
         this.host = createSessionHost(options.hostPorts);
         this.policy = snapshotDirectAgentPolicy(options.directAgentPolicy);
+        this.contextBuilder = new ConversationContextBuilder(options, this.policy);
     }
 
     async executeDirect(execution: ConversationExecution): Promise<void> {
-        if (directExecutionMode(execution.task.input) === 'agent' && execution.config.capabilityPolicy?.toolIds === undefined) {
-            const toolIds = await this.options.resolveHarnessToolIds?.(execution.task.sessionId) ?? [];
-            execution = { ...execution, config: { ...execution.config,
-                capabilityPolicy: { mcpProfileIds: [], ...execution.config.capabilityPolicy, toolIds } } };
-        }
-        const profiles = execution.config.capabilityPolicy?.mcpProfileIds ?? [];
-        if (profiles.length && directExecutionMode(execution.task.input) !== 'chat') {
-            if (!this.options.resolveMCPToolIds) throw new Error('MCP profile resolution is unavailable');
-            const mcpIds = await this.options.resolveMCPToolIds(execution.task.sessionId, profiles);
-            const policy = execution.config.capabilityPolicy!;
-            execution = { ...execution, config: { ...execution.config,
-                capabilityPolicy: { ...policy, toolIds: [...new Set([...(policy.toolIds ?? []), ...mcpIds])] } } };
-        }
-        const ids = execution.config.capabilityPolicy?.skillIds ?? [];
-        const skills = ids.length ? await this.options.resolveSkills?.(ids, execution.task.sessionId) ?? [] : [];
-        const skillsPrompt = skills.filter(skill => ids.includes(skill.id) && skill.enabled && !skill.disableModelInvocation && skill.triggerStrategy !== 'action')
-            .flatMap(skill => [skill.instructions,
-                skill.compact?.rawContent ? `Skill ${skill.id} — critical rules:\n${skill.compact.rawContent}` : '',
-            ]).filter(Boolean).join('\n\n');
+        const prepared = await prepareDirectConversation(this.options, execution);
+        execution = prepared.execution;
+        const { skills, skillsPrompt } = prepared;
         await this.execute(execution, async snapshot => {
             const run = await this.directTask(execution, snapshot, skills);
             return { ...run, parse: parseOutput };
@@ -155,8 +132,8 @@ export class ConversationRunCoordinator {
         }>,
         options: { skillsPrompt?: string; includeMemory?: boolean } = {},
     ): Promise<void> {
-        const location = await this.resolveLocation(execution);
-        const snapshot = await this.assembleContext(execution, location, options.skillsPrompt, options.includeMemory ?? true);
+        const location = await this.contextBuilder.resolveLocation(execution);
+        const snapshot = await this.contextBuilder.assemble(execution, location, options.skillsPrompt, options.includeMemory ?? true);
         const submission = await createTask(snapshot);
         const handle = submission.root;
         this.active.set(execution.task.sessionId, { root: handle, tasks: submission.tasks });
@@ -175,6 +152,7 @@ export class ConversationRunCoordinator {
             await execution.finalize();
         } catch (error) {
             if (roundStarted) await this.failRound(execution, error, toolCalls, streamedOutput.history);
+            else await this.cancelRun(submission);
             throw error;
         } finally {
             this.active.delete(execution.task.sessionId);
@@ -212,61 +190,6 @@ export class ConversationRunCoordinator {
         await run.root.cancel().catch(() => {});
         const members = run.tasks().filter(task => task.id !== run.root.id);
         await Promise.allSettled(members.map(task => task.cancel().catch(() => {})));
-    }
-
-    private async resolveLocation(
-        execution: ConversationExecution,
-    ): Promise<ConversationLocation> {
-        const manifest = await execution.log.loadManifest();
-        const branchRef = execution.task.frozen?.branchRef
-            ?? manifest.currentBranch
-            ?? 'main';
-        const branchHead = execution.task.frozen?.branchHead
-            ?? manifest.branches[branchRef]
-            ?? null;
-        return { branchRef, branchHead };
-    }
-
-    private async assembleContext(
-        execution: ConversationExecution,
-        location: ConversationLocation,
-        skillsPrompt?: string,
-        includeMemory = true,
-    ): Promise<ContextSnapshot> {
-        const manifest = await execution.log.loadManifest();
-        const profile = manifest.branchMeta[location.branchRef]?.contextProfile
-            ?? { id: '', revision: 0 };
-        const assembler = this.contextAssembler(execution, includeMemory);
-        const version = execution.task.frozen?.agentVersion
-            ?? execution.config.agentVersion
-            ?? 'unversioned';
-        const sessionContext = await this.options.resolveSessionContext?.(execution.task.sessionId, execution.task.input.text);
-        const result = await assembler.assemble(contextPlan(execution, location, profile), execution.task.id, {
-            id: execution.config.id,
-            version,
-        }, this.systemPrompt(execution), skillsPrompt, { persist: false, ...sessionContext });
-        return result.snapshot;
-    }
-
-    private systemPrompt(execution: ConversationExecution): string[] {
-        const base = execution.config.systemPrompt ?? [];
-        const prompts = typeof base === 'string' ? [base] : base;
-        return directExecutionMode(execution.task.input) === 'agent' ? [...this.policy.systemPrompt, ...prompts] : prompts;
-    }
-
-    private contextAssembler(
-        execution: ConversationExecution,
-        includeMemory = true,
-    ): IContextAssembler {
-        return createContextAssembler({
-            log: execution.log,
-            profileStore: new ContextProfileStore(this.options.engine, execution.task.sessionId),
-            readRound: roundId => execution.log.readRound(roundId),
-            loadArtifact: id => this.options.loadArtifact(id),
-            retrieveMemory: includeMemory && this.options.retrieveMemory ? (plan, agent) => this.options.retrieveMemory!(plan, agent, {
-                sessionId: execution.task.sessionId, policy: structuredClone(execution.config.memoryPolicy),
-            }) : undefined,
-        });
     }
 
     private async directTask(
@@ -507,105 +430,6 @@ export class ConversationRunCoordinator {
             this.options.eventBus.emitSession(execution.task.sessionId, event);
         }
     }
-}
-
-function contextPlan(
-    execution: ConversationExecution,
-    location: ConversationLocation,
-    profile: { id: string; revision: number },
-) {
-    return {
-        branchRef: location.branchRef,
-        branchHead: location.branchHead,
-        profile,
-        // The assembler de-duplicates this against the Round that owns it, so a
-        // Round excluded by context policy can never drop the prompt entirely.
-        pendingUserMessage: { role: 'user' as const, content: execution.task.input.text },
-        pendingRoundId: execution.roundId,
-        explicitInputs: [],
-        tokenBudget: execution.config.defaultContextPolicy?.tokenBudget,
-    };
-}
-
-function directTaskSpec(
-    execution: ConversationExecution,
-    snapshot: ContextSnapshot,
-    catalog: { definitions: ToolDefinition[]; externalIds: string[] },
-    skills: LLMSkill[],
-    policy: ResolvedDirectAgentPolicy,
-): TaskSpec<DurableAgentInput> {
-    const tools = directToolIds(execution.config, execution.task.input);
-    const mode = directExecutionMode(execution.task.input);
-    // 客户端 WebSearchTool 注入开关：仅 'client-tool' 态注入；'builtin' 与 'disabled'
-    // 均剥离，避免重复检索。决策直接消费 webSearchMode（源自 resolveWebSearchStrategy）。
-    const definitions = catalog.definitions.filter(tool => tools.includes(toolNameOf(tool))
-        && (execution.config.webSearchMode === 'client-tool' || toolNameOf(tool) !== CLIENT_WEB_SEARCH_TOOL));
-    // Initial Skill selection activates the same snapshots a runtime load_skill returns,
-    // so critical rules are re-injected per round and tools stay inside the declared set.
-    const allowedToolIds = execution.config.webSearchMode === 'client-tool'
-        ? tools : tools.filter(id => id !== CLIENT_WEB_SEARCH_TOOL);
-    const skillContexts = initialSkillContexts(skills, { definitions: catalog.definitions, externalIds: catalog.externalIds },
-        allowedToolIds, new Set(execution.config.capabilityPolicy?.skillIds ?? []));
-    return {
-        program: { kind: mode === 'agent' || tools.length ? 'llm.agent' : 'llm.chat', version: '1' },
-        input: buildLlmTaskInput({
-            sessionId: execution.task.sessionId,
-            roundId: execution.roundId,
-            messages: snapshot.canonicalMessages,
-            connectionId: execution.config.connectionId,
-            model: execution.config.model,
-            temperature: execution.config.temperature,
-            maxTokens: execution.config.constraints?.maxTokens,
-            thinking: execution.config.enableThinking,
-            reasoningEffort: execution.config.reasoningEffort,
-            webSearch: execution.config.webSearchMode === 'builtin',
-            stream: execution.config.stream,
-            approval: 'external',
-            maxExchanges: mode === 'agent' ? policy.maxExchanges : undefined,
-            llmRetry: mode === 'agent' ? policy.llmRetry : undefined,
-            toolTimeoutMs: mode === 'agent' ? policy.toolTimeoutMs : undefined,
-            tools: definitions,
-            allowedToolIds,
-            externalToolIds: catalog.externalIds,
-            memoryPolicy: execution.config.memoryPolicy,
-            ...(skillContexts.length ? { skillContexts } : {}),
-        }),
-        labels: { roundId: execution.roundId, kind: mode === 'agent' || tools.length ? 'agent' : 'chat',
-            ...(mode ? { executionMode: mode } : {}) },
-        deferStart: true,
-    };
-}
-
-/**
- * Host-side Skill activation port for Flow Agent nodes: resolves the selected Skills and
- * binds their tools against the same catalog the node itself is allowed to use.
- */
-export function skillContextResolver(options: Pick<ConversationRunCoordinatorOptions, 'resolveSkills' | 'resolveTools'>) {
-    return async (sessionId: string, skillIds: string[], allowedToolIds: string[]): Promise<SkillContext[]> => {
-        if (!options.resolveSkills) return [];
-        const skills = await options.resolveSkills(skillIds, sessionId);
-        if (!skills.length) return [];
-        const catalog = await options.resolveTools?.(sessionId, allowedToolIds) ?? { definitions: [], externalIds: [] };
-        return buildSkillContexts(skills, catalog, allowedToolIds, new Set(skillIds));
-    };
-}
-
-/** 从统一 ToolDefinition 中取工具名（function.name 或顶层 name）。 */
-function toolNameOf(tool: ToolDefinition): string {
-    return tool.function?.name ?? tool.name ?? '';
-}
-
-/**
- * Snapshots for Skills selected at initialization, shared with the Flow executor path.
- * The builder keeps every activation inside the caller's capability set.
- */
-function initialSkillContexts(
-    skills: LLMSkill[],
-    catalog: { definitions: ToolDefinition[]; externalIds: string[] },
-    allowedToolIds: string[],
-    selectedIds: ReadonlySet<string>,
-): NonNullable<DurableAgentInput['skillContexts']> {
-    return buildSkillContexts(skills, catalog, allowedToolIds, selectedIds);
 }
 
 function conversationRound(

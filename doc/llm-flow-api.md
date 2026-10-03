@@ -221,7 +221,8 @@ flowRevisionDigest(flow: Omit<FlowRevision, 'digest'>): string; // 修订摘要�
 ```mermaid
 flowchart LR
     Host[宿主身份解析] -->|bindNode 端口| Mutation[GraphMutationRuntime]
-    Scheduler[DurableFlowExecutor] -->|已完成节点的输出| Mutation
+    Executor[DurableFlowExecutor] --> Scheduler[FlowScheduler]
+    Scheduler -->|已完成节点的输出| Mutation
     Mutation -->|校验后修改| State[单次运行图状态]
     Mutation --> Validation[端口 / 容量 / 变量校验]
     Scheduler --> Delegation[DelegationController]
@@ -251,11 +252,11 @@ flowchart LR
 
 执行器仍按 task.started → submit → 记住变量快照与运行成员 → 绑定能力 → checkpoint 的顺序协调提交。LLM 任务及控制组保持 deferStart，图重试 generation 与恢复 requestId 保持原格式；输入装配拆分不改变启动或幂等边界。
 
-`scheduler-state.ts` 统一集合恢复、Task 重挂和 checkpoint 序列化，继续使用 version-1 存储格式。`GraphRetryController` 消费已受理意图，处理下游失效、提交代数、token 退款和递归委派清理；同次消费内，CAS 重读不重复应用同一 requestId，并保留并发追加的新意图。意图确认与 checkpoint 仍是两个写入，本次修复限于同次消费的 CAS 重试，不新增跨写入原子协议。
+`scheduler-state.ts` 统一集合恢复、Task 重挂和 checkpoint 序列化，继续使用 version-1 存储格式。`GraphRetryController` 消费已受理意图，处理下游失效、提交代数、token 退款和递归委派清理；同次消费内，CAS 重读不重复应用同一 requestId，并保留并发追加的新意图。图状态与 `appliedGraphRetries` 回执先写入同一 checkpoint，再 CAS 确认队列。恢复读取回执，跳过已经应用的 requestId，避免确认前崩溃导致代数/退款重复；checkpoint 写入失败不确认队列。两个写入仍是独立事务，靠可重放协议保证恢复。
 
 `FlowRunLifecycle` 处理工作区创建/恢复、收尾、失败清理与 detached drain；宿主只提供 manager 和 dispose 状态，调用方传入 fenced Session/租约。`FlowRunAggregation` 处理根 Task、运行成员、变量和结果投影，保持输出抑制、失败容忍、结果顺序与嵌套 invocation 幂等请求。根创建使用当前 Session，取得租约后最终投影使用 fenced Session。
 
-运行装配、所有权边界和主调度仍由执行器协调；图修改组件不自行写存储或取得租约。循环 back-edge 的派发顺序约束，以及 join 只能取消已观察依赖的约束保持原行为。
+运行装配与所有权边界由执行器协调；`FlowScheduler` 经显式端口管理并发派发、等待、生产者校验与结算，失权或宿主关闭返回 detached；图修改组件不自行写存储或取得租约。循环 back-edge 的派发顺序约束，以及 join 只能取消已观察依赖的约束保持原行为。
 
 ## 插件
 
@@ -411,3 +412,5 @@ Flow 的发布 revision 与草稿 draftVersion 分开保存。Session 重跑使�
 ### variables 与 assign
 
 FlowDraft/FlowRevision.variables 声明类型和 initial；FlowNodeDefinition.assign 将输出映射到变量。DagRunSpec 同步携带声明与子流程 variableScopes。模板支持 `${vars.field}`、赋值阶段的 `${output.field}` 和 `${output}`。变量提交进入 SchedulerCheckpoint，RunGet 与最终输出可读取其状态与来源。完整语义及示例见 [Flow 内部变量](./design/flow-variables.md)。
+
+调度 checkpoint 经 checkpoint-decoder 验证后恢复，图效果整批结构解码后才进入语义校验和修改；未知插件 config/input 的语义归插件目录。旧 version-1 checkpoint 可不含重试回执，新字段缺省为空。

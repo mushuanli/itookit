@@ -8,19 +8,21 @@
 |---|---|---|---|---|
 | `FileStorageBackend` / `OperationOptions` | `files` + 可选 `mutations`，signal/timeoutMs，opaque revision | `vfs-core/src/interfaces/storage/file-storage.ts`、`vfs-core/src/interfaces/core/operation.ts` | `vfsdriver-http` | `FileStorageAdapter` → VFS |
 | `IStorageBackend` | `stat/list/read/write/mkdir/delete/rename` | `vfs-core/interfaces/storage/` | `vfsdriver-indexeddb`、`vfsdriver-localfs` | `vfs-core (VFSEngine)` |
-| `IVFSManager` | `openFileSystem()/mounts/devices/plugins` | `vfs-core/interfaces/services/vfs-manager.ts` | `vfs-core (VFSManager)` | `app-core`、`app-shell`、`driver-llm` |
+| `IVFSManager` | `openFileSystem()/mounts/devices/plugins` | `vfs-core/interfaces/services/vfs-manager.ts` | `vfs-core (VFSManager)` | `app-core`、`app-shell`、`kernel-adapters` |
 | `IFileSystem` | `openFile()/driver/meta/capabilities/capabilitiesAt()/discoveryRoot?()` | `vfs-core/interfaces/services/file-system.ts` | `vfs-core (FileSystemView)` | `vfs-ui`、`llm-ui`、`llm-session`、`app-core` |
 | `IFSDriver` | `getNode/getChildren/readContent/writeContent/createFile/createDirectory/rename/move/delete/search` | `vfs-core/interfaces/services/fs-driver.ts` | `FileSystemView.driver` | `vfs-ui`、`mdx-adapter`、`llm-session` |
 | `IFSMetaDriver` | `assets/tags/seq/refs/watcher` | `vfs-core/interfaces/services/fs-meta-driver.ts` | `FileSystemView.meta` | `llm-session`、`mdx-adapter` |
 | `IFile` | `read()/write()`（extends `IIOStream`） | `vfs-core/interfaces/IFile.ts` | `FileHandle`、`MDXFileHandle` | `mdx-adapter`、`llm-session` |
 | `FileDiscoverySource` / `FileDiscoveryOptions` | `list/stat/readIgnoreFile/rootFor`；`includeIgnored/excludeDirectories/signal` | `vfs-core/interfaces/services/file-discovery.ts` | VFS 适配器、tools Node 适配器 | `discoverFiles` → 工具搜索及 llm-ui 文件候选 |
 | `IIOStream` | `read()/write()/readStream?/close?` | `vfs-core/interfaces/` | 文件/设备句柄 | 文件↔LLM↔TTY 互拷 |
-| `IDeviceDriver` | `open()/ioctl()/close()` | `vfs-core/interfaces/device/` | `LLMDeviceDriver`、TTY driver | `kernel-adapters`、`driver-llm` |
+| `IDeviceDriver` | `open()/ioctl()/close()` | `vfs-core/interfaces/device/` | `LLMDeviceDriver`、TTY driver | `kernel-adapters`、`app-core` |
 
 ## LLM 契约（能力包公开入口）
 
 | 接口/类型 | 核心字段/方法 | 定义 | 实现 | 消费 |
 |---|---|---|---|---|
+| `EditorTaskControlPlane` / `AttachedTask` | openTask/openSession/listSessionTasks；共享挂接身份、Task 事件及控制 | `llm-ui/src/domain/ports/TaskControlPlane.ts`，从 `/chat` 和根入口导出 | Kernel 或宿主远程客户端 | 聊天编辑器、任务挂接及 pending 恢复 |
+| `SessionViewBinding` / `LLMFactoryDependencies` | 显式 sessionManager 或 resolveSessionView；仓储及可选宿主端口 | `llm-ui/src/chat.ts` | 宿主组合根 | createLLMFactory |
 | `ILLMService` | `chat()`、`chatStream()`、`abort()`、`getConnection()` | `driver-llm/src/types/service.ts` | `kernel-adapters LLMServiceAdapter` | `llm-tasks`（经 effect）、`llm-session` |
 | `ChatMessage` | `role/content/attachments?` | `llm-context/src/domain/message.ts` | driver-llm | 全部 LLM 层 |
 | `ChatCompletionParams/ChatCompletionResponse/ChatCompletionChunk` | `messages/model/tools/stream/webSearch`… | `driver-llm/src/types/response.ts` | driver-llm providers | `llm-tasks`、`kernel-adapters` |

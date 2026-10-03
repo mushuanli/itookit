@@ -84,3 +84,24 @@ describe('graph retry queue reconciliation', () => {
         expect(session.setShared).not.toHaveBeenCalled();
     });
 });
+
+it('commits scheduler state before acknowledgement and leaves failed commits pending', async () => {
+    const calls: string[] = [];
+    const session = {
+        getShared: vi.fn(async () => ({ value: [retryIntent('first')], version: 1 })),
+        setShared: vi.fn(async () => { calls.push('ack'); }),
+    } as unknown as Pick<SessionHandle, 'getShared' | 'setShared'>;
+    await consumeGraphRetryIntents(session, 'root', async () => { calls.push('apply'); }, async () => { calls.push('checkpoint'); });
+    expect(calls).toEqual(['apply', 'checkpoint', 'ack']);
+    session.setShared = vi.fn();
+    await expect(consumeGraphRetryIntents(session, 'root', async () => {}, async () => { throw new Error('checkpoint failed'); }))
+        .rejects.toThrow('checkpoint failed');
+    expect(session.setShared).not.toHaveBeenCalled();
+});
+
+it('rejects a corrupt queue without mutating or acknowledging it', async () => {
+    const session = { getShared: vi.fn(async () => ({ value: [retryIntent('valid'), null], version: 1 })), setShared: vi.fn() };
+    const apply = vi.fn();
+    await expect(consumeGraphRetryIntents(session as never, 'root', apply)).rejects.toThrow('Invalid Flow graph retry queue');
+    expect(apply).not.toHaveBeenCalled(); expect(session.setShared).not.toHaveBeenCalled();
+});

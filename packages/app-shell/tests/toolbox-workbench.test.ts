@@ -150,7 +150,7 @@ it('groups providers by availability and keeps settings before their connections
     const f = await setup();
     for (const [id, name, apiKey, enabled] of [
         ['ready', 'Z Ready', 'secret', true], ['empty', 'A Empty', '', true], ['off', 'A Disabled', 'secret', false],
-    ] as const) await runtime.agentService.saveProvider({ id, name, apiKey, enabled, icon: 'R', implementation: 'openai-compatible', models: [] });
+    ] as const) await runtime.agentService.saveProvider({ baseURL: '', id, name, apiKey, enabled, icon: 'R', implementation: 'openai-compatible', models: [] });
     await runtime.agentService.saveConnection({ id: 'drawer-conn', name: 'A Connection', providerId: 'ready' });
     await vi.waitFor(() => expect(f.inventory.connections.has('drawer-conn')).toBe(true));
     f.workbench.setFilter('models');
@@ -340,7 +340,7 @@ it('reuses the MCP editor confirmation when deleting from the resource list', as
 });
 it('exposes provider drawer export and deletion for custom and builtin providers', async () => {
     const f = await setup();
-    await runtime.agentService.saveProvider({ id: 'deletable', name: 'Custom provider', implementation: 'openai-compatible', models: [] });
+    await runtime.agentService.saveProvider({ baseURL: '', id: 'deletable', name: 'Custom provider', implementation: 'openai-compatible', models: [] });
     await runtime.agentService.saveConnection({ id: 'deletable-connection', name: 'Linked connection', providerId: 'deletable' });
     await vi.waitFor(() => expect(f.sidebar.querySelector('[data-item-id="/model-groups/deletable"]')).not.toBeNull());
     f.workbench.setFilter('models');
@@ -385,7 +385,7 @@ it('keeps bulk deletion and JSON export for editable files while tool references
 });
 it('deletes a provider with the selected default connection and clears the preference', async () => {
     const f = await setup();
-    await runtime.agentService.saveProvider({ id: 'protected-provider', name: 'Protected', implementation: 'openai-compatible', models: [] });
+    await runtime.agentService.saveProvider({ baseURL: '', id: 'protected-provider', name: 'Protected', implementation: 'openai-compatible', models: [] });
     await runtime.agentService.saveConnection({ id: 'default', name: 'Protected default', providerId: 'protected-provider' });
     await runtime.agentService.setDefaultConnection('default');
     await vi.waitFor(() => expect(f.sidebar.querySelector('[data-item-id="/model-groups/protected-provider"]')).not.toBeNull());

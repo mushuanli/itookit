@@ -1,3 +1,4 @@
+import { graphEffects } from './graph-decoder';
 import type { TaskHandle } from '@itookit/durable-kernel';
 import type { DagEdgeDefinition, DagNodeDefinition, DagRunSpec, GraphEffect, GraphPatch, JsonValue } from '../contracts';
 import type { EdgeState } from './delegation-runtime';
@@ -131,11 +132,6 @@ export class GraphMutationRuntime {
             if (handle) await handle.cancel(effect.reason);
         }
     }
-}
-
-function graphEffects(output: unknown): GraphEffect[] {
-    if (!isRecord(output) || !Array.isArray(output.effects)) return [];
-    return output.effects.filter(isRecord).map(effect => effect as unknown as GraphEffect);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

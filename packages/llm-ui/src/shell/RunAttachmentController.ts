@@ -2,17 +2,13 @@ import type {
     EventEnvelope,
     InteractionRequest,
     JsonValue,
-    TaskHandle,
     TaskRecord,
     TaskSignal,
 } from '@itookit/durable-kernel';
 import { randomUUID } from '@itookit/common';
 
-export type AttachedTask = Pick<TaskHandle, 'id' | 'events' | 'signal' | 'start' | 'cancel' | 'status' | 'respond' | 'pause' | 'interrupt' | 'resume'>;
-
-export interface TaskControlPlane {
-    openTask(id: string): Promise<AttachedTask>;
-}
+import type { AttachedTask, TaskControlPlane } from '../domain/ports/TaskControlPlane';
+export type { AttachedTask, TaskControlPlane } from '../domain/ports/TaskControlPlane';
 
 export interface RunAttachmentCallbacks {
     onEvent(event: EventEnvelope): void;

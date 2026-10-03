@@ -25,6 +25,8 @@ export interface SchedulerCheckpoint {
     skipped: string[];
     detachedNodes: string[];
     appliedPatches: [string, string][];
+    /** Retry receipts committed with graph state before acknowledging the intent queue. */
+    appliedGraphRetries?: string[];
     nodeDefaults: [string, Record<string, unknown>][];
     nodeConnections: [string, NonNullable<DagRunSpec['nodeConnections']>[string]][];
     consumedTokens: number;

@@ -23,8 +23,8 @@ async function setup() {
         loadArtifact: async () => null,
     } as never);
     const internal = coordinator as any;
-    vi.spyOn(internal, 'resolveLocation').mockResolvedValue({ branchRef: 'main', branchHead: null });
-    vi.spyOn(internal, 'assembleContext').mockResolvedValue({ blocks: [], canonicalMessages: [] });
+    vi.spyOn(internal.contextBuilder, 'resolveLocation').mockResolvedValue({ branchRef: 'main', branchHead: null });
+    vi.spyOn(internal.contextBuilder, 'assemble').mockResolvedValue({ blocks: [], canonicalMessages: [] });
     vi.spyOn(internal, 'startRound').mockResolvedValue(undefined);
     vi.spyOn(internal, 'projectRun').mockImplementation(() => {});
     vi.spyOn(internal, 'completeRound').mockResolvedValue(undefined);
@@ -114,3 +114,18 @@ it.each(['cancel', 'cancelAll'])('cancels the DAG root before it can create succ
         await system.dispose();
     }
 }, 15_000);
+
+it('cancels an admitted run if its initial Round cannot be persisted', async () => {
+    const system = await setup();
+    try {
+        const failure = new Error('Round storage unavailable');
+        vi.mocked((system.coordinator as any).startRound).mockRejectedValue(failure);
+        await expect(system.coordinator.executeDag(execution() as never, undefined, humanFlow)).rejects.toBe(failure);
+        await vi.waitFor(async () => {
+            const tasks = await system.kernel.listSessionTasks('session');
+            expect(tasks.length).toBeGreaterThan(0);
+            expect(tasks.every(task => ['cancelled', 'succeeded', 'failed'].includes(task.status))).toBe(true);
+        });
+        expect((system.coordinator as any).active.size).toBe(0);
+    } finally { await system.dispose(); }
+});

@@ -9,6 +9,7 @@ import { NodeFsOps } from '../../vfsdriver-localfs/src/fs/node-fs-ops';
 import { Kernel } from '@itookit/durable-kernel';
 import { SessionRepository, SessionManager, SessionCommand } from '@itookit/llm-session';
 import { SessionDirectoryStorageResolver } from '../../llm-session/src/persistence/session-directory-storage';
+import { createLLMFactory } from '../../llm-ui/src/chat';
 import { LLMWorkspaceEditor } from '../../llm-ui/src/shell/LLMWorkspaceEditor';
 import type { ICommandBus } from '@itookit/llm-session/contracts';
 
@@ -230,4 +231,29 @@ it('persists Agent and Connection changes to the original Session before disposa
     expect((await fresh.getSessionSettings(f.id))).toMatchObject({ connectionId: 'chosen-connection', modelTier: 'fast' });
     expect((await fresh.getUIState(f.id))?.branchDrafts?.main?.inputAgentId).toBe('chosen');
     expect((await fresh.getSessionSettings(otherId)).connectionId).not.toBe('chosen-connection');
+});
+
+it('releases layout and shared connection subscriptions after factory initialization fails', async () => {
+    const f = await fixture(), container = document.createElement('div');
+    const unsubscribe = vi.fn(); f.agents.onChange = () => unsubscribe;
+    const removeListener = vi.spyOn(container, 'removeEventListener');
+    const failure = new Error('Bind failed'); f.bind.mockRejectedValueOnce(failure);
+    const factory = createLLMFactory(f.agents as never, { sessionManager: f.sessions,
+        sessionRepository: f.repository, commandBus: f.commandBus });
+    await expect(factory(container, { target: { kind: 'session', sessionId: f.id } })).rejects.toBe(failure);
+    expect(container.innerHTML).toBe('');
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(removeListener).toHaveBeenCalledWith('click', expect.any(Function));
+});
+
+it('continues disposal after save failure and returns the same destruction promise', async () => {
+    const f = await fixture(), container = document.createElement('div');
+    const editor = new LLMWorkspaceEditor(container, { sessionManager: f.sessions, sessionId: f.id,
+        sessionRepository: f.repository, commandBus: f.commandBus, agentService: f.agents as never });
+    await editor.init(container);
+    const failure = new Error('Save failed');
+    vi.spyOn(editor, 'flushPendingSave').mockRejectedValue(failure);
+    const destroy = editor.destroy(); expect(editor.destroy()).toBe(destroy);
+    await expect(destroy).rejects.toMatchObject({ errors: [failure] });
+    expect(container.innerHTML).toBe('');
 });

@@ -25,6 +25,7 @@ export interface GraphRetryState {
     depths: Map<string, number>;
     groupByChild: Map<string, string>;
     nodeGenerations: Map<string, number>;
+    appliedGraphRetries: Set<string>;
     nodeDefaults: Map<string, Record<string, unknown>>;
     nodeConnections: Map<string, NonNullable<DagRunSpec['nodeConnections']>[string]>;
     edgeState: Map<string, EdgeState>;
@@ -39,13 +40,13 @@ export class GraphRetryController {
     constructor(private readonly state: GraphRetryState) {}
 
     async consume(): Promise<number> {
-        const count = await consumeGraphRetryIntents(this.state.session, this.state.run.root.id, intent => this.apply(intent));
-        if (count) await this.state.persist();
-        return count;
+        return consumeGraphRetryIntents(this.state.session, this.state.run.root.id,
+            intent => this.apply(intent), () => this.state.persist());
     }
 
     private async apply(intent: FlowGraphRetryIntent): Promise<void> {
         const state = this.state;
+        if (state.appliedGraphRetries.has(intent.requestId)) return;
         const source = String(intent.sourceNodeId);
         const reason = `Graph retry of ${source}`;
         state.variables.retry(intent.sourceTaskId, intent.retryTaskId);
@@ -60,6 +61,7 @@ export class GraphRetryController {
             state.run.taskIds.add(intent.retryTaskId);
         }
         for (const nodeId of intent.downstream) await this.resetDownstream(nodeId, reason);
+        state.appliedGraphRetries.add(intent.requestId);
     }
 
     private async resetDownstream(nodeId: string, reason: string): Promise<void> {

@@ -10,7 +10,7 @@ async function fixture(selected?: string) {
     const prompts: SystemPromptDefinition[] = [{ id: 'shared', name: '<Shared>', content: ['Shared rule'], presets: [{ name: 'Review', prompt: 'Review it' }] }];
     const service = { listSystemPrompts: async () => [...prompts], getSystemPrompt: async (id: string) => prompts.find(prompt => prompt.id === id) ?? null,
         saveSystemPrompt: vi.fn(async (prompt: SystemPromptDefinition) => { prompts.push(prompt); }),
-        getMCPServers: async () => [], getSkills: async () => [] };
+        saveAgent: vi.fn(async () => {}), getMCPServers: async () => [], getSkills: async () => [] };
     const host = document.createElement('div'), navigate = vi.fn();
     const editor = new AgentConfigEditor(host, { hostContext: { navigate } } as never, service as never);
     cleanup.push(() => editor.destroy());
@@ -42,6 +42,8 @@ it('copies the shared definition explicitly and selects the independent copy', a
     const copied = f.service.saveSystemPrompt.mock.calls[0][0];
     expect(copied.id).not.toBe('shared'); expect(copied.content).toEqual(['Shared rule']);
     expect(JSON.parse(f.editor.getText()).config.systemPromptId).toBe(copied.id);
+    await f.editor.flushPendingSave();
+    expect(f.service.saveAgent).toHaveBeenCalledWith(expect.objectContaining({ config: expect.objectContaining({ systemPromptId: copied.id }) }));
     copied.content[0] = 'Changed copy'; expect(f.prompts[0].content).toEqual(['Shared rule']);
 });
 

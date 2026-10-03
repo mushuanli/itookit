@@ -10,7 +10,7 @@ import type { IAgentConfigService } from '@itookit/kernel-adapters/contracts';
 import { IEditor } from '@itookit/ui-common';
 import type { ICommandBus } from '@itookit/llm-session/contracts';
 import { EditorFactory, EditorOptions } from '@itookit/ui-common';
-import type { Kernel } from '@itookit/durable-kernel';
+import type { EditorTaskControlPlane } from './domain/ports/TaskControlPlane';
 
 export type {
     IPrivilegedCommandService,
@@ -30,27 +30,32 @@ export type { FlowsEditorDeps } from './components/FlowsEditor';
  *
  * @example 动态创建带初始状态的会话
  * ```ts
- * const factory = createLLMFactory(agentService, { sessionRepository });
+ * const factory = createLLMFactory(agentService, { sessionRepository, sessionManager });
  * const editor = await factory(container, {
  *     title: 'New Chat',
  *     fs: chatModuleFS
  * });
  * ```
  */
+/** A formal Session factory must receive one explicit instance source. */
+export type SessionViewBinding =
+    | { sessionManager: import('./domain/ports/SessionViewPort').SessionViewPort; resolveSessionView?: never }
+    | { sessionManager?: never; resolveSessionView: () => import('./domain/ports/SessionViewPort').SessionViewPort };
+
+export type LLMFactoryDependencies = SessionViewBinding & {
+    defaultHarnessToolIds?: readonly string[];
+    sessionRepository: ISessionRepository;
+    ocr?: import('@itookit/ui-common').OcrControls;
+    commandBus?: ICommandBus;
+    kernel?: EditorTaskControlPlane;
+    privilegedCommands?: import('./domain/ports/IPrivilegedCommandService').IPrivilegedCommandService;
+    sessionSkills?: import('@itookit/tools/contracts').SessionSkillControls;
+    onLoadMetrics?: LLMEditorOptions['onLoadMetrics'];
+};
+
 export const createLLMFactory = (
     agentService: IAgentConfigService,
-    deps: {
-        defaultHarnessToolIds?: readonly string[];
-        sessionManager?: import('./domain/ports/SessionViewPort').SessionViewPort;
-        resolveSessionView?: () => import('./domain/ports/SessionViewPort').SessionViewPort;
-        sessionRepository: ISessionRepository;
-        ocr?: import('@itookit/ui-common').OcrControls;
-        commandBus?: ICommandBus;
-        kernel?: Kernel;
-        privilegedCommands?: import('./domain/ports/IPrivilegedCommandService').IPrivilegedCommandService;
-        sessionSkills?: import('@itookit/tools/contracts').SessionSkillControls;
-        onLoadMetrics?: LLMEditorOptions['onLoadMetrics'];
-    },
+    deps: LLMFactoryDependencies,
 ): EditorFactory => {
 
     // 跟踪进行中的创建，按 sessionId 去重
@@ -80,12 +85,14 @@ export const createLLMFactory = (
             }
         }
 
+        const sessionManager = deps.sessionManager ?? deps.resolveSessionView?.();
+        if (!sessionManager) throw new Error('Chat editor requires an injected session view');
         const editorOptions: LLMEditorOptions = {
             ...chatOptions,
             agentService,
             sessionId,
             sessionRepository: engine,
-            sessionManager: deps.sessionManager ?? deps.resolveSessionView?.(),
+            sessionManager,
             defaultHarnessToolIds: deps.defaultHarnessToolIds,
             ocr: deps.ocr,
             commandBus: deps.commandBus,
@@ -97,12 +104,14 @@ export const createLLMFactory = (
 
         // 将创建过程包装为 Promise，注册到 pendingCreations
         const createPromise = (async () => {
+            let editor: LLMWorkspaceEditor | undefined;
             try {
-                const editor = new LLMWorkspaceEditor(container, editorOptions);
+                editor = new LLMWorkspaceEditor(container, editorOptions);
                 await editor.init(container, options.initialContent);
                 return editor;
             } catch (e) {
-                console.error(`[LLMFactory] Editor creation failed for ${sessionId}:`, e);
+                try { await editor?.destroy(); }
+                catch (cleanupError) { throw new AggregateError([e, cleanupError], 'Editor initialization and cleanup failed'); }
                 throw e;
             } finally {
                 // 无论成功失败，都清理 pending 记录
@@ -133,3 +142,5 @@ export { installFlowLibrary, restoreFlowLibrary } from './flows/library';
 export type { SessionViewPort, PromptHistoryPort } from './domain/ports/SessionViewPort';
 
 export type { FlowContextMenuOptions } from './flows/context-menu';
+
+export type { EditorTaskControlPlane, TaskControlPlane, TaskAttachmentSession, PendingInteractionTaskSource, AttachedTask } from './domain/ports/TaskControlPlane';

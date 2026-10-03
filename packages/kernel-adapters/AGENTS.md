@@ -91,18 +91,20 @@ pnpm --filter @itookit/kernel-adapters typecheck
 
 ## 模型管理子入口
 
-`@itookit/kernel-adapters/llm` 承接旧 device-llm 的 LLMDeviceDriver、LLM_IOCTL、配置、费用、Skill 与 MCP 管理。源码在 `src/llm-management/`，回归在 `tests/llm-management/`；不是额外 npm 包。公开通信客户端与契约来自 driver-llm，禁止其反向依赖本包。MCP stdio 保留 browser/default 条件入口。详见 [模型集成](./doc/llm-management/README.md)。
+`@itookit/kernel-adapters/llm/core` 承接旧 device-llm 的 LLMDeviceDriver、LLM_IOCTL、配置、费用、Skill 与 MCP 管理。源码在 `src/llm-management/`，回归在 `tests/llm-management/`；不是额外 npm 包。公开通信客户端与契约来自 driver-llm，禁止其反向依赖本包。MCP stdio 保留 browser/default 条件入口。详见 [模型集成](./doc/llm-management/README.md)。
 
 ## 配置契约入口
 
 `@itookit/kernel-adapters/contracts` 定义 Agent、连接管理、恢复与定价契约及纯策略，不加载适配器运行时、VFS、YAML 或 MCP SDK。Session 与设置 UI 直接消费此入口；适配层不得反向依赖 Session、Flow 或 Tasks。模型事件来自 driver-llm/contracts 的 LlmCommunicationEvent。
 
-模型管理机制使用 `/llm/core`，预设经 `presets` 快照注入，自动连接经 `providerConnectionPolicy` 注入。MindOS 目录与默认连接策略只在可选 `/llm/presets`；旧 `/llm` 构造器保留兼容默认行为。禁止机制入口加载产品目录。
+模型管理机制使用 `/llm/core`，预设经 `presets` 快照注入，自动连接经 `providerConnectionPolicy` 注入。MindOS 目录与默认连接策略只在可选 `/llm/presets`；旧 `/llm` 聚合入口已删除。禁止机制入口加载产品目录。
 
-配置格式与目录组合只从 `/llm/config` 提供，不依赖产品目录或设备实现。MCP 宿主桥从 `/llm/mcp-host` 的 createMCPStdioTransportFactory 创建，通过驱动 options.mcp.stdioTransport 注入。机制入口禁止读取全局桥；旧 `/llm` 构造器仅在构造时快照兼容注册。
+配置格式与目录组合只从 `/llm/config` 提供，不依赖产品目录或设备实现。MCP 宿主桥从 `/llm/mcp-host` 的 createMCPStdioTransportFactory 创建，通过驱动 options.mcp.stdioTransport 注入。机制入口禁止读取全局桥；不提供全局桥注册或兼容构造器。
 
 构建自动运行 [入口检查](../../scripts/check-llm-entrypoints.mjs)，递归检查 ESM/CJS 配置与机制导入图，并验证核心入口不加载旧 MCP 全局注册模块。
 
 MCP 日志与客户端身份经 MCPConnectionOptions.logger/clientInfo 实例注入；机制默认空日志与通用身份，禁止读取 common 全局日志或内置 MindOS 身份。
 
 诊断日志与进程不可用提示通过实例选项注入；禁止重新引入 common 全局日志/翻译、MCP 全局注册或旧 /llm 聚合。设备 ioctl 分为管理分派表与 MCP/Skill/Chat 会话处理。
+
+设备 ioctl 在分派前验证身份、配置、消息和调用参数；Connection/Provider 直接保存路径也验证，加载时跳过无效配置并保留合法删除回执。模型 URL、密钥和协议字段不允许依赖 JavaScript 隐式转换；配置身份禁止路径分隔符。Skill 定义和 MCP 配置继续由各自管理器检查语义。

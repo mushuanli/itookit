@@ -1,3 +1,4 @@
+import { isIdentity, isRecord, strings } from './graph-decoder';
 // @file: llm-flow/src/flow/graph-retry.ts
 // 图级 retry：重试某节点的 Task 后，让它在下游按新结果重算。
 //
@@ -100,7 +101,7 @@ async function appendIntent(session: SessionHandle, rootId: string, intent: Flow
     const key = graphRetryKey(rootId);
     for (let attempt = 0; attempt < 5; attempt++) {
         const saved = await session.getShared(key);
-        const current = Array.isArray(saved?.value) ? saved!.value as unknown as FlowGraphRetryIntent[] : [];
+        const current = decodeGraphRetryIntents(saved?.value);
         if (current.some(entry => entry.requestId === intent.requestId)) return;
         try {
             await session.setShared(key, [...current, intent] as unknown as JsonValue,
@@ -121,12 +122,13 @@ export async function consumeGraphRetryIntents(
     session: Pick<SessionHandle, 'getShared' | 'setShared'>,
     rootId: string,
     apply: (intent: FlowGraphRetryIntent) => Promise<void>,
+    persist?: () => Promise<void>,
 ): Promise<number> {
     const key = graphRetryKey(rootId);
     const reconciled = new Set<string>();
     for (let attempt = 0; attempt < 5; attempt++) {
         const saved = await session.getShared(key);
-        const intents = Array.isArray(saved?.value) ? saved.value as unknown as FlowGraphRetryIntent[] : [];
+        const intents = decodeGraphRetryIntents(saved?.value);
         const pending = intents.filter(intent => !intent.applied);
         if (!pending.length) return reconciled.size;
         for (const intent of pending) {
@@ -134,6 +136,8 @@ export async function consumeGraphRetryIntents(
             await apply(intent);
             reconciled.add(intent.requestId);
         }
+        // Commit reconciled graph state and receipts before acknowledging the queue.
+        await persist?.();
         try {
             await session.setShared(key, intents.map(intent => intent.applied ? intent : { ...intent, applied: true }) as unknown as JsonValue,
                 { expectedVersion: saved?.version ?? null });
@@ -141,4 +145,16 @@ export async function consumeGraphRetryIntents(
         } catch (error) { if (attempt === 4) throw error; }
     }
     return reconciled.size;
+}
+
+/** Refuse corrupt queues before applying or acknowledging any intent. */
+export function decodeGraphRetryIntents(value: unknown): FlowGraphRetryIntent[] {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || !value.every(isRetryIntent)) throw new TypeError('Invalid Flow graph retry queue');
+    return value;
+}
+function isRetryIntent(value: unknown): value is FlowGraphRetryIntent {
+    return isRecord(value) && value.version === 1
+        && ['requestId', 'sourceTaskId', 'retryTaskId', 'sourceNodeId'].every(key => isIdentity(value[key]))
+        && strings(value.downstream) && (value.applied === undefined || typeof value.applied === 'boolean');
 }

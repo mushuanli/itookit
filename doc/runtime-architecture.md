@@ -561,16 +561,16 @@ sequenceDiagram
 
 | 热点 | 审查基线 → 实施后 | 结构与剩余工作 |
 |---|---:|---|
-| llm-flow/src/flow/executor.ts 的 execute | 约 770 → 376 行 | 已提取就绪判定、图修改、委派管理、节点输入准备和任务请求构造，显式持有单次运行状态与宿主绑定端口；本轮继续集中恢复集合、重试消费、工作区生命周期和根聚合；主调度与装配仍需治理 |
+| llm-flow/src/flow/executor.ts 的 execute | 约 770 → 294 行 | 主调度移入 FlowScheduler；执行器保留装配、租约和提交协调，恢复、图修改、委派、输入准备、任务构造、工作区及根聚合均有组件 |
 | llm-ui/src/components/input/plugins/SlashCommandPlugin.ts 的 buildDefaultCommands | 约 439 → 3 行 | 命令描述移至 slash-command-catalog，参数解析移至 slash-tool-args；弹窗仅消费描述目录 |
 | llm-ui/src/shell/SlashCommandRouter.ts 的 buildSlashCallbacks | 约 366 → 12 行 | 按会话、模型、工具、导航领域组织处理器；创建状态通过宿主导航参数传递 |
-| kernel-adapters/src/llm-management/device/llm-device-driver.ts 的 ioctl | 约 205 → 11 行 | 管理命令使用类型化分派表；MCP、Skill、Chat 单独处理；输入 payload 校验仍可加强 |
-| llm-session/src/session/conversation-run-coordinator.ts | 文件约 818 行 | 准入、任务构造、Context 装配、历史投影与恢复分别测试 |
-| llm-ui/src/shell/LLMWorkspaceEditor.ts | 文件约 1245 行 | 视图装配、会话绑定、任务挂接、保存生命周期；避免编辑器持有全部业务分支 |
+| kernel-adapters/src/llm-management/device/llm-device-driver.ts 的 ioctl | 约 205 → 11 行 | 管理命令使用类型化分派表；MCP、Skill、Chat 单独处理；设备参数与存储配置在边界校验 |
+| llm-session/src/session/conversation-run-coordinator.ts | 文件约 818 → 643 行 | Context 装配与直接运行准备/TaskSpec 已分离；协调器保留 Round 与事件投影 |
+| llm-ui/src/shell/LLMWorkspaceEditor.ts | 文件约 1245 → 1195 行 | 挂接生命周期与完整资源清理已分离；控制依赖改为公开结构端口 |
 
 Provider wire 层与管理适配层存在 any 和双重断言，但数量不能证明错误。优先在外部 JSON、VFS ioctl 和持久化解码边界使用 unknown + 校验；已经校验后的稳定内部类型再逐步收紧。不要只替换关键字或为了函数≤30行而拆成没有语义的跳转。
 
-API 仍有改进空间：UI 工厂参数中的 sessionManager 与 resolveSessionView 均可省略，正式会话编辑器到运行时才报错；可用区分 Draft/Session 的依赖类型提前约束。UI 内部已有 TaskControlPlane，可以逐步用它替换暴露到 UI 工厂的具体 Kernel 类，但先确认所有消费所需方法；不应通过内联 Kernel 的私有字段类型破坏类身份。
+UI 工厂通过 SessionViewBinding 要求显式会话来源；EditorTaskControlPlane 收窄为 openTask/openSession/listSessionTasks 等公开结构方法，宿主可实现远程控制客户端，无需继承具体 Kernel。
 
 ### 冗余清理与实施结果
 
@@ -586,13 +586,13 @@ API 仍有改进空间：UI 工厂参数中的 sessionManager 与 resolveSession
 
 公开 API 删除以仓库消费者迁移和外部产物验证为依据，不能推断外部 npm 用户均已迁移。后续发布须明确兼容变更：全局 Provider 注册改用实例 Registry/Factory，旧 /llm 聚合改用明确子入口，Tasks 的 Context 转发改为直接导入 llm-context。本轮未发布。
 
-本轮完成兼容清理、实例策略/诊断注入、显式 UI 创建参数、命令目录和 ioctl 分派拆分，以及 Flow 就绪判定、动态图 patch 与图事件处理提取。Flow execute 仍约 376 行，Session 协调与编辑器生命周期仍有大函数；UI 工厂的具体 Kernel 类型和外部 JSON/ioctl 解码仍需进一步治理。不能把顶层函数缩短视为所有复杂度已消除。
+本轮完成兼容清理、实例策略/诊断注入、显式 UI 创建参数、命令目录和 ioctl 分派拆分，以及 Flow 就绪判定、动态图 patch 与图事件处理提取。最新批次已完成主调度、Session 上下文/直接运行准备、UI 生命周期及外部解码边界治理；装配与视图代码仍有大函数。不能把顶层函数缩短视为所有复杂度已消除。
 
 ### 验证证据
 
 本轮 Context 31、Tasks 68、Flow 346、UI 67、Driver 63、Adapters 209、app-core 232 项测试通过；app-shell 的 SessionWorkbench/Tauri bootstrap 定向 28 项和宿主边界 11 项通过。相关包构建、Web 构建、全仓类型检查、架构守卫和文档检查通过。Driver 打包后在工作区外验证结构 ProviderFactory、ESM/CJS 与严格类型；UI 外部消费者验证 root/chat/settings、实例 Session API 与兼容入口删除。外部检查时也重建了设置模块产物，避免旧产物继续引用已删除的 MCP API。
 
-Session 回归补迁了 pending-user 测试中遗漏的 ContextAssembler 导入，直接引用 llm-context；完整 Session 矩阵 215 项通过。完整 app-shell 矩阵仍有已知基线问题，以上定向通过不代表全仓测试矩阵通过。
+Session 回归补迁了 pending-user 测试中遗漏的 ContextAssembler 导入，直接引用 llm-context；完整 Session 矩阵 215 项通过。首轮完整 app-shell 矩阵发现 4 个基线失败；最新集中实施已修复草稿覆盖并迁移保存测试，完整宿主矩阵现已通过。以上仍不代表含 Rust 的全仓测试矩阵已运行。
 
 主要源码入口：
 
@@ -613,8 +613,43 @@ Session 回归补迁了 pending-user 测试中遗漏的 ContextAssembler 导入�
 
 本批提取 GraphRetryController、scheduler-state、FlowRunLifecycle 和 FlowRunAggregation，覆盖重试/下游失效/委派清理、checkpoint 恢复与序列化、工作区与 detached 生命周期、根任务及结果投影。公共 workspace 类型和 lease key 保持原入口，未新增 npm 包或根 API。执行器保留运行装配、租约切换和主调度，execute 约 376 行；函数长度下降不等同于消除全部圈复杂度。
 
-同时修复同次重试消费发生 CAS 冲突后重复应用意图的问题：相同 requestId 的图修改执行一次，重读合并并发新增意图。新增回归覆盖并发追加、确认写入失败和图协调失败不确认；本修复不改变意图确认与 checkpoint 分开写入的既有协议，其跨崩溃事务窗口仍需单独设计。
+同时修复同次重试消费发生 CAS 冲突后重复应用意图的问题：相同 requestId 的图修改执行一次，重读合并并发新增意图。新增回归覆盖并发追加、确认写入失败和图协调失败不确认；本修复不改变意图确认与 checkpoint 分开写入的既有协议，后续批次采用 checkpoint 回执先提交、队列后确认的恢复协议。
 
-剩余重点为 Session/UI 的准入、上下文与生命周期职责，外部 JSON/ioctl 的运行时解码，以及 Flow 主调度和重试持久协议的进一步治理。公共模块主要静态依赖方向与宿主策略注入已经成立，但不能将本次内部拆分宣称为全部质量目标完成。
+上述剩余架构审查项已在下一批集中实施，具体协议与验证见下节。公共模块依赖方向与宿主策略注入成立；这不等同于全仓每个函数都满足长度或所有厂商扩展字段均已获得静态类型。
 
 本批最终验证：Flow 349 项、Session 215 项、app-core 232 项回归通过；全仓类型检查、Flow ESM/CJS/声明构建、架构入口守卫和文档检查通过。打包产物在工作区外验证原公共入口、workspace 类型兼容以及 UI ESM/CJS 与严格 NodeNext 类型消费。未运行全仓测试矩阵或发布。
+
+
+### 集中实施：调度、会话、UI 与解码边界
+
+此前批次提交为 `25911b65`。本批完成此前列出的三类剩余实施项，不新增 npm 包或产品全局状态：
+
+- FlowScheduler 独立负责并发、控制组、交互等待和结算；租约失权仅退出本地调度。图效果整批解码，恢复 checkpoint 与重试队列在修改状态前校验。
+- 重试图状态与 appliedGraphRetries 回执同 checkpoint 提交，然后确认队列；恢复按回执跳过重复请求。确认失败可重放，checkpoint 失败不确认，旧 checkpoint 无回执按空集合恢复。
+- ConversationContextBuilder 独立处理历史位置、上下文预算和宿主材料；direct-conversation 装配工具/MCP/Skill 和直接任务。策略在 Context 计量前应用。初始 Round 持久化失败取消已提交 Run。
+- UI 工厂会话来源由类型约束；公开控制端口可由 Kernel 或远程客户端实现。挂接恢复校验当前编辑器身份，销毁幂等、顺序释放全部资源并汇总异常。加载配置记录基线，未编辑刷新不覆盖外部草稿。
+- Adapter 在 ioctl 分派和直接保存前验证参数，启动加载跳过畸形配置。Driver 对 HTTP/SSE envelope 和使用到的集合/消息字段解码，保持扩展字段、SSE 跳过语义、文本 delta 和 usage=null 兼容。
+
+```mermaid
+sequenceDiagram
+    participant Control as 控制端
+    participant Queue as Session retry queue
+    participant Scheduler as GraphRetryController
+    participant Checkpoint as Scheduler checkpoint
+    Control->>Queue: CAS append intent(requestId)
+    Scheduler->>Queue: read pending intents
+    Scheduler->>Checkpoint: read appliedGraphRetries on recovery
+    alt requestId has no receipt
+        Scheduler->>Scheduler: reconcile graph / generations / refunds
+        Scheduler->>Checkpoint: save graph state + receipt in one write
+    else receipt exists
+        Scheduler->>Scheduler: skip repeated reconciliation
+    end
+    Scheduler->>Queue: CAS acknowledge (retry on conflict)
+    Note over Scheduler,Checkpoint: Save failure leaves queue pending; crash after save resumes from receipt
+```
+
+机制执行已声明预算、授权与图策略，宿主决定模型、提示、工具目录、MCP、工作区和产品导航。会话层拥有 Round/Branch，编排层拥有图，Tasks 拥有单任务状态机；没有为了减少包数而合并这些不同语义。Provider 内部扩展类型及大型视图/装配代码仍可渐进优化，本批不宣称全仓圈复杂度达标。
+
+
+本批验证：Flow 358、Session 216、Driver 70、Adapters 217、UI 69、app-core 232 项回归通过；完整 app-shell 484 项通过、30 项按配置跳过，随后新增的初始化失败清理和销毁幂等 2 项也通过（该文件共 9 项）。全仓 TypeScript、相关 5 包构建、架构守卫和文档检查通过。Driver/UI tarball 在仓库外验证 ESM/CJS；严格 TS 消费者验证结构控制端口、必须注入的会话实例和 Flow workspace 公共类型。未执行包含 Rust 边界的全仓 pnpm test，未发布 npm。

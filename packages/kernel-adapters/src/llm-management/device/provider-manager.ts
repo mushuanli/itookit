@@ -1,3 +1,4 @@
+import { isProvider, isStoredProvider } from './argument-validation';
 // @file: device-llm/device/provider-manager.ts
 //
 // ProviderManager — manages LLMProvider catalog (built-in + user custom).
@@ -32,7 +33,7 @@ export class ProviderManager {
      * syncs structural fields for existing entries.
      */
     async syncDefaultProviders(preLoaded?: LLMProvider[]): Promise<void> {
-        const existing = preLoaded ?? await this.helpers.loadJsonFilesFromDir<LLMProvider>(PROVIDERS_DIR);
+        const existing = preLoaded ?? await this.helpers.loadJsonFilesFromDir<LLMProvider>(PROVIDERS_DIR, undefined, isStoredProvider);
         const existingIds = new Set(existing.map(p => p.id));
         for (const [key, def] of Object.entries(this.presets.providers)) {
             if (!existingIds.has(key)) {
@@ -65,7 +66,7 @@ export class ProviderManager {
 
     reloadProvidersFrom(fromVFS: LLMProvider[]): void {
         const merged = new Map(Object.entries(this.presets.providers).map(([k, v]) => [k, { ...v, id: k }]));
-        for (const p of fromVFS) {
+        for (const p of fromVFS.filter(isStoredProvider)) {
             if ((p as any).__deleted) { merged.delete(p.id); continue; }
             const def = this.presets.providers[p.id];
             // 内置 Provider：VFS 用户数据优先，但合并内置定义的结构性能力字段
@@ -92,6 +93,7 @@ export class ProviderManager {
     }
 
     async saveProvider(provider: LLMProvider, systemFS?: IFileSystem): Promise<void> {
+        if (!isProvider(provider)) throw new TypeError('Invalid LLM provider');
         await this.writeProviderToDisk(provider, systemFS);
         this._providers.set(provider.id, provider);
         this.onChanged();

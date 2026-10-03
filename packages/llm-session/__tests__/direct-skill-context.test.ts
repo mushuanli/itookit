@@ -3,7 +3,8 @@ import { expect, it, vi } from 'vitest';
 import { Kernel } from '@itookit/durable-kernel';
 import { DurableChatProgram } from '@itookit/llm-tasks';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
-import { ConversationRunCoordinator, skillContextResolver } from '../src/session/conversation-run-coordinator';
+import { ConversationRunCoordinator } from '../src/session/conversation-run-coordinator';
+import { skillContextResolver } from '../src/session/direct-conversation';
 
 it.each([false, true])('persists selected Skill and scoped memory in direct chat Task input (memory: %s)', async withMemory => {
     const { manager } = await createVFS({ rootBackend: new MemoryBackend() });

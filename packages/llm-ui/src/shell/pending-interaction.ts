@@ -1,4 +1,5 @@
-import type { Kernel, TaskRecord } from '@itookit/durable-kernel';
+import type { TaskRecord } from '@itookit/durable-kernel';
+import type { PendingInteractionTaskSource } from '../domain/ports/TaskControlPlane';
 
 const TERMINAL = ['succeeded', 'failed', 'cancelled'];
 
@@ -18,7 +19,7 @@ export function pendingInteractionTask(tasks: readonly TaskRecord[]): TaskRecord
 
 /** Re-attach a waiting run; returns the attached Task id when there was one. */
 export async function restoreWaitingAttachment(
-    kernel: Pick<Kernel, 'listSessionTasks'> & Partial<Pick<Kernel, 'listSessionPendingInteractionTasks'>>,
+    kernel: PendingInteractionTaskSource,
     sessionId: string,
     attach: (taskId: string) => Promise<void>,
     isCurrent: () => boolean = () => true,

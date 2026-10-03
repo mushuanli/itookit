@@ -1,4 +1,4 @@
-import { skillContextResolver } from './session/conversation-run-coordinator';
+import { skillContextResolver } from './session/direct-conversation';
 import { createSessionHost, type SessionHostPorts } from './utils/host-ports';
 import { FlowInvocationService } from './session/flow-invocations';
 import type { FlowInvocationSessions } from './persistence/flow-invocation-sessions';

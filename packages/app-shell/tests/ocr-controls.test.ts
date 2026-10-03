@@ -17,7 +17,7 @@ async function setup() {
     vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => { fn(0); return 0; });
     runtime = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'web' });
     const agents = runtime.agentService;
-    await agents.saveProvider({ id: 'vision', name: 'Vision', implementation: 'openai-compatible', apiKey: 'test',
+    await agents.saveProvider({ baseURL: '', id: 'vision', name: 'Vision', implementation: 'openai-compatible', apiKey: 'test',
         models: [{ id: 'image', name: 'Image', supportsVision: true }, { id: 'text', name: 'Text' }] });
     await agents.saveConnection({ id: 'ocr', name: '<OCR>', providerId: 'vision', tiers: { optimal: 'image' } });
     await agents.saveConnection({ id: 'text', name: 'Text', providerId: 'vision', tiers: { optimal: 'text' } });

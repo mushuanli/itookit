@@ -1,3 +1,6 @@
+import { disposeEditorResources } from './editor-disposal';
+import { rememberTaskAttachment, restoreTaskAttachment } from './task-attachment-lifecycle';
+import type { EditorTaskControlPlane } from '../domain/ports/TaskControlPlane';
 import type { SessionViewPort } from '../domain/ports/SessionViewPort';
 import { acquireConnectionOptions } from './connection-options-cache';
 import { rerunSession } from './rerun-session';
@@ -11,7 +14,7 @@ import { promptFlowParameters } from '../components/FlowParameterForm';
 import { IEditor, EditorOptions, EditorHostContext, EditorEvent, EditorEventMap, EditorEventCallback, CollapseExpandResult, Toast } from '@itookit/ui-common';
 import { EventBus } from '@itookit/vfs-core';
 import type { ICommandBus } from '@itookit/llm-session/contracts';
-import type { EventEnvelope, Kernel, InteractionRequest, JsonValue } from '@itookit/durable-kernel';
+import type { EventEnvelope, InteractionRequest, JsonValue } from '@itookit/durable-kernel';
 
 import { ISessionRepository, IAgentConfigService, type ConversationManifest, SessionCommand } from '@itookit/llm-session/contracts';
 
@@ -53,7 +56,6 @@ import {
     buildExecutorOptions, validateAgentId,
 } from './AgentProvider';
 import { promptInterruptedRun } from './InterruptedRunPrompt';
-import { restoreWaitingAttachment } from './pending-interaction';
 import { bindSkillRefresh } from './skill-refresh';
 import { measureSessionLoad, type SessionLoadMetrics } from './load-metrics';
 import { buildSlashCallbacks } from './SlashCommandRouter';
@@ -80,12 +82,11 @@ interface InitialSessionData {
     savedUIState: UIState | null;
 }
 
-const ACTIVE_PRIVILEGED_TASK_KEY = 'ui.privileged.active-task';
 
 export interface LLMEditorOptions extends EditorOptions<import('@itookit/llm-flow/contracts').SessionSubmission> {
     sessionId: string;
     sessionRepository: ISessionRepository;
-    sessionManager?: SessionViewPort;
+    sessionManager: SessionViewPort;
     defaultHarnessToolIds?: readonly string[];
     agentService: IAgentConfigService;
     initialInputState?: { text?: string; agentId?: string };
@@ -96,8 +97,8 @@ export interface LLMEditorOptions extends EditorOptions<import('@itookit/llm-flo
      * 所有高层操作通过 commands.execute('session.*') / 'vcs.*' 调用。
      */
     commandBus?: ICommandBus;
-    /** Durable Kernel used to attach to Tasks. */
-    kernel?: Kernel;
+    /** Host task control and restoration port. */
+    kernel?: EditorTaskControlPlane;
     /** Application service for durable privileged slash commands. */
     privilegedCommands?: IPrivilegedCommandService;
     sessionSkills?: import('@itookit/tools/contracts').SessionSkillControls;
@@ -156,6 +157,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private inputDialogKey?: string;
     private inputDialogAbort?: AbortController;
     private attachmentClosed = false;
+    private destroyPromise?: Promise<void>;
 
     // === 事件系统 ===
     private bus!: IEditorEventBus;
@@ -830,6 +832,7 @@ export class LLMWorkspaceEditor implements IEditor {
             savedState: savedUIState,
             sessionSettings,
         });
+        if (!effectiveInitialInputState) this.stateManager.rememberRestoredConfiguration(this.chatInput.getConfig());
 
         // 恢复 workflow 实例来源（manifest.flow）→ 恢复参数；新实例则立即运行一次。
         let autoRunFlow: NonNullable<ConversationManifest['flow']> | undefined;
@@ -1088,9 +1091,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private async attachPrivilegedTask(taskId: string, message?: string): Promise<void> {
         if (!this.runAttachment) throw new Error('Kernel task attachment is unavailable');
-        const session = await this.options.kernel!.openSession(this.requireSessionId());
-        await session.setShared(ACTIVE_PRIVILEGED_TASK_KEY, { taskId });
-        await this.runAttachment.attach(taskId);
+        await rememberTaskAttachment(this.options.kernel!, this.requireSessionId(), this.runAttachment, taskId);
         if (message) Toast.info(message);
     }
 
@@ -1100,21 +1101,8 @@ export class LLMWorkspaceEditor implements IEditor {
         const revision = attachment.revision;
         const isCurrent = () => !this.attachmentClosed && this.runAttachment === attachment
             && this.currentSessionId === sessionId && attachment.revision === revision;
-        const session = await kernel.openSession(sessionId);
-        if (!isCurrent()) return;
-        const entry = await session.getShared(ACTIVE_PRIVILEGED_TASK_KEY);
-        if (!isCurrent()) return;
-        const taskId = sharedTaskId(entry?.value);
-        if (taskId) {
-            const task = (await (await session.attachTask(taskId)).status()).task;
-            if (!isCurrent()) return;
-            if (!['succeeded', 'failed', 'cancelled'].includes(task.status)) {
-                if (attachment.activeTaskId !== taskId) await attachment.attach(taskId);
-                return;
-            }
-        }
-        const calls = await this.invocationPanel?.taskIds() ?? new Set<string>();
-        await restoreWaitingAttachment(kernel, sessionId, id => attachment.attach(id), isCurrent, calls);
+        await restoreTaskAttachment(kernel, sessionId, attachment, isCurrent,
+            async () => await this.invocationPanel?.taskIds() ?? new Set<string>());
     }
 
     private async cancelAttachedTask(): Promise<void> {
@@ -1158,81 +1146,49 @@ export class LLMWorkspaceEditor implements IEditor {
         await this.stateManager.saveInputConfiguration(this.chatInput.getConfig());
     }
 
-    async destroy(): Promise<void> {
-        await this.flushPendingSave();
-        this.container.removeEventListener('click', this.onWelcomePrompt);
+    destroy(): Promise<void> {
+        if (this.destroyPromise) return this.destroyPromise;
+        this.attachmentClosed = true;
         this.rerunAbort?.abort();
         this.flowOutputAbort?.abort();
-        this.attachmentClosed = true;
+        this.inputDialogAbort?.abort();
+        this.invocationAbort.abort();
         const attachment = this.runAttachment;
         this.runAttachment = undefined;
-        void attachment?.detach();
+        this.destroyPromise = Promise.resolve().then(() => disposeEditorResources(this.disposalSteps(attachment)));
+        return this.destroyPromise;
+    }
 
-        // 1. 状态持久化（先于组件销毁）
-        this.assetManager?.close();
-        this.skillRefreshBinding?.dispose();
+    private disposalSteps(attachment?: RunAttachmentController): (() => void | Promise<void>)[] {
+        return [
+            () => this.flushPendingSave(), () => attachment?.detach(),
+            () => this.container?.removeEventListener('click', this.onWelcomePrompt),
+            () => this.assetManager?.close(), () => this.skillRefreshBinding?.dispose(),
+            () => this.sessionEventUnsub?.(), () => this.stateManager?.cleanup(),
+            () => this.stateManager?.waitForDrafts(),
+            () => this.globalEventUnsub?.(), () => this.agentServiceUnsub?.(),
+            () => this.connectionOptions?.dispose(), () => this.clearDisposalBindings(),
+            () => this.eventBinder?.cleanup(), () => this.directoryMenu?.destroy(),
+            () => this.commandRegistry?.destroy(), () => this.navigation?.destroy(),
+            () => this.timers.destroy(), () => this.historyPlugin?.deactivate(),
+            () => this.slashPlugin?.deactivate(), () => this.invocationPanel?.destroy(),
+            () => this.branchIndicator?.destroy(), () => this.statusIndicator?.destroy(),
+            () => this.historyView?.destroy(), () => this.chatInput?.destroy(),
+            () => this.sessionService?.dispose(), () => this.branchStore?.destroy(),
+            () => this.domCache?.destroy(), () => this.bus?.destroy(),
+            async () => { await this.commandBus?.execute(SessionCommand.Unbind).catch(() => {}); },
+            () => { if (this.container) this.container.innerHTML = ''; },
+            () => this.editorEvents.clear(), () => this.nodeCommands.clear(),
+        ];
+    }
+
+    private clearDisposalBindings(): void {
         this.skillRefreshBinding = null;
-        this.sessionEventUnsub?.();
-        this.sessionEventUnsub = null;
-        this.stateManager?.cleanup();
-        await this.stateManager?.waitForDrafts();
-
-
-        // 2. 外部事件解绑（Session 事件已在等待草稿前解除）
-        this.globalEventUnsub?.();
-        this.agentServiceUnsub?.();
-        this.connectionOptions?.dispose();
         this.connectionOptions = undefined;
         this.sessionEventUnsub = null;
         this.globalEventUnsub = null;
         this.agentServiceUnsub = null;
-        if (this.refreshAgentsTimer) {
-            clearTimeout(this.refreshAgentsTimer);
-            this.refreshAgentsTimer = null;
-        }
-
-        // 3. 事件系统
-        this.eventBinder?.cleanup();
-        this.directoryMenu?.destroy();
-        this.commandRegistry?.destroy();
-
-        // 4. 导航子模块
-        this.navigation?.destroy();
-
-        // 5. 基础设施
-        this.timers.destroy();
-
-        // 6. 插件清理
-        this.historyPlugin?.deactivate();
-        this.slashPlugin?.deactivate();
-        this.invocationAbort.abort();
-        this.invocationPanel?.destroy();
-        this.historyPlugin = null;
-        this.slashPlugin = null;
-
-        // 7. UI 组件
-        this.branchIndicator?.destroy();
-        this.statusIndicator?.destroy();
-        this.historyView?.destroy();
-        this.chatInput?.destroy();
-
-        // 8. 服务
-        this.sessionService?.dispose();
-        this.branchStore?.destroy();
-        this.domCache?.destroy();
-        this.bus?.destroy();
-
-        // 9. 引擎解绑
-        this.commandBus.execute(SessionCommand.Unbind).catch(() => {});
-
-        // 10. DOM 清理
-        this.container.innerHTML = '';
-        this.editorEvents.clear();
-        this.nodeCommands.clear();
+        if (this.refreshAgentsTimer) clearTimeout(this.refreshAgentsTimer);
+        this.refreshAgentsTimer = null;
     }
-}
-
-function sharedTaskId(value: JsonValue | undefined): string | undefined {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-    return typeof value.taskId === 'string' ? value.taskId : undefined;
 }

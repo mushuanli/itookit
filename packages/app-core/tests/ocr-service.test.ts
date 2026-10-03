@@ -9,7 +9,7 @@ afterEach(async () => { vi.restoreAllMocks(); await runtime?.dispose(); });
 async function setup() {
     runtime = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'web' });
     const agents = runtime.agentService, fs = await runtime.vfs.openFileSystem('/etc');
-    await agents.saveProvider({ id: 'vision', name: 'Vision', implementation: 'openai-compatible', apiKey: 'test',
+    await agents.saveProvider({ baseURL: '', id: 'vision', name: 'Vision', implementation: 'openai-compatible', apiKey: 'test',
         models: [{ id: 'image-model', name: 'Image', supportsVision: true }, { id: 'text-model', name: 'Text' }] });
     await agents.saveConnection({ id: 'ocr', name: 'OCR', providerId: 'vision', tiers: { optimal: 'image-model', fast: 'text-model' } });
     await agents.saveConnection({ id: 'chat', name: 'Chat', providerId: 'vision', tiers: { optimal: 'text-model' } });
