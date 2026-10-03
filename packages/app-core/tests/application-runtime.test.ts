@@ -105,9 +105,14 @@ describe('host application startup', () => {
 });
 
 it('isolates conversation managers and prompt history across runtime disposal', async () => {
-    const first = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'cli' });
+    const policy = { systemPrompt: ['First host'], maxExchanges: 7 };
+    const first = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'cli', directAgentPolicy: policy });
     const second = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'cli' });
     try {
+        policy.systemPrompt[0] = 'Changed'; policy.maxExchanges = 1;
+        expect(first.sessionManager.getDirectAgentPolicy()).toEqual({ systemPrompt: ['First host'], maxExchanges: 7 });
+        expect(second.sessionManager.getDirectAgentPolicy().maxExchanges).toBe(50);
+        expect(second.sessionManager.getDirectAgentPolicy().systemPrompt[0]).toContain('Execute the user request');
         expect(first.sessionManager).not.toBe(second.sessionManager);
         expect(first.sessionManager.promptHistory).not.toBe(second.sessionManager.promptHistory);
         await first.sessionManager.promptHistory!.add('first host');

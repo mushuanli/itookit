@@ -391,6 +391,7 @@ export class LLMWorkspaceEditor implements IEditor {
         const validAgentId = validateAgentId(this.agentService, savedAgentId);
 
         this.chatInput = new ChatInput(inputEl, {
+            maxAgentExchanges: this.sessionManager.getDirectAgentPolicy?.().maxExchanges,
             ...(this.options.sessionSkills ? {
                 onRequestSkills: async () => this.decorateSkillCapabilities(await this.options.sessionSkills!.list(this.options.sessionId)),
                 onConfigureCapabilities: () => {

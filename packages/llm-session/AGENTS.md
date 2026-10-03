@@ -60,3 +60,5 @@ Flow 重跑以 Session manifest/持久 Round 索引为来源，空分支或无�
 Agent 定义的 `capabilityPolicy` 位于顶层；`AgentResolver` 读取 `agentDef.capabilityPolicy`，不是 `agentDef.config.capabilityPolicy`。
 
 Agent、连接管理、恢复与定价的权威契约位于 kernel-adapters/contracts。本包为既有 Session API 保留具名转发，构建必须内联其 JavaScript 与声明，发布产物不得保留对适配器包的导入；它仅列为开发依赖。
+
+DirectAgentPolicy 控制显式 Agent 模式的附加提示与 maxExchanges。构造时验证预算、复制并冻结；附加提示必须在 Context 装配前加入并参与 token 计量，不得在 Task 构造时绕过预算追加消息。实际预算写入 Task，Chat/Flow 与旧模式不消费附加提示。

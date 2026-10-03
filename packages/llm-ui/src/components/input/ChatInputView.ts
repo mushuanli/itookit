@@ -26,6 +26,7 @@ import { InteractionPanel } from './InteractionPanel';
 import { delegate } from '../../utils/domEvents';
 
 export interface ChatInputOptions {
+    maxAgentExchanges?: number;
     onSend: (text: string, files: File[], executorId: string, overrides?: ChatOverrides) => Promise<void>;
     onStop: () => void;
     onExecutorChange?: (executorId: string) => void;
@@ -223,7 +224,7 @@ export class ChatInput implements IChatInputPresenter {
         this.executionMode = new ExecutionModeControl(container, mode => {
             this.config.settings.executionMode = mode;
             this.notifyConfigChange();
-        });
+        }, options.maxAgentExchanges);
         this.initExecutors();
         this.syncUIFromConfig();
         this.loadConnections();

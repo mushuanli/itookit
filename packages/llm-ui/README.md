@@ -34,3 +34,5 @@ const menu = createFlowContextMenuConfig({ ...runOptions, library: hostTemplates
 未提供 `library` 的菜单不显示恢复入口。MindOS 使用 app-core 的 `createMindosFlowLibrary()`，其他用户可提供任意符合公共契约的模板。
 
 Agent 设置工厂使用 `createAgentEditorFactory(service, { defaultToolIds: hostToolIds })` 显式注入宿主默认授权；不传则默认目录为空。UI 不选择 Read/Write/Bash 等工具。该默认列表仅用于展示与编辑，实际工具授权由执行层校验。
+
+SessionViewPort 可通过可选的 getDirectAgentPolicy 返回实际 Agent 策略。聊天编辑器据此显示 maxExchanges，独立 ChatInput 可直接传 maxAgentExchanges；没有该端口时沿用 llm-tasks 的通用默认预算。

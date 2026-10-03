@@ -2,7 +2,7 @@ import { createSessionHost, type SessionHost, type SessionHostPorts } from '../u
 import { createContextAssembler, type IContextAssembler, type RetrievedMemoryEntry } from '@itookit/llm-context';
 import { FlowHistory } from './flow-history';
 import { CLIENT_WEB_SEARCH_TOOL, directExecutionMode, directToolIds } from './direct-execution-mode';
-import { DEFAULT_AGENT_MAX_EXCHANGES } from '@itookit/llm-tasks/contracts';
+import { snapshotDirectAgentPolicy, type DirectAgentPolicy, type ResolvedDirectAgentPolicy } from '../contracts/direct-agent-policy';
 import { formatFlowOutput } from '@itookit/llm-flow/contracts';
 import type { AgentEvent, ToolCallInfo } from '@itookit/llm-tasks/contracts';
 import type { Artifact, DagPluginCatalog, DagRunSpec, DagNodeDefinition } from '@itookit/llm-flow/contracts';
@@ -51,6 +51,7 @@ export interface ConversationExecution {
 
 export interface ConversationRunCoordinatorOptions {
     hostPorts?: SessionHostPorts;
+    directAgentPolicy?: DirectAgentPolicy;
     engine: ISessionRepository;
     eventBus: SessionEventBus;
     kernel: Kernel;
@@ -90,8 +91,12 @@ export class ConversationRunCoordinator {
     /** Session id → live root + task membership; DAG nodes can be added after submit. */
     private readonly active = new Map<string, RunExecution>();
 
+    private readonly policy: ResolvedDirectAgentPolicy;
     private readonly host: SessionHost;
-    constructor(private readonly options: ConversationRunCoordinatorOptions) { this.host = createSessionHost(options.hostPorts); }
+    constructor(private readonly options: ConversationRunCoordinatorOptions) {
+        this.host = createSessionHost(options.hostPorts);
+        this.policy = snapshotDirectAgentPolicy(options.directAgentPolicy);
+    }
 
     async executeDirect(execution: ConversationExecution): Promise<void> {
         if (directExecutionMode(execution.task.input) === 'agent' && execution.config.capabilityPolicy?.toolIds === undefined) {
@@ -239,8 +244,14 @@ export class ConversationRunCoordinator {
         const result = await assembler.assemble(contextPlan(execution, location, profile), execution.task.id, {
             id: execution.config.id,
             version,
-        }, execution.config.systemPrompt, skillsPrompt, { persist: false, ...sessionContext });
+        }, this.systemPrompt(execution), skillsPrompt, { persist: false, ...sessionContext });
         return result.snapshot;
+    }
+
+    private systemPrompt(execution: ConversationExecution): string[] {
+        const base = execution.config.systemPrompt ?? [];
+        const prompts = typeof base === 'string' ? [base] : base;
+        return directExecutionMode(execution.task.input) === 'agent' ? [...this.policy.systemPrompt, ...prompts] : prompts;
     }
 
     private contextAssembler(
@@ -266,7 +277,7 @@ export class ConversationRunCoordinator {
         const tools = directToolIds(execution.config, execution.task.input);
         const catalog = await this.options.resolveTools?.(execution.task.sessionId, tools)
             ?? { definitions: [], externalIds: [] };
-        const spec = directTaskSpec(execution, snapshot, catalog, skills);
+        const spec = directTaskSpec(execution, snapshot, catalog, skills, this.policy);
         if (directExecutionMode(execution.task.input) === 'agent' && !spec.input.tools?.length) {
             throw new Error(this.host.translate('chatInput.executionMode.noTools'));
         }
@@ -520,7 +531,8 @@ function directTaskSpec(
     execution: ConversationExecution,
     snapshot: ContextSnapshot,
     catalog: { definitions: ToolDefinition[]; externalIds: string[] },
-    skills: LLMSkill[] = [],
+    skills: LLMSkill[],
+    policy: ResolvedDirectAgentPolicy,
 ): TaskSpec<DurableAgentInput> {
     const tools = directToolIds(execution.config, execution.task.input);
     const mode = directExecutionMode(execution.task.input);
@@ -539,8 +551,7 @@ function directTaskSpec(
         input: buildLlmTaskInput({
             sessionId: execution.task.sessionId,
             roundId: execution.roundId,
-            messages: mode === 'agent' ? [{ role: 'system', content: 'Execute the user request with the available tools. Inspect the Session workspace and report observed results; do not merely suggest commands when you can perform the requested action. Relative file paths use the Session working directory; absolute file paths are Session virtual paths, not host paths. Access only mounted directories and respect tool approvals.' },
-                ...snapshot.canonicalMessages] : snapshot.canonicalMessages,
+            messages: snapshot.canonicalMessages,
             connectionId: execution.config.connectionId,
             model: execution.config.model,
             temperature: execution.config.temperature,
@@ -550,7 +561,7 @@ function directTaskSpec(
             webSearch: execution.config.webSearchMode === 'builtin',
             stream: execution.config.stream,
             approval: 'external',
-            maxExchanges: mode === 'agent' ? DEFAULT_AGENT_MAX_EXCHANGES : undefined,
+            maxExchanges: mode === 'agent' ? policy.maxExchanges : undefined,
             tools: definitions,
             allowedToolIds,
             externalToolIds: catalog.externalIds,

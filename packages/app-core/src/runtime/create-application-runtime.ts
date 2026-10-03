@@ -75,6 +75,7 @@ export interface ApplicationRuntime {
 }
 
 export interface ApplicationRuntimeOptions {
+    directAgentPolicy?: import('@itookit/llm-session/contracts').DirectAgentPolicy;
     contextEngineOptions?: CreateKernelRuntimeOptions['contextEngineOptions'];
     agentResolution?: import('@itookit/llm-session').AgentResolutionPolicy;
     backend: IStorageBackend;
@@ -279,7 +280,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         // Writes are only allowed while this host holds the Session's single-writer lease; the
         // gate acquires a lease on demand so a freshly created Session is writable immediately.
         const { sessionManager, commandBus, dispose: disposeConversations } = await traceBoot('initializeConversationSystem',
-            () => createConversationSystem({ vfs, systemFS, agentResolution: options.agentResolution, agentService, sessionRepository, flowEngine, kernel,
+            () => createConversationSystem({ vfs, systemFS, directAgentPolicy: options.directAgentPolicy, agentResolution: options.agentResolution, agentService, sessionRepository, flowEngine, kernel,
                 ensureWritable: async sessionId => !await sessionRepository.isSessionDeletionPending(sessionId) && await recovery.acquireLater(sessionId),
                 flowWorkspaceManager: options.kernelPlatform?.flowWorkspaceManager }));
 

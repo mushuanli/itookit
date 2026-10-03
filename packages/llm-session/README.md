@@ -13,6 +13,7 @@ const conversation = await initializeConversationSystem({
     logger: myLogger,
   },
   agentResolution: { missingAgent: 'reject' },
+  directAgentPolicy: { systemPrompt: ['Your host execution guidance'], maxExchanges: 7 },
 });
 
 // Pass this instance to the editor instead of reading a process singleton.
@@ -29,3 +30,7 @@ await conversation.dispose();
 Session manifest 只接受规范 `schemaVersion: 3` 数据。作文预设和播种属于 app-core 的产品装配，不再由本包导出。
 
 迁移：删除 `configureSessionHostPorts`，改为 `initializeConversationSystem({ hostPorts, ... })`。该工厂不再设置全局 SessionManager 或 PromptHistory；使用返回的实例。旧 `createSessionManager/getSessionManager` 与提示词历史单例仍是兼容入口，不用于独立运行时装配。UI 使用 `createLLMFactory(agentService, { sessionManager, sessionRepository, ... })`。
+
+`directAgentPolicy` 只作用于显式 Agent 模式：提示词在 Context 装配阶段加入并参与 token 预算，maxExchanges 固定到持久 Task。实例构造时复制并冻结策略；maxExchanges 必须为正的安全整数。未传提示词时不追加产品执行指令；未传预算时沿用 llm-tasks 的通用默认值。普通 Chat、Flow 和无显式模式的旧调用不追加这些提示词。
+
+`SessionManager.getDirectAgentPolicy()` 提供只读视图，宿主 UI 可据此显示实际预算。MindOS 的默认执行指导由 app-core 注入；其他宿主可传自己的策略或空对象。

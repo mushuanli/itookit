@@ -10,6 +10,7 @@ export interface PromptHistoryPort {
 
 /** The editor needs observation and a command channel, not a session implementation. */
 export interface SessionViewPort extends ISession {
+    getDirectAgentPolicy?(): import('@itookit/llm-session/contracts').ResolvedDirectAgentPolicy;
     getSessions(): SessionGroup[];
     getStatus(): SessionStatus | 'unbound';
     isGenerating(): boolean;

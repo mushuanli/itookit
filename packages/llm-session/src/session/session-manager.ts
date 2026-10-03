@@ -1,3 +1,4 @@
+import { snapshotDirectAgentPolicy, type ResolvedDirectAgentPolicy } from '../contracts/direct-agent-policy';
 import { restoreFlowHistory } from '../persistence/restore-flow-history';
 import { KernelError, KernelErrorCode } from '@itookit/durable-kernel';
 import { flowBranchExecutions } from './flow-branches';
@@ -77,10 +78,15 @@ export class SessionManager implements ISession, SessionQuery {
     private projectionSyncTail?: Promise<void>;
     private projectionSyncQueued = false;
 
+    private readonly directAgentPolicy: ResolvedDirectAgentPolicy;
+
+    getDirectAgentPolicy(): ResolvedDirectAgentPolicy { return this.directAgentPolicy; }
+
     constructor(
         engine: ISessionRepository,
         agentService: IAgentConfigService,
         options: {
+            directAgentPolicy?: import('../contracts/direct-agent-policy').DirectAgentPolicy;
             agentResolution?: import('./agent-resolver').AgentResolutionPolicy;
             hostPorts?: import('../utils/host-ports').SessionHostPorts;
             promptHistory?: import('../services/prompt-history-service').PromptHistoryService;
@@ -102,6 +108,7 @@ export class SessionManager implements ISession, SessionQuery {
         }
     ) {
         this.host = createSessionHost(options.hostPorts);
+        this.directAgentPolicy = snapshotDirectAgentPolicy(options.directAgentPolicy);
         this.promptHistory = options.promptHistory;
         this.canWriteSession = options.canWriteSession;
         this.registry = new SessionRegistry(engine, round => restoreFlowHistory(options.kernel, round, this.host), this.host);
@@ -148,6 +155,7 @@ export class SessionManager implements ISession, SessionQuery {
             options.workspaceManager,
             options.resolveHarnessToolIds,
             this.host,
+            this.directAgentPolicy,
         );
 
         this.roundOps = new RoundOperations(this.registry, this.runs, this.promptHistory);

@@ -102,6 +102,7 @@ import { DagCommandService } from '@itookit/llm-flow';
 import { registerDurablePrograms } from '@itookit/llm-flow';
 
 export interface ConversationSystemOptions {
+    directAgentPolicy?: import('./contracts').DirectAgentPolicy;
     hostPorts?: SessionHostPorts;
     agentResolution?: import('./session/agent-resolver').AgentResolutionPolicy;
     memoryProvider?: import('./session/session-memory-provider').SessionMemoryProvider;
@@ -162,7 +163,7 @@ export async function initializeConversationSystem(
 
 function createManagedSession(options: ConversationSystemOptions, promptHistory: PromptHistoryService): SessionManager {
     return new SessionManager(options.sessionEngine, options.agentService, {
-        agentResolution: options.agentResolution, hostPorts: options.hostPorts, promptHistory,
+        directAgentPolicy: options.directAgentPolicy, agentResolution: options.agentResolution, hostPorts: options.hostPorts, promptHistory,
         kernel: options.kernel, dagPlugins: options.dagPlugins, flowStore: options.flowStore,
         resolveTools: options.resolveTools, resolveHarnessToolIds: options.resolveHarnessToolIds,
         resolveMCPToolIds: options.resolveMCPToolIds, resolveSessionContext: options.resolveSessionContext,

@@ -18,7 +18,7 @@ export class ExecutionModeControl {
     private loading = false;
     private locked = false;
 
-    constructor(container: HTMLElement, onChange: (mode: ChatExecutionMode) => void) {
+    constructor(container: HTMLElement, onChange: (mode: ChatExecutionMode) => void, private readonly maxExchanges = DEFAULT_AGENT_MAX_EXCHANGES) {
         this.group = container.querySelector('.llm-input__execution-mode')!;
         this.hint = container.querySelector('.llm-input__execution-hint')!;
         this.buttons = Array.from(this.group.querySelectorAll('button'));
@@ -48,7 +48,7 @@ export class ExecutionModeControl {
             button.setAttribute('aria-pressed', String(!this.flow && button.dataset.executionMode === this.mode));
         }
         this.hint.textContent = this.flow ? t('chatInput.executionMode.flowHint')
-            : this.mode === 'agent' ? t('chatInput.executionMode.agentHint', { count: DEFAULT_AGENT_MAX_EXCHANGES })
+            : this.mode === 'agent' ? t('chatInput.executionMode.agentHint', { count: this.maxExchanges })
                 : t('chatInput.executionMode.chatHint');
     }
 }

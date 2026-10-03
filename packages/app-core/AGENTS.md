@@ -113,3 +113,5 @@ pnpm --filter @itookit/app-core typecheck
 - UI 模板目录位于 `src/presets/essay-review-isolated.json`，公共 `createMindosFlowLibrary()` 返回副本；Web/Tauri 显式接入 UI 的安装、恢复和菜单机制。产品提示词不进入 llm-ui 包。
 
 MindOS 默认工具列表属于 `src/presets/harness-tools.ts`，通过 app-core 公共出口供 app-shell 装配聊天与 Agent 设置 UI；禁止从公共配置契约读取产品默认授权。
+
+MindOS Agent 默认执行策略位于 `src/presets/direct-agent.json`，createMindosDirectAgentPolicy 返回副本；ApplicationRuntimeOptions.directAgentPolicy 可替换整个策略（包括空对象），会话装配显式注入，不在 Session 机制中保留产品指令。

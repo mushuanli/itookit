@@ -71,9 +71,11 @@ export class SessionRunCoordinator {
         workspaceManager?: import('./conversation-run-coordinator').ConversationRunCoordinatorOptions['workspaceManager'],
         resolveHarnessToolIds?: (sessionId: string) => Promise<string[]>,
         private readonly host: SessionHost = createSessionHost(),
+        directAgentPolicy?: import('../contracts/direct-agent-policy').DirectAgentPolicy,
     ) {
         this.runs = new ConversationRunCoordinator({
             hostPorts: host,
+            directAgentPolicy,
             engine,
             eventBus,
             kernel,

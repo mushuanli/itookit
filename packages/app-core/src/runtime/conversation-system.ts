@@ -1,3 +1,4 @@
+import { createMindosDirectAgentPolicy } from '../presets/direct-agent-policy';
 import { createFlowCapabilities } from './flow-capabilities';
 import { createFlowInvocationSessions, initializeConversationSystem, type CommandBus, type FlowEngine, type SessionManager, type SessionRepository, type VFSAgentService } from '@itookit/llm-session';
 import { resolveSessionSkillContext, resolveSessionSelectedSkills } from '@itookit/kernel-adapters';
@@ -7,6 +8,7 @@ import { withWorkspaceScopeCleanup } from './workspace-scope-cleanup';
 import { t, createModuleLogger, traceBoot } from '@itookit/common';
 
 export interface ConversationSystemOptions {
+    directAgentPolicy?: import('@itookit/llm-session/contracts').DirectAgentPolicy;
     agentResolution?: import('@itookit/llm-session').AgentResolutionPolicy;
     vfs: IVFSManager;
     /** Root view shared by Session-independent services; holds the Flow invocation marker. */
@@ -35,6 +37,7 @@ export async function createConversationSystem(
     const { vfs, agentService, sessionRepository, flowEngine, kernel, systemFS } = options;
     const capabilities = createFlowCapabilities(kernel);
     return initializeConversationSystem({
+        directAgentPolicy: options.directAgentPolicy ?? createMindosDirectAgentPolicy(),
         agentResolution: options.agentResolution,
         hostPorts: { translate: t, logger: createModuleLogger('llm-conversation'), traceBoot },
         agentService,

@@ -27,7 +27,9 @@ it.each([
         // Return an overbroad catalog to verify admission also filters at the Task boundary.
         const resolveTools = vi.fn(async () => ({ definitions: [{ name: 'write_file' }, { name: 'WebSearch' }], externalIds: ['write_file'] }));
         const resolveHarnessToolIds = vi.fn(async () => ['write_file']);
-        const coordinator = new ConversationRunCoordinator({ kernel, resolveTools, resolveHarnessToolIds, engine: {}, eventBus: {}, dagPlugins: {} } as never);
+        const policy = mode === 'agent' && ids === undefined ? { systemPrompt: ['Host custom policy'], maxExchanges: 3 } : undefined;
+        const coordinator = new ConversationRunCoordinator({ directAgentPolicy: policy, kernel, resolveTools, resolveHarnessToolIds, engine: {}, eventBus: {}, dagPlugins: {} } as never);
+        if (policy) { policy.systemPrompt[0] = 'Changed after construction'; policy.maxExchanges = 99; }
         const internal = coordinator as any;
         vi.spyOn(internal, 'startRound').mockResolvedValue(undefined);
         vi.spyOn(internal, 'projectRun').mockReturnValue(undefined);
@@ -51,7 +53,12 @@ it.each([
         expect(resolveTools).toHaveBeenCalledWith('s', [...allowed]);
         expect(task.labels?.executionMode).toBe(mode);
         expect(resolveHarnessToolIds).toHaveBeenCalledTimes(mode === 'agent' && ids === undefined ? 1 : 0);
-        if (mode === 'agent') expect(task.input).toMatchObject({ maxExchanges: DEFAULT_AGENT_MAX_EXCHANGES });
+        if (mode === 'agent') expect(task.input).toMatchObject({ maxExchanges: policy ? 3 : DEFAULT_AGENT_MAX_EXCHANGES });
+        expect(JSON.stringify(task.input)).not.toContain('Execute the user request with the available tools');
+        if (policy) {
+            expect(JSON.stringify(task.input)).toContain('Host custom policy');
+            expect(JSON.stringify(task.input)).not.toContain('Changed after construction');
+        }
         execution.task.input.sendIntent.execution.mode = 'agent';
         expect((await kernel.listSessionTasks('s'))[0].labels?.executionMode).toBe(mode);
     } finally { kernel.dispose(); await kernel.waitIdle(); await manager.dispose(); }

@@ -98,3 +98,5 @@ export { resolveProjectFavorite } from './projects/favorites/routes';
 export { createMindosFlowLibrary } from './presets/flow-library';
 
 export { DEFAULT_HARNESS_TOOL_IDS } from './presets/harness-tools';
+
+export { createMindosDirectAgentPolicy } from './presets/direct-agent-policy';

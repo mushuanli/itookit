@@ -55,3 +55,5 @@ export type {
 } from './persistence/types';
 
 export type { IPrivilegedCommandService, PlanCommandRequest, ExecCommandRequest } from './services/privileged-command';
+
+export { snapshotDirectAgentPolicy, type DirectAgentPolicy, type ResolvedDirectAgentPolicy } from './contracts/direct-agent-policy';

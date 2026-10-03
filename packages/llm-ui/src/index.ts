@@ -12,7 +12,7 @@ export const createLLMFactory: typeof createChatFactory = (service, deps) =>
 function legacySessionView(): SessionViewPort {
     const manager = getSessionManager();
     return { id: manager.id, signal: manager.signal.bind(manager), events: manager.events.bind(manager),
-        getSessions: manager.getSessions.bind(manager), getStatus: manager.getStatus.bind(manager),
+        getDirectAgentPolicy: manager.getDirectAgentPolicy.bind(manager), getSessions: manager.getSessions.bind(manager), getStatus: manager.getStatus.bind(manager),
         isGenerating: manager.isGenerating.bind(manager), onEvent: manager.onEvent.bind(manager),
         onGlobalEvent: manager.onGlobalEvent.bind(manager), promptHistory: manager.promptHistory ?? getPromptHistory() };
 }

@@ -97,3 +97,12 @@ it('keeps the accepted mode locked after stopping and restores the lock on reope
     f.view.setConfig({ settings: { executionMode: 'chat', executionModeLocked: false } });
     expect(f.button('agent').disabled).toBe(false);
 });
+
+it('shows the host exchange budget instead of a fixed Agent limit', () => {
+    const container = document.createElement('div'); document.body.append(container);
+    const view = new ChatInput(container, { onSend: async () => {}, onStop: () => {}, maxAgentExchanges: 7 });
+    views.push(view);
+    view.setConfig({ settings: { executionMode: 'agent' } });
+    expect(container.querySelector('.llm-input__execution-hint')?.textContent).toContain('7');
+    expect(container.querySelector('.llm-input__execution-hint')?.textContent).not.toContain('50');
+});
