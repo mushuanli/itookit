@@ -10,3 +10,7 @@
 [submodule "tools/fs-agent"]
 	path = tools/fs-agent
 	url = git@github.com:mushuanli/fs-agent.git
+[submodule "packages/vfs-core"]
+	path = packages/vfs-core
+	url = git@github.com:mushuanli/vfs-core.git
+	branch = main
