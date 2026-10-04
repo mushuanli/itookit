@@ -14,3 +14,7 @@
 	path = packages/vfs-core
 	url = git@github.com:mushuanli/vfs-core.git
 	branch = main
+[submodule "packages/vfs-ui"]
+	path = packages/vfs-ui
+	url = git@github.com:mushuanli/vfs-ui.git
+	branch = main
