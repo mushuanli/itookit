@@ -1,5 +1,5 @@
 import { createMindosFlowLibrary } from '@itookit/app-core';
-import { createHttpSourceProvider } from '@itookit/vfsdriver-http';
+import { createHttpSourceProvider } from '@itookit/vfsdriver-agent';
 import { createTauriMCPTransport } from './shell/tauri-mcp-transport';
 import { recordDiagnostic, observeTools } from './log/desktop-diagnostics';
 import { errorDetails, t } from '@itookit/common';

@@ -28,3 +28,8 @@
 	path = packages/vfsdriver-local
 	url = git@github.com:mushuanli/vfsdriver-local.git
 	branch = main
+
+[submodule "packages/vfsdriver-agent"]
+	path = packages/vfsdriver-agent
+	url = git@github.com:mushuanli/vfsdriver-agent.git
+	branch = main

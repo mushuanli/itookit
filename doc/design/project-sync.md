@@ -37,8 +37,8 @@
 | [ProjectService](../../packages/app-core/src/projects/project-service.ts) | 稳定项目 ID、目录绑定和项目视图；openFiles 会组合挂载，不能直接把该视图全部递归复制 |
 | [ProjectRemoteMountService](../../packages/app-core/src/projects/remote-mounts.ts) | 连接、凭据引用、项目授权和可用状态；同步关系需要独立记录 |
 | [SessionFilesService](../../packages/app-core/src/vfs/session-files.ts) | 授权 revision、cwd、派生视图撤销和挂载守卫；该 revision 不代表目录内容版本 |
-| [HTTP capabilities](../../packages/vfsdriver-http/src/capabilities.ts) | 已有能力发现，sync 目前只有 push 布尔值且声明为 false |
-| [HttpFSBackend](../../packages/vfsdriver-http/src/backend.ts) | 条件替换、Range 读取、操作结果查询；删除和重命名目前没有相同的版本条件 |
+| [HTTP capabilities](../../packages/vfsdriver-agent/src/capabilities.ts) | 已有能力发现，sync 目前只有 push 布尔值且声明为 false |
+| [HttpFSBackend](../../packages/vfsdriver-agent/src/backend.ts) | 条件替换、Range 读取、操作结果查询；删除和重命名目前没有相同的版本条件 |
 | [fs-agent revision](../../tools/fs-agent/src/fs/revision.rs) | 服务生命周期内的文件身份凭证，不能作为内容摘要；命令后会使凭证失效 |
 | [fs-agent router](../../tools/fs-agent/src/http/mod.rs) | 当前文件和进程路由，没有本文提出的同步项目 API |
 | [SessionBundle](../../packages/app-core/src/session/session-bundle.ts) | 格式版本、历史和附件交换；导入创建新身份，导出没有跨多个读取的快照边界 |
@@ -120,7 +120,7 @@ flowchart TD
 | app-core 的 projects/sync | 范围及覆盖语义、新会话纳入策略、同步关系、触发、守卫和数据集编排 | HTTP 实现、DOM 交互、直接递归复制所有挂载 |
 | 新增 sync-core | 三方比较、局部计划、基线推进、传输、部分成功和恢复 | 项目导航、Session 业务、宿主路径、具体服务商 |
 | 本地同步 store 及宿主适配 | 操作日志、基线对象、冲突、待应用结果、同副本串行协调 | 自行选择冲突赢家、隐式覆盖应用结果 |
-| vfsdriver-http 的 sync 适配 | 云端协议、能力发现、对象传输和结果查询 | 决定冲突赢家、持有项目业务状态 |
+| vfsdriver-agent 的 sync 适配 | 云端协议、能力发现、对象传输和结果查询 | 决定冲突赢家、持有项目业务状态 |
 | vfs-core | 文件访问、通用条件 IO 和必要的可选能力 | 项目同步调度、会话合并、云端账号模型 |
 | llm-session | 快照闭包、历史对象版本、祖先判断、稳定分支去重和条件应用 | 云端 HTTP、项目同步触发和凭据管理 |
 | app-core 的 session 用例 | 会话同步和目标端依赖绑定 | 直接覆盖原始存储文件来合并会话 |

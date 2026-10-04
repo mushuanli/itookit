@@ -1,4 +1,4 @@
-import { createHttpSourceProvider } from '@itookit/vfsdriver-http';
+import { createHttpSourceProvider } from '@itookit/vfsdriver-agent';
 import { recordRuntimeDiagnostic, runtimeDiagnosticPath, traceRuntimeStage } from './diagnostics';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile, appendFile } from 'node:fs/promises';

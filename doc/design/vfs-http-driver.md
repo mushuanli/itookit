@@ -6,7 +6,7 @@
 
 ## 1. 目标与决策
 
-在 tools/fs-server 新建独立 Rust HTTP 文件服务，在 packages/vfsdriver-http 新建三端共用驱动。服务端仅暴露预配置目录别名；工作台可把别名中的目录外挂到项目，项目文件树、编辑器和 Agent 使用同一授权视图。
+在 tools/fs-server 新建独立 Rust HTTP 文件服务，在 packages/vfsdriver-agent 新建三端共用驱动。服务端仅暴露预配置目录别名；工作台可把别名中的目录外挂到项目，项目文件树、编辑器和 Agent 使用同一授权视图。
 
 核心决策：
 

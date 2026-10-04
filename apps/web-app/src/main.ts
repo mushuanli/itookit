@@ -1,6 +1,6 @@
 import { createMindosFlowLibrary } from '@itookit/app-core';
 import { configureAppCache } from './app-cache';
-import { createHttpSourceProvider } from '@itookit/vfsdriver-http';
+import { createHttpSourceProvider } from '@itookit/vfsdriver-agent';
 import { initApp, installMobileNavigation, windowSessionLeaseToken, type AppUI } from '@itookit/app-shell';
 import { createApplicationRuntime } from '@itookit/app-core';
 import { openIndexedDBBackend } from '@itookit/vfsdriver-indexeddb';

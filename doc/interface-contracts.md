@@ -6,7 +6,7 @@
 
 | 接口 | 核心方法 | 定义 | 实现 | 消费 |
 |---|---|---|---|---|
-| `FileStorageBackend` / `OperationOptions` | `files` + 可选 `mutations`，signal/timeoutMs，opaque revision | `vfs-core/src/interfaces/storage/file-storage.ts`、`vfs-core/src/interfaces/core/operation.ts` | `vfsdriver-http` | `FileStorageAdapter` → VFS |
+| `FileStorageBackend` / `OperationOptions` | `files` + 可选 `mutations`，signal/timeoutMs，opaque revision | `vfs-core/src/interfaces/storage/file-storage.ts`、`vfs-core/src/interfaces/core/operation.ts` | `vfsdriver-agent` | `FileStorageAdapter` → VFS |
 | `IStorageBackend` | `stat/list/read/write/mkdir/delete/rename` | `vfs-core/interfaces/storage/` | `vfsdriver-indexeddb`、`vfsdriver-local` | `vfs-core (VFSEngine)` |
 | `IVFSManager` | `openFileSystem()/mounts/devices/plugins` | `vfs-core/interfaces/services/vfs-manager.ts` | `vfs-core (VFSManager)` | `app-core`、`app-shell`、`kernel-adapters` |
 | `IFileSystem` | `openFile()/driver/meta/capabilities/capabilitiesAt()/discoveryRoot?()` | `vfs-core/interfaces/services/file-system.ts` | `vfs-core (FileSystemView)` | `vfs-ui`、`llm-ui`、`llm-session`、`app-core` |

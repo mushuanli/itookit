@@ -1,4 +1,4 @@
-import { createHttpSourceProvider } from '@itookit/vfsdriver-http';
+import { createHttpSourceProvider } from '@itookit/vfsdriver-agent';
 import { selectFinalResult } from './run-store';
 import { recordRuntimeDiagnostic, traceRuntimeStage } from './diagnostics';
 import { leaseSkewConfig } from './lease-config';

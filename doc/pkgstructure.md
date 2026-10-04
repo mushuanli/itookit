@@ -27,7 +27,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 | `@itookit/tools` | 内置工具实现（`buildTool()` 工厂）：File/Search/Shell/Task/Agent/Bash/Skill 等；拥有 Tool/TTY 公共执行契约，Skill/子代理契约和 MCP 纯协议入口也归本包；外部 Skill/Agent 经最小端口注入。 |
 | `@itookit/vfs-core` | VFS 引擎核心：协议层 + 引擎实现 + 事件总线 + 通用 IO（IIOStream/pipe）。 |
 | `@itookit/vfsdriver-indexeddb` | IndexedDB 存储后端（浏览器）。 |
-| `@itookit/vfsdriver-http` | HTTP 外挂文件驱动（Web/Tauri/CLI），可取消批量读取与条件写入；服务端为 `tools/fs-server`。 |
+| `@itookit/vfsdriver-agent` | HTTP 外挂文件驱动（Web/Tauri/CLI），可取消批量读取与条件写入；服务端为 `tools/fs-server`。 |
 | `@itookit/vfsdriver-local` | SQLite + 本地 FS 后端（Node/Electron）。 |
 | `@itookit/llm-ui` | Chat UI：聊天界面、流式历史视图、会话编排可视化。 |
 | `@itookit/llm-settings-ui` | LLM 设置 UI：Agent/Provider/Connection/MCP/Skill/Cost/SystemPrompt 编辑器 + 配置导入导出（`llm-import`）。 |
