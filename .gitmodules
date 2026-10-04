@@ -33,3 +33,8 @@
 	path = packages/vfsdriver-agent
 	url = git@github.com:mushuanli/vfsdriver-agent.git
 	branch = main
+
+[submodule "packages/vfs-sync"]
+	path = packages/vfs-sync
+	url = git@github.com:mushuanli/vfs-sync.git
+	branch = main
