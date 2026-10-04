@@ -1,5 +1,5 @@
 /** User-selected directories are independent sources, never global root mounts. */
-import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { openLocalFSBackend } from '@itookit/vfsdriver-local';
 import { createFileSystemSource, type FileSystemContext, type FileSystemSourceOwner, type IFileSystem } from '@itookit/vfs-core';
 import { TauriSqlSidecarDb } from '../db/tauri-sql-sidecar';
 import { TauriFsOps } from '../fs/tauri-fs-ops';

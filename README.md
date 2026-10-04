@@ -151,7 +151,7 @@ packages/
 ├── vfslib/              # VFS 引擎核心（模块隔离 / 设备节点 / AssetDir）
 ├── vfsdriver-indexeddb/ # IndexedDB 存储后端（Web）
 ├── vfsdriver-fs/        # SQLite + FS 存储后端（Node/Electron）
-├── vfsdriver-localfs/   # LocalFS 存储后端（Tauri）
+├── vfsdriver-local/   # LocalFS 存储后端（Tauri）
 ├── device-llm/          # LLM 驱动：多 Provider / 流式 / MCP / Skill
 ├── llm-kernel/          # 执行内核：Executor + Orchestrator
 ├── llm-kernel/         # 多轮 Agent 循环 + 内置工具 + TTY

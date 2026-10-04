@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { createFileSystemSource, type FileSystemSourceOwner, type IFileSystem } from '@itookit/vfs-core';
 import { sha256Hex } from '@itookit/common';
-import { openLocalFSBackend, type IFsOps, type StatResult, type DirEntry } from '@itookit/vfsdriver-localfs';
+import { openLocalFSBackend, type IFsOps, type StatResult, type DirEntry } from '@itookit/vfsdriver-local';
 import { TauriFsOps } from '../fs/tauri-fs-ops';
 import { TauriSqlSidecarDb } from '../db/tauri-sql-sidecar';
 

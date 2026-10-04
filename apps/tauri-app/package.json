@@ -28,7 +28,7 @@
     "@itookit/vfs-core": "workspace:*",
     "@itookit/vfs-ui": "workspace:*",
     "@itookit/vfsdriver-indexeddb": "workspace:*",
-    "@itookit/vfsdriver-localfs": "workspace:*",
+    "@itookit/vfsdriver-local": "workspace:*",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-fs": "^2.0.0",

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { SessionLeaseStore } from '@itookit/app-core';
 import { createVFS } from '@itookit/vfs-core';
-import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { openLocalFSBackend } from '@itookit/vfsdriver-local';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanup.splice(0).map(run => run())); });

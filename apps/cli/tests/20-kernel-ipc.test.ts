@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { fork, type ChildProcess } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -24,7 +25,7 @@ function receive(child: ChildProcess, matches: (message: any) => boolean): Promi
 }
 async function worker() {
     const child = fork(join(bundle, 'ipc-worker.cjs'), [root, mountMode], {
-        env: { ...process.env, NODE_PATH: join(here, '../node_modules') },
+        env: { ...process.env, NODE_PATH: join(dirname(createRequire(import.meta.url).resolve('@itookit/vfsdriver-local')), '../node_modules') },
         stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     });
     children.push(child);
@@ -52,7 +53,7 @@ async function crash(child: ChildProcess, action: string, args?: unknown) {
 beforeAll(async () => {
     bundle = await mkdtemp(join(tmpdir(), 'kernel-worker-build-'));
     await build({ config: false, entry: [join(here, 'ipc-worker.ts')], outDir: bundle, format: ['cjs'],
-        outExtension: () => ({ js: '.cjs' }), noExternal: ['@itookit/vfs-core'],
+        outExtension: () => ({ js: '.cjs' }), noExternal: ['@itookit/vfs-core', '@itookit/vfsdriver-local', '@itookit/vfsdriver-local/node', 'yaml', 'ignore'],
         external: ['better-sqlite3'], splitting: false, silent: true, dts: false });
 }, 30_000);
 afterAll(async () => { if (bundle) await rm(bundle, { recursive: true, force: true }); });

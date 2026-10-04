@@ -6,7 +6,7 @@ import { expect, it, vi } from 'vitest';
 import { t } from '@itookit/common';
 import { Kernel } from '@itookit/durable-kernel';
 import { createVFS } from '@itookit/vfs-core';
-import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { openLocalFSBackend } from '@itookit/vfsdriver-local';
 import { SessionManager, SessionRepository, SessionDirectoryStorageResolver } from '@itookit/llm-session';
 import { NodeSqliteSidecarDb } from '../../../apps/cli/src/sqlite-sidecar';
 import { showMemoryDialog } from '../src/files/memory-dialog';

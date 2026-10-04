@@ -92,9 +92,9 @@ importers:
       '@itookit/vfsdriver-http':
         specifier: workspace:*
         version: link:../../packages/vfsdriver-http
-      '@itookit/vfsdriver-localfs':
+      '@itookit/vfsdriver-local':
         specifier: workspace:*
-        version: link:../../packages/vfsdriver-localfs
+        version: link:../../packages/vfsdriver-local
       yaml:
         specifier: ^2.8.2
         version: 2.8.2
@@ -199,9 +199,9 @@ importers:
       '@itookit/vfsdriver-indexeddb':
         specifier: workspace:*
         version: link:../../packages/vfsdriver-indexeddb
-      '@itookit/vfsdriver-localfs':
+      '@itookit/vfsdriver-local':
         specifier: workspace:*
-        version: link:../../packages/vfsdriver-localfs
+        version: link:../../packages/vfsdriver-local
       '@tauri-apps/api':
         specifier: ^2.0.0
         version: 2.10.1
@@ -486,9 +486,9 @@ importers:
       '@itookit/vfsdriver-indexeddb':
         specifier: workspace:*
         version: link:../vfsdriver-indexeddb
-      '@itookit/vfsdriver-localfs':
+      '@itookit/vfsdriver-local':
         specifier: workspace:*
-        version: link:../vfsdriver-localfs
+        version: link:../vfsdriver-local
       '@types/node':
         specifier: ^20.19.25
         version: 20.19.43
@@ -1191,7 +1191,7 @@ importers:
         specifier: ^3.2.1
         version: 3.2.4(@types/debug@4.1.13)(@types/node@25.2.3)(jiti@1.21.7)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.2)
 
-  packages/vfsdriver-localfs:
+  packages/vfsdriver-local:
     dependencies:
       '@itookit/vfs-core':
         specifier: workspace:*
@@ -1203,15 +1203,18 @@ importers:
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.15
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@25.2.3))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
+        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@22.19.15))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
       vitest:
         specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.2.3)(jiti@1.21.7)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.2)
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.15)(jiti@1.21.7)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.2)
 
 packages:
 

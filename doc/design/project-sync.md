@@ -615,7 +615,7 @@ files 数据集必须排除受协议管理的 .mindos 子树，sessions 和 orga
 
 当前 [Session 存储布局](../../packages/llm-session/src/persistence/session-storage-layout.ts) 将会话放在 MindOS 的 /var/lib/sessions 下，Kernel 记录位于该会话的 kernel 子目录。项目草稿和收藏位于 /var/lib/projects 下，成员关系在共享 folders.seq 中，SessionFilesService 还直接引用会话 session.seq 路径。
 
-更关键的是 [LocalFSBackend](../../packages/vfsdriver-localfs/AGENTS.md) 将 SeqFile 记录和元数据放在 SQLite sidecar 中。目录里有 session.seq 并不代表完整记录就在该文件字节中；复制目录或单独复制某个 SQLite 文件都不是可移植会话协议。浏览器 IndexedDB 同样需要通过逻辑读取导出。
+更关键的是 [LocalFSBackend](../../packages/vfsdriver-local/AGENTS.md) 将 SeqFile 记录和元数据放在 SQLite sidecar 中。目录里有 session.seq 并不代表完整记录就在该文件字节中；复制目录或单独复制某个 SQLite 文件都不是可移植会话协议。浏览器 IndexedDB 同样需要通过逻辑读取导出。
 
 因此迁移必须使用领域级快照，并明确上下文和历史引用闭包。便携目录不能包含依赖宿主 SQLite、IndexedDB 或原 MindOS 数据根才能解释的隐藏引用。现有只读会话投影可复用展示思路，但多个读取仍需快照边界才能用于同步。
 

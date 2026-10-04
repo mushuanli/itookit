@@ -4,11 +4,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createVFS } from '@itookit/vfs-core';
-import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { openLocalFSBackend } from '@itookit/vfsdriver-local';
 import { SessionRepository } from '@itookit/llm-session';
 import { SessionRegistry } from '../../llm-session/src/session/session-registry';
 import { Kernel } from '@itookit/durable-kernel';
-import { NodeFsOps } from '../../vfsdriver-localfs/src/fs/node-fs-ops';
+import { NodeFsOps } from '../../vfsdriver-local/src/fs/node-fs-ops';
 
 it('measures cold history loading on LocalFS without reading each round twice', async () => {
     const root = await mkdtemp(join(tmpdir(), 'session-load-cost-'));

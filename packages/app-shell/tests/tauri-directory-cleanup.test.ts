@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ dispose: vi.fn(), invoke: vi.fn() }));
 vi.mock('@itookit/vfs-core', async importOriginal => ({ ...await importOriginal<object>(),
     createFileSystemSource: async () => ({ fs: {}, dispose: mocks.dispose }),
 }));
-vi.mock('@itookit/vfsdriver-localfs', async importOriginal => ({ ...await importOriginal<object>(),
+vi.mock('@itookit/vfsdriver-local', async importOriginal => ({ ...await importOriginal<object>(),
     openLocalFSBackend: async () => ({ close: async () => {} }),
 }));
 beforeEach(() => {

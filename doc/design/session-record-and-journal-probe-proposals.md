@@ -150,13 +150,13 @@ rename 的原子性缺口：文件系统 `rename` 与 sidecar 记录迁移（`mo
 **每个外层事务**都必须先探 `intent`，存在则在同一事务内推进恢复（补做 rename、迁移记录、写回执）：
 
 ```ts
-// packages/vfsdriver-localfs/src/localfs-backend.ts:78
+// packages/vfsdriver-local/src/localfs-backend.ts:78
 this.records = new SidecarRecordStore(() => this.requireDb(), db => this.recoverRename(db), false);
 // 探测本体（localfs-backend.ts:307）
 const intent = await db.getRecordField(RENAME_JOURNAL, 'intent');
 ```
 
-**为什么不能靠「实例内曾经干净」跳过**：另一个进程可以在本连接打开之后提交 `intent` 然后崩溃。这在 2026-09-14 的真实两进程 SIGKILL 事故里已经发生过一次（当时移除进程内干净缓存才修复），因此 `packages/vfsdriver-localfs/AGENTS.md` 明确禁止该做法。**任何跳过探测的方案都必须提供一个能看见「其他连接提交」的证据源**，否则不予考虑。
+**为什么不能靠「实例内曾经干净」跳过**：另一个进程可以在本连接打开之后提交 `intent` 然后崩溃。这在 2026-09-14 的真实两进程 SIGKILL 事故里已经发生过一次（当时移除进程内干净缓存才修复），因此 `packages/vfsdriver-local/AGENTS.md` 明确禁止该做法。**任何跳过探测的方案都必须提供一个能看见「其他连接提交」的证据源**，否则不予考虑。
 
 ### 2.2 方案 2a：把探测折叠进 begin（零语义变化，推荐）
 
@@ -185,11 +185,11 @@ sidecar_begin(IPC) → sidecar_select(journal intent, IPC) → 业务 SQL(IPC) �
 |---|---|
 | `apps/tauri-app/src-tauri/src/sidecar.rs` | `sidecar_begin` 增加 `probe: Option<ProbeSpec>` 参数；在事务内执行并返回 `probeRows`；`SidecarTransactions::begin` 签名扩展 |
 | `apps/tauri-app/src/db/tauri-sql-sidecar.ts:314` | `transaction()` 改为带探测调用；`invoke('sidecar_begin', { …, probe })` |
-| `packages/vfsdriver-localfs/src/db/sidecar-interface.ts` | 新增 `SidecarProbe`、`transactionWithProbe?`；`getRecordField` 探测型调用保持不变 |
-| `packages/vfsdriver-localfs/src/localfs-backend.ts:78/307/661` | `beforeTransaction` 增加 `probeRows` 形参；`runInTransaction` 优先 `transactionWithProbe`；`recoverRename` 接受探测结果 |
-| `packages/vfsdriver-localfs/src/db/sidecar.ts`、`apps/cli/src/sqlite-sidecar.ts` | `transactionWithProbe` 实现（本地调用，收益为少一次 JS 调用，SQL 不变） |
-| `packages/app-shell/tests/fake-sidecar.ts`、`packages/vfsdriver-localfs/tests/{18,24,25}-*.test.ts` | fake/计数实现补齐新端口；`25-journal-probe.test.ts` 的 `journalProbes` 断言改为「begin 携带探测」计数 |
-| `packages/vfsdriver-localfs/tests/20-kernel-ipc.test.ts` | 两进程 SIGKILL 场景保持在改后路径下通过（探测仍每事务执行） |
+| `packages/vfsdriver-local/src/db/sidecar-interface.ts` | 新增 `SidecarProbe`、`transactionWithProbe?`；`getRecordField` 探测型调用保持不变 |
+| `packages/vfsdriver-local/src/localfs-backend.ts:78/307/661` | `beforeTransaction` 增加 `probeRows` 形参；`runInTransaction` 优先 `transactionWithProbe`；`recoverRename` 接受探测结果 |
+| `packages/vfsdriver-local/src/db/sidecar.ts`、`apps/cli/src/sqlite-sidecar.ts` | `transactionWithProbe` 实现（本地调用，收益为少一次 JS 调用，SQL 不变） |
+| `packages/app-shell/tests/fake-sidecar.ts`、`packages/vfsdriver-local/tests/{18,24,25}-*.test.ts` | fake/计数实现补齐新端口；`25-journal-probe.test.ts` 的 `journalProbes` 断言改为「begin 携带探测」计数 |
+| `apps/cli/tests/20-kernel-ipc.test.ts` | 两进程 SIGKILL 场景保持在改后路径下通过（探测仍每事务执行） |
 
 **收益**：桌面每事务少 1 次 IPC；启动 175 次、每次 poll 19 次探测不再各自成为一次往返（-21.5% / -22% IPC）。**SQL 与事务数不变**，`sidecarStats` 逻辑调用数只有在实现成「探测在 begin 内执行」时才下降——这一点必须写清楚，否则指标会被误读为「优化掉了检查」。
 
@@ -254,10 +254,10 @@ sidecar_begin(IPC) → sidecar_select(journal intent, IPC) → 业务 SQL(IPC) �
 pnpm --filter @itookit/cli exec tsx tests/fixtures/profile-boot-cost.ts
 
 # journal 探测语义（每事务探测一次、rename 后仍迁移）
-pnpm --filter @itookit/vfsdriver-localfs test -- tests/25-journal-probe.test.ts
+pnpm --filter @itookit/vfsdriver-local test -- tests/25-journal-probe.test.ts
 
 # 两进程 SIGKILL / 跨进程可见性
-pnpm --filter @itookit/vfsdriver-localfs test -- tests/20-kernel-ipc.test.ts
+pnpm --filter @itookit/vfsdriver-local test -- tests/20-kernel-ipc.test.ts
 
 # 会话恢复写入预算（干净恢复 0 写、记录读次数上限）
 pnpm --filter @itookit/durable-kernel test -- src/session-open-cost.test.ts

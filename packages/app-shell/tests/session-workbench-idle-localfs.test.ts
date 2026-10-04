@@ -6,7 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createVFS } from '@itookit/vfs-core';
-import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { openLocalFSBackend } from '@itookit/vfsdriver-local';
 import { SessionRepository } from '@itookit/llm-session';
 import { SessionFilesService, createSessionAttachmentMounts } from '@itookit/app-core';
 import { SessionWorkbench } from '../src/projects/SessionWorkbench';

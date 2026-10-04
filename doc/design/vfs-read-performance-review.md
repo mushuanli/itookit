@@ -51,7 +51,7 @@ Session 文件上下文的挂载根、cwd 检查使用类型端口；启动只�
 ## 验证入口
 
 - vfs-core：类型读取、虚拟父目录、删除后立即可见、路径逃逸拒绝，以及既有视图/SeqFile/挂载回归。
-- vfsdriver-localfs：跨进程 rename journal、SIGKILL 恢复、链接与批量类型查询回归。
+- vfsdriver-local：跨进程 rename journal、SIGKILL 恢复、链接与批量类型查询回归。
 - llm-session：历史顺序、分支重载、空分支、环、缺失祖先、身份/版本检查和兼容后端。
 - app-shell：真实 LocalFS 100 轮读取计数、Kernel + 编辑器初始化、设置/草稿不回写、审批恢复。
 

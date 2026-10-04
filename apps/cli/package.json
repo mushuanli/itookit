@@ -26,7 +26,7 @@
     "@itookit/llm-tasks": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
     "@itookit/tools": "workspace:*",
-    "@itookit/vfsdriver-localfs": "workspace:*",
+    "@itookit/vfsdriver-local": "workspace:*",
     "@itookit/app-core": "workspace:*",
     "yaml": "^2.8.2",
     "zod": "^4.1.0",

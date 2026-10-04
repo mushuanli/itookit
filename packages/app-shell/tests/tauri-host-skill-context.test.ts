@@ -12,7 +12,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryBackend } from '@itookit/vfs-core';
-import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { openLocalFSBackend } from '@itookit/vfsdriver-local';
 import { FakeSidecarDb } from './fake-sidecar';
 import { createApplicationRuntime } from '@itookit/app-core';
 import { SessionCommand } from '@itookit/llm-session';

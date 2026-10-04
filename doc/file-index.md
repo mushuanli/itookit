@@ -95,7 +95,7 @@
 | IndexedDB 后端 | `vfsdriver-indexeddb/src/` |
 | HTTP 外挂驱动 | `vfsdriver-http/src/` |
 | 远程连接与项目 | `app-core/src/projects/remote-mounts.ts`、`app-core/src/projects/remote-mount-store.ts`、`app-core/src/projects/remote-connections.ts`、`app-shell/src/files/RemoteFilesSettingsEditor.ts`、`app-shell/src/files/remote-project-fields.ts` |
-| LocalFS 后端 | `vfsdriver-localfs/src/localfs-backend.ts` |
+| LocalFS 后端 | `vfsdriver-local/src/localfs-backend.ts` |
 
 ## CLI（@itookit/cli）
 

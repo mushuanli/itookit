@@ -19,7 +19,7 @@
 - WaitSpec 当前支持 signal/effect/task/child/interaction/shared-version/timer/message/cache/resource 及 any/all/quorum；完整 Endpoint、业务 stream、通用 deadline WaitSet、跨 authority transport 和迁移器仍不是这些类型的现成功能。Shared revision 和选定输入已有持久恢复路径。
 - 观察查询现在包含 listSessionTaskPage、taskHistoryPage、taskEventPage，浏览主视图已经接入；分页上界、Task 当前状态与不可变版本的差别、旧派生索引补建成本见 [浏览设计](vfs-session-browser.md)。eventList、部分 mailbox/恢复扫描仍全量，不能据此宣称 §13 的所有分页已完成。
 
-自动故障场景见 [protocol.test.ts](../../packages/durable-kernel/src/protocol.test.ts)。独立 OS 进程/LocalFS SQLite 验证见 [20-kernel-ipc.test.ts](../../packages/vfsdriver-localfs/tests/20-kernel-ipc.test.ts)：两种挂载模式下覆盖 SIGKILL 后显式接管、带重试预算的自然到期恢复、多文件事务回滚、等待唤醒竞争、资源清理、single-use Cache 回执及父取消落盘后后代清理前的崩溃恢复。当前该文件共 28 项通过。无周期轮询的到期恢复依赖已登记的期限；这不证明完全空闲 worker 能收到另一个进程任意时刻的新提交，跨进程 notifier/主动唤醒或可选 pollMs 仍属宿主部署条件。现有场景不等于全部 §15 kill 矩阵、跨主机时钟或 GUI 人工验收。
+自动故障场景见 [protocol.test.ts](../../packages/durable-kernel/src/protocol.test.ts)。独立 OS 进程/LocalFS SQLite 验证见 [20-kernel-ipc.test.ts](../../apps/cli/tests/20-kernel-ipc.test.ts)：两种挂载模式下覆盖 SIGKILL 后显式接管、带重试预算的自然到期恢复、多文件事务回滚、等待唤醒竞争、资源清理、single-use Cache 回执及父取消落盘后后代清理前的崩溃恢复。当前该文件共 28 项通过。无周期轮询的到期恢复依赖已登记的期限；这不证明完全空闲 worker 能收到另一个进程任意时刻的新提交，跨进程 notifier/主动唤醒或可选 pollMs 仍属宿主部署条件。现有场景不等于全部 §15 kill 矩阵、跨主机时钟或 GUI 人工验收。
 
 ### 初始信号与启动
 

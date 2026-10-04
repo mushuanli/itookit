@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createVFS } from '@itookit/vfs-core';
 import type { IDeviceDriver } from '@itookit/vfs-core';
-import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { openLocalFSBackend } from '@itookit/vfsdriver-local';
 import { Kernel } from '@itookit/durable-kernel';
 import { DurableAgentProgram } from '../../llm-tasks/src';
 import { createKernelAdaptersRuntime } from '../../kernel-adapters/src/runtime/create-kernel-adapters-runtime';

@@ -43,7 +43,7 @@ CLI 使用 `uncaughtExceptionMonitor` 记录致命异常，不安装吞错的异
 - `packages/app-shell/tests/tauri-sidecar-close.test.ts`：宿主 pool 命令接线、定向关闭、初始化失败保留原因、暖启动跳过 DDL、缺对象补齐。
 - `apps/tauri-app/src-tauri/src/sidecar.rs`：真实 SQLite 验证重载回滚、旧代次/旧 close 拒绝、pool 租约转移、等待中 begin 拒绝、其它窗口隔离和新事务提交；另有单测固定「失败语句、慢阶段或需要新建连接时记录」、追踪开关的真值解析，以及真实 pool 上失败与解码路径仍留下计时。
 - `apps/cli/tests/http-server.test.ts`：HTTP 宿主跨页面复用连接、拒绝旧 scope close，并保持记录可读。
-- `packages/vfsdriver-localfs/tests/25-journal-probe.test.ts`：journal 初始化失败关闭 sidecar，随后可重试。
+- `packages/vfsdriver-local/tests/25-journal-probe.test.ts`：journal 初始化失败关闭 sidecar，随后可重试。
 - `apps/cli/tests/diagnostics.test.ts`：轮换/长度限制、真实 CLI 缺文件失败、未捕获异常/未处理 rejection 的落盘与失败退出码、stdout 不受影响。
 
 2026-09-22 Linux 真实 Tauri 临时 profile 验收：首次完整 bootstrap 9828 ms，留下一笔未提交事务后刷新为 2246 ms；原生 `sidecar.scope.open` 记录回滚 1 笔事务，重载后未提交记录不存在，新事务提交可读。上述为本机虚拟显示器中的单次观测，首次启动包含默认配置初始化，不能作为同一场景优化前后的速度比较。验收使用真实应用入口和真实 Rust IPC，仅在临时构建中注入诊断事件观察钩子。

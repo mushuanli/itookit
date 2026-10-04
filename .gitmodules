@@ -23,3 +23,8 @@
 	path = packages/vfsdriver-indexeddb
 	url = git@github.com:mushuanli/vfsdriver-indexeddb.git
 	branch = main
+
+[submodule "packages/vfsdriver-local"]
+	path = packages/vfsdriver-local
+	url = git@github.com:mushuanli/vfsdriver-local.git
+	branch = main

@@ -2,26 +2,25 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { LocalFSBackend } from '../src/localfs-backend';
-import { BetterSqliteSidecarDb } from '../src/db/sidecar';
-import { NodeSqliteSidecarDb } from '../../../apps/cli/src/sqlite-sidecar';
-import type { ISidecarDb } from '../src/db/sidecar-interface';
+import { LocalFSBackend } from '@itookit/vfsdriver-local';
+import { NodeSqliteSidecarDb } from '../src/sqlite-sidecar';
+import type { ISidecarDb } from '@itookit/vfsdriver-local';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 
-it.each(['better', 'node'] as const)('bounds SQLite page payloads and retains totals and transaction visibility (%s)', async kind => {
+it.each(['node'] as const)('bounds SQLite page payloads and retains totals and transaction visibility (%s)', async () => {
     const root = await mkdtemp(join(tmpdir(), 'record-page-'));
     cleanup.push(() => rm(root, { recursive: true, force: true }));
     let db!: ISidecarDb;
     const backend = new LocalFSBackend({ rootDir: root, sidecarDir: join(root, '.meta'),
-        createDb: async path => db = kind === 'better' ? new BetterSqliteSidecarDb(path) : await NodeSqliteSidecarDb.open(path) });
+        createDb: async path => db = await NodeSqliteSidecarDb.open(path) });
     await backend.init(); cleanup.push(() => backend.close());
     await backend.records.transaction!(async tx => {
         for (let i = 0; i < 120; i++) await tx.setRecordField('/r', `a_%/${String(i).padStart(3, '0')}`, { i });
         await tx.setRecordField('/r', 'aXother', 'excluded');
     });
-    const page = vi.spyOn(db, 'listRecordFieldsPage');
+    const page = vi.spyOn(db as Required<ISidecarDb>, 'listRecordFieldsPage');
     const full = vi.spyOn(db, 'listRecordFields');
     const visit = vi.fn((_field: string) => true);
     expect(await backend.records.walkRecordFields('/r', visit, { prefix: 'a_%/', offset: 50, limit: 3 }))

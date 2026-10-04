@@ -34,7 +34,7 @@ export const WORKSPACE_SOURCES = [
     ['@itookit/vfs-core', 'packages/vfs-core/src/index.ts'],
     ['@itookit/vfs-ui', 'packages/vfs-ui/src/index.ts'],
     ['@itookit/vfsdriver-indexeddb', 'packages/vfsdriver-indexeddb/src/index.ts'],
-    ['@itookit/vfsdriver-localfs', 'packages/vfsdriver-localfs/src/index.ts'],
+    ['@itookit/vfsdriver-local', 'packages/vfsdriver-local/src/index.ts'],
 ];
 
 /**

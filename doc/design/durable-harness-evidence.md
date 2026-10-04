@@ -22,7 +22,7 @@
 | `packages/durable-kernel/src/kernel.test.ts` | Kernel 状态机、租约、wait、spawn、shared CAS、消息、资源授权 | `pnpm --filter @itookit/durable-kernel test` |
 | `packages/durable-kernel/src/protocol.test.ts` | 协议不变量与 §15 矩阵中的内核侧行（分页、重试、fencing、cache 回执、outbox） | 同上 |
 | `packages/durable-kernel/src/resources.test.ts` | 资源分配/授权/预算/物理清理/迁移 | 同上 |
-| `packages/vfsdriver-localfs/tests/20-kernel-ipc.test.ts` | 真实 LocalFS + SQLite 上的 SIGKILL/多进程：接管、竞争、单次消费、清理恢复 | `pnpm --filter @itookit/vfsdriver-localfs test` |
+| `apps/cli/tests/20-kernel-ipc.test.ts` | 真实 LocalFS + SQLite 上的 SIGKILL/多进程：接管、竞争、单次消费、清理恢复 | `pnpm --filter @itookit/vfsdriver-local test` |
 | `packages/llm-flow/__tests__/durable-flow-executor.test.ts` | Flow 调度：根任务、检查点恢复、任务去重、工作区租约、detached 计时器、调度所有权 fencing | `pnpm --filter @itookit/llm-flow test` |
 | `packages/llm-flow/__tests__/scheduler-lease.test.ts` | Run 级调度租约：记录、拒绝活拥有者、到期接管、心跳、释放 | 同上 |
 | `packages/llm-flow/__tests__/{git-worktree-manager,transcript-budget,port-contract}.test.ts` | 隔离工作区恢复、transcript 字节预算、端口结构兼容 | 同上 |

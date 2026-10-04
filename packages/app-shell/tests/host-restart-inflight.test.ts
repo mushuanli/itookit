@@ -13,7 +13,7 @@ import { createServer } from 'node:http';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { openLocalFSBackend } from '@itookit/vfsdriver-local';
 import { createApplicationRuntime } from '@itookit/app-core';
 import { SessionCommand } from '@itookit/llm-session';
 import { createAgentSendIntent } from '@itookit/llm-flow/contracts';

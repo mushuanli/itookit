@@ -5,7 +5,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { expect, it } from 'vitest';
 import { Kernel, bindCapabilities, type DurableTaskProgram } from '@itookit/durable-kernel';
-import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { openLocalFSBackend } from '@itookit/vfsdriver-local';
 import { createVFS } from '@itookit/vfs-core';
 import type { IDeviceDriver } from '@itookit/vfs-core';
 import { createKernelAdaptersRuntime } from '@itookit/kernel-adapters';

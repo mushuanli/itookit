@@ -35,7 +35,7 @@
 | vfs-ui | 88 通过，含真实 DOM 导航 |
 | llm-ui | 15 通过 |
 | vfsdriver-indexeddb | 15 通过 |
-| vfsdriver-localfs | 54 通过，含独立 OS 进程与 SIGKILL 恢复 |
+| vfsdriver-local | 54 通过，含独立 OS 进程与 SIGKILL 恢复 |
 | CLI 全套 | 71 项中 70 通过；1 项失败（supervisor 循环分派），以实际输出为准 |
 | mdxeditor | 本工作区未安装 vitest，未执行 |
 | Web / Tauri / CLI TypeScript | 通过 |

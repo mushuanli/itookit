@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import type { CommandOptions } from './commands';
 import { createApplicationRuntime, type ApplicationRuntime } from '@itookit/app-core';
-import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { openLocalFSBackend } from '@itookit/vfsdriver-local';
 import { CliDirectorySourceProvider } from './directories';
 import { resolveProfileRoot } from './mindos';
 import { NodeSqliteSidecarDb } from './sqlite-sidecar';

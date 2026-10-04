@@ -44,7 +44,7 @@ import {
 import { FlowRunProjection, SessionRepository } from '@itookit/llm-session';
 import { createVFS, createFileSystemView, MemoryBackend, type IFileSystem, type VFSFactoryOptions } from '@itookit/vfs-core';
 import { createBashTool, type INativeShell } from '@itookit/tools';
-import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { openLocalFSBackend } from '@itookit/vfsdriver-local';
 import { taskOutputReference } from './config';
 import { CliDirectorySourceProvider } from './directories';
 import { createShell, OciTtyDriver, NodeNativeShell } from './shell';

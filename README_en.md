@@ -151,7 +151,7 @@ packages/
 ├── vfslib/              # VFS engine (module isolation / device nodes / AssetDir)
 ├── vfsdriver-indexeddb/ # IndexedDB storage backend (Web)
 ├── vfsdriver-fs/        # SQLite + FS backend (Node/Electron)
-├── vfsdriver-localfs/   # LocalFS backend (Tauri)
+├── vfsdriver-local/   # LocalFS backend (Tauri)
 ├── device-llm/          # LLM driver: multi-Provider / streaming / MCP / Skills
 ├── llm-kernel/          # Execution kernel: Executor + Orchestrator
 ├── llm-kernel/         # Multi-turn Agent loop + built-in tools + TTY

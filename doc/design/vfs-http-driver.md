@@ -253,7 +253,7 @@ If-Match 使用强比较，If-Range 不匹配会忽略 Range；以上行为依�
 
 上传使用一次 PUT，不支持跨多个请求持续追加上传数据；未来若引入分块上传、快照游标、订阅或远程句柄，必须另行定义 open/finish/abort、租约和遗弃回收，不能直接复用 operationId 当会话 ID。未来 watch 才需要显式订阅生命周期，当前不实现。
 
-现有仓库的 begin/commit 不产生新协议要求：[CLI HTTP sidecar](../../apps/cli/src/http-server.ts) 的 sidecarBegin/sidecarFinish 用于 SQLite BEGIN/COMMIT/ROLLBACK；[DirectoryDriver.transaction](../../packages/vfs-core/src/impl/services/DirectoryDriver.ts) 当前主要缓冲事件，[LocalFS 外层 transaction](../../packages/vfsdriver-localfs/src/localfs-backend.ts) 与 [IndexedDB 外层 transaction](../../packages/vfsdriver-indexeddb/src/idb-backend.ts) 直接执行回调，不提供跨文件 ACID。记录存储事务另有实现，不应与上述外层文件回调混淆。end 是结束语义的泛称，不是当前统一文件 API。
+现有仓库的 begin/commit 不产生新协议要求：[CLI HTTP sidecar](../../apps/cli/src/http-server.ts) 的 sidecarBegin/sidecarFinish 用于 SQLite BEGIN/COMMIT/ROLLBACK；[DirectoryDriver.transaction](../../packages/vfs-core/src/impl/services/DirectoryDriver.ts) 当前主要缓冲事件，[LocalFS 外层 transaction](../../packages/vfsdriver-local/src/localfs-backend.ts) 与 [IndexedDB 外层 transaction](../../packages/vfsdriver-indexeddb/src/idb-backend.ts) 直接执行回调，不提供跨文件 ACID。记录存储事务另有实现，不应与上述外层文件回调混淆。end 是结束语义的泛称，不是当前统一文件 API。
 
 新 HTTP backend 不声明跨操作文件事务能力。未来若有人要求 mkdir + 多文件替换整体提交，应作为新增需求评估；仅把多次 HTTP 调用放入 transaction(fn) 不能提供该保证。
 

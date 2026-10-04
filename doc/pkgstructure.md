@@ -28,7 +28,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 | `@itookit/vfs-core` | VFS 引擎核心：协议层 + 引擎实现 + 事件总线 + 通用 IO（IIOStream/pipe）。 |
 | `@itookit/vfsdriver-indexeddb` | IndexedDB 存储后端（浏览器）。 |
 | `@itookit/vfsdriver-http` | HTTP 外挂文件驱动（Web/Tauri/CLI），可取消批量读取与条件写入；服务端为 `tools/fs-server`。 |
-| `@itookit/vfsdriver-localfs` | SQLite + 本地 FS 后端（Node/Electron）。 |
+| `@itookit/vfsdriver-local` | SQLite + 本地 FS 后端（Node/Electron）。 |
 | `@itookit/llm-ui` | Chat UI：聊天界面、流式历史视图、会话编排可视化。 |
 | `@itookit/llm-settings-ui` | LLM 设置 UI：Agent/Provider/Connection/MCP/Skill/Cost/SystemPrompt 编辑器 + 配置导入导出（`llm-import`）。 |
 | `@itookit/vfs-ui` | 独立文件/资源浏览 UI：目录导航、标签、内容大纲；仅依赖 vfs-core，通过公开接口注入数据源、动作、展示和持久化。 |

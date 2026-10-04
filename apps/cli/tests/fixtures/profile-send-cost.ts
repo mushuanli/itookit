@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createApplicationRuntime } from '@itookit/app-core';
-import { openLocalFSBackend, type ISidecarDb } from '@itookit/vfsdriver-localfs';
+import { openLocalFSBackend, type ISidecarDb } from '@itookit/vfsdriver-local';
 import { NodeSqliteSidecarDb } from '../../src/sqlite-sidecar';
 import { listenForTest } from '../listen';
 

@@ -26,7 +26,7 @@ import { createFileSystemSource } from '@itookit/vfs-core';
 
 import { initApp, installMobileNavigation, windowSessionLeaseToken, workspaceRoot, type AppUI } from '@itookit/app-shell';
 import { createApplicationRuntime } from '@itookit/app-core';
-import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { openLocalFSBackend } from '@itookit/vfsdriver-local';
 import { createFlowContextMenuConfig, createAIContextMenuConfig,
     installFlowLibrary, restoreFlowLibrary } from '@itookit/llm-ui/startup';
 import {

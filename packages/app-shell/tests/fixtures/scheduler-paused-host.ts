@@ -1,6 +1,6 @@
 import { once } from 'node:events';
 import { createVFS } from '@itookit/vfs-core';
-import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { openLocalFSBackend } from '@itookit/vfsdriver-local';
 import { Kernel } from '@itookit/durable-kernel';
 import { NodeSqliteSidecarDb } from '../../../../apps/cli/src/sqlite-sidecar';
 import { acquireSchedulerLease } from '../../../llm-flow/src/flow/scheduler-lease';

@@ -1,6 +1,6 @@
-import { RECORD_PAGE_SQL, recordPageValues, decodeRecordPage, type RecordPageRow } from '@itookit/vfsdriver-localfs';
-import type { ISidecarDb, MetaExtRow } from '@itookit/vfsdriver-localfs';
-import { DDL, SCHEMA_VERSION } from '@itookit/vfsdriver-localfs';
+import { RECORD_PAGE_SQL, recordPageValues, decodeRecordPage, type RecordPageRow } from '@itookit/vfsdriver-local';
+import type { ISidecarDb, MetaExtRow } from '@itookit/vfsdriver-local';
+import { DDL, SCHEMA_VERSION } from '@itookit/vfsdriver-local';
 
 interface StatementSync {
     get(...values: unknown[]): unknown;

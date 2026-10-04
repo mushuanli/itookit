@@ -3,7 +3,7 @@ import { mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { DirectorySourceProvider } from '@itookit/app-core';
 import { createFileSystemSource, type FileSystemSourceOwner, type IFileSystem } from '@itookit/vfs-core';
-import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
+import { openLocalFSBackend } from '@itookit/vfsdriver-local';
 import { NodeSqliteSidecarDb } from './sqlite-sidecar';
 
 /** Node-host directory sources used by CLI --set-home / --add-dir / RequestWorkspaceAccess. */

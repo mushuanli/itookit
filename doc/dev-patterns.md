@@ -82,7 +82,7 @@ Provider / Connection 使用 `configuration-form.ts` 的自动保存表单，新
 | UI 包 | vite build | `pnpm build` (app bundle + CSS) |
 | 无 build 脚本 | — | `app-core`/`app-shell` 以 TS 源码被 app 消费 |
 
-- **tsup**：`common`/`durable-kernel`/`llm-tasks`/`llm-flow`/`llm-session`/`kernel-adapters`/`driver-llm`/`device-tty`/`tools`/`vfs-core`/`vfsdriver-indexeddb`/`vfsdriver-localfs`，以及 UI 包中的 `llm-settings-ui`/`ui-common`。
+- **tsup**：`common`/`durable-kernel`/`llm-tasks`/`llm-flow`/`llm-session`/`kernel-adapters`/`driver-llm`/`device-tty`/`tools`/`vfs-core`/`vfsdriver-indexeddb`/`vfsdriver-local`，以及 UI 包中的 `llm-settings-ui`/`ui-common`。
 - **vite build**：`llm-ui`/`vfs-ui`/`mdx`/`app-settings`/`demo`。
 
 ### dev server 的 workspace 别名（唯一来源）

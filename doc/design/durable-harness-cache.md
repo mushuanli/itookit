@@ -21,7 +21,7 @@
 
 **Session 关闭时的物理回收（2026-09-11 第二轮，同日）**：`cleanupSessionCachesTx` 在 Session 转为 `closed` 的同一事务里删除该 Session 的全部 cache namespace（含 `session` scope）、entry、发布序号、owner 索引与 handle/resource，并追加 `cache.cleaned`（`scope: session`）。`closed` 转换前已校验没有未结束 Task，且 cache 操作对 closed Session 一律拒绝，因此回收时不可能存在活跃引用；artifact 族资源与幂等事实同样不动。回归：`protocol.test.ts`「reclaims every cache namespace when the Session closes, including session scope」。
 
-跨 Session owner、provider cache、artifact 大值、容量账本与跨 Session 的 retention/GC 竞争仍待实施。当前 namespace 的 `ownerTaskId` 记录创建者，Session scope 授权不要求该 Task 本体仍存在。基础回归见 [protocol.test.ts](../../packages/durable-kernel/src/protocol.test.ts)；独立进程竞争与提交前/后 SIGKILL 回执原子性见 [LocalFS IPC 测试](../../packages/vfsdriver-localfs/tests/20-kernel-ipc.test.ts)，覆盖根后端和非根挂载、失效后的原回执重放；本轮实测 durable-kernel 全套 189 项通过（其中 protocol.test.ts 112 项）、20-kernel-ipc 所属 vfsdriver-localfs 54 项通过，不能替代上述扩展的验收。测试计数随代码演进，以实际测试输出为准。
+跨 Session owner、provider cache、artifact 大值、容量账本与跨 Session 的 retention/GC 竞争仍待实施。当前 namespace 的 `ownerTaskId` 记录创建者，Session scope 授权不要求该 Task 本体仍存在。基础回归见 [protocol.test.ts](../../packages/durable-kernel/src/protocol.test.ts)；独立进程竞争与提交前/后 SIGKILL 回执原子性见 [LocalFS IPC 测试](../../apps/cli/tests/20-kernel-ipc.test.ts)，覆盖根后端和非根挂载、失效后的原回执重放；本轮实测 durable-kernel 全套 189 项通过（其中 protocol.test.ts 112 项）、20-kernel-ipc 所属 vfsdriver-local 54 项通过，不能替代上述扩展的验收。测试计数随代码演进，以实际测试输出为准。
 
 ## 1. 设计裁决
 
