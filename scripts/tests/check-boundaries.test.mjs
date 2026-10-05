@@ -68,11 +68,11 @@ test('standalone vfs-ui only depends on vfs-core internally', () => {
 test('public LLM mechanisms reject host dependencies', () => {
     for (const name of ['common', 'ui-common', 'vfs-core', 'kernel-adapters/llm', 'llm-session'])
         assert.match(dependencyError('@itookit/driver-llm', '@itookit/' + name), /public ports/);
-    assert.equal(dependencyError('@itookit/driver-llm', '@itookit/llm-context'), undefined);
+    assert.match(dependencyError('@itookit/driver-llm', '@itookit/llm-context'), /public ports/);
     assert.match(dependencyError('@itookit/llm-context', '@itookit/driver-llm'), /public ports/);
     const driver = pkg('driver-llm'), context = pkg('llm-context');
     const inspectDriver = text => sourceErrors(driver, '/repo/packages/driver-llm/src/test.ts', text, [driver, context]);
-    assert.equal(inspectDriver("import type { ChatMessage } from '@itookit/llm-context';").length, 0);
+    assert.equal(inspectDriver("import type { ChatMessage } from '@itookit/llm-context';").length, 1);
     assert.equal(inspectDriver("import { createContextService } from '@itookit/llm-context';").length, 1);
     assert.equal(inspectDriver("import { Client } from 'some-sdk';").length, 1);
 });
@@ -97,9 +97,9 @@ test('kernel adapters cannot depend on the task, flow or session implementations
 });
 
 
-test('published driver dependencies stay empty while development message types remain permitted', () => {
+test('driver dependencies reject context types as well as runtime imports', () => {
     assert.match(manifestDependencyError('@itookit/driver-llm', '@itookit/llm-context'), /no runtime dependencies/);
-    assert.equal(dependencyError('@itookit/driver-llm', '@itookit/llm-context'), undefined);
+    assert.match(dependencyError('@itookit/driver-llm', '@itookit/llm-context'), /public ports/);
 });
 
 test('optional settings may only load through the explicit settings or compatibility entry', () => {

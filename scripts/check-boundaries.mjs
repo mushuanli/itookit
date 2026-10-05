@@ -21,7 +21,7 @@ export function dependencyError(source, target) {
     if (source === '@itookit/kernel-adapters' && ['@itookit/llm-tasks', '@itookit/llm-flow', '@itookit/llm-session'].includes(target)) return 'adapters must not depend on execution or conversation layers';
     if (['@itookit/kernel-adapters', '@itookit/tools', '@itookit/device-tty', '@itookit/llm-tasks', '@itookit/llm-flow', '@itookit/llm-session'].includes(source) &&
         ['@itookit/common', '@itookit/llm-common'].includes(target)) return 'execution capabilities must use owned contracts and injected ports';
-    if (source === '@itookit/driver-llm' && target !== '@itookit/llm-context') return 'driver-llm must receive host capabilities through its public ports';
+    if (source === '@itookit/driver-llm') return 'driver-llm must receive host capabilities through its public ports';
     if (source === '@itookit/llm-context') return 'llm-context must receive I/O through its public ports';
     if (source === '@itookit/mdxeditor' && target.startsWith('@itookit/')) return 'mdxeditor must receive host capabilities through its public ports';
     if (source === '@itookit/vfs-ui' && target !== '@itookit/vfs-core') return 'vfs-ui must not depend on host packages; use its public ports';
@@ -109,11 +109,6 @@ export function sourceErrors(source, file, text, packages) {
         if (specifier && ts.isStringLiteralLike(specifier)) {
             const error = importError(source, file, specifier.text, packages);
             if (error) report(node, `${error} (${specifier.text})`);
-            if (source.name === '@itookit/driver-llm' && specifier.text === '@itookit/llm-context' &&
-                ((ts.isImportDeclaration(node) && !node.importClause?.isTypeOnly) ||
-                    (ts.isExportDeclaration(node) && !node.isTypeOnly))) {
-                report(node, 'driver-llm may only use neutral message contracts through type imports');
-            }
         }
         if (['@itookit/kernel-adapters', '@itookit/llm-session', '@itookit/llm-ui', '@itookit/llm-settings-ui'].includes(source.name) &&
             ts.isIdentifier(node) && node.text === 'DEFAULT_HARNESS_TOOL_IDS')

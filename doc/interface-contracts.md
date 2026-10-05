@@ -1,6 +1,6 @@
 # 跨包接口契约
 
-调用方只依赖接口，不依赖实现。契约按能力归属：driver-llm/contracts（模型通信与服务端口）、llm-context（消息与上下文）、tools/contracts（Tool/TTY 执行）、vfs-core（文件系统）；llm-tasks/contracts、llm-flow/contracts 和 llm-session/contracts 分别承载执行、编排与会话契约；kernel-adapters/contracts 承载配置管理与定价；common 不再转发 LLM 契约。
+调用方只依赖接口，不依赖实现。契约按能力归属：driver-llm/contracts（模型通信与服务端口）、llm-context（领域消息与上下文）、tools/contracts（Tool/TTY 执行）、vfs-core（文件系统）；llm-tasks/contracts、llm-flow/contracts 和 llm-session/contracts 分别承载执行、编排与会话契约；kernel-adapters/contracts 承载配置管理与定价；common 不再转发 LLM 契约。
 
 ## VFS 体系（@itookit/vfs-core）
 
@@ -24,7 +24,7 @@
 | `EditorTaskControlPlane` / `AttachedTask` | openTask/openSession/listSessionTasks；共享挂接身份、Task 事件及控制 | `llm-ui/src/domain/ports/TaskControlPlane.ts`，从 `/chat` 和根入口导出 | Kernel 或宿主远程客户端 | 聊天编辑器、任务挂接及 pending 恢复 |
 | `SessionViewBinding` / `LLMFactoryDependencies` | 显式 sessionManager 或 resolveSessionView；仓储及可选宿主端口 | `llm-ui/src/chat.ts` | 宿主组合根 | createLLMFactory |
 | `ILLMService` | `chat()`、`chatStream()`、`abort()`、`getConnection()` | `driver-llm/src/types/service.ts` | `kernel-adapters LLMServiceAdapter` | `llm-tasks`（经 effect）、`llm-session` |
-| `ChatMessage` | `role/content/attachments?` | `llm-context/src/domain/message.ts` | driver-llm | 全部 LLM 层 |
+| `ChatMessage` | `role/content/attachments?` | `driver-llm/src/types/message.ts` | driver-llm | 宿主通信适配 |
 | `ChatCompletionParams/ChatCompletionResponse/ChatCompletionChunk` | `messages/model/tools/stream/webSearch`… | `driver-llm/src/types/response.ts` | driver-llm providers | `llm-tasks`、`kernel-adapters` |
 | `Citation` | `text/source/title/url`（联网搜索引用） | `driver-llm/src/types/response.ts` | driver-llm providers | `kernel-adapters`、`llm-ui` |
 | `TokenUsage` | `prompt_tokens/completion_tokens/total_tokens` | `driver-llm/src/types/response.ts` | driver-llm | `llm-tasks`、预算扣减 |
@@ -34,7 +34,7 @@
 | `IConnectionService.listProviderModels` | 接受完整未保存 Provider，返回归一化模型目录；无持久化副作用 | `kernel-adapters/src/llm-management/contracts/agent.ts` | `LLMDeviceDriver` → `providers/model-catalog.ts`，`VFSAgentService` 转发 | `ProviderSettingsEditor` |
 | `LLMProvider.supportedProtocols/defaultProtocol/modelsPath`、`LLMModel.preferredProtocol` | Provider 协议集合与默认、模型目录覆盖、模型首选；连接显式协议优先 | `driver-llm/src/types/connection.ts`、`driver-llm/src/types/protocol.ts` | `driver-llm` registry / Driver / `.llm` 转换 | Provider / Connection 设置页 |
 | `LLMProvider.capabilities.serverSideWebSearch` | 服务端内置联网搜索能力（唯一事实源） | `driver-llm/src/types/connection.ts` | `kernel-adapters/src/llm-management/constants/providers.ts` | `resolveWebSearchStrategy` |
-| `ToolCall` / `ToolDefinition` | `id/name/arguments` | `llm-context/src/domain/message.ts` | driver-llm / `tools` | `llm-tasks` |
+| `ToolCall` / `ToolDefinition` | `id/name/arguments` | `driver-llm/src/types/message.ts` | driver-llm | 宿主通信适配 |
 | `ToolInvokeResult` | `success/output/durationMs`；可选 `data/errorCode/recoverable/truncated` | `tools/src/contracts/tool-types.ts` | `tools`、`kernel-adapters` | `llm-tasks`：显式 recoverable 失败反馈模型，其余失败终止任务 |
 | `DagNodeDefinition/DagEdgeDefinition/DagRunSpec/DagNodeOutcome` | `id/plugin/config/outputs/effects` | `llm-flow/src/contracts/dag-plugin.ts` | `llm-flow` | `llm-session`、`cli` |
 | `FlowDraft/FlowRevision/FlowNodeDefinition` | `nodes/edges/layout` | `llm-flow/src/contracts/flow-definition.ts` | `llm-flow FlowDefinitionStore` | `llm-ui`、`llm-session` |
@@ -155,4 +155,4 @@ HTTP 外挂的条件写入、取消与项目授权见 [HTTP VFS 设计](design/v
 
 `vfs-ui` 仅依赖 `vfs-core`。`BrowserSource` / `BrowserAction` 接收自定义资源与动作；`VFSPresentationOptions` 按实例注入翻译、SVG 和启动跟踪；`TagEditorFactory` / `ContextMenuConfig` / `UIPersistencePort` 接收宿主组件、菜单和存储。消费方从 vfs-ui 导入这些类型，或提供结构兼容实现，无需依赖 common/ui-common。MindOS 展示适配位于 `app-shell/src/browser/vfs-presentation.ts`。
 
-通信契约的权威实现已迁到 `driver-llm/src/types/`，原 llm-common 和 common 的 LLM 兼容转发已删除。中立消息契约归 `llm-context/src/domain/message.ts`；驱动的发布声明内联这些类型。模型设备与配置实现已迁到 `kernel-adapters/src/llm-management/`，通过 `@itookit/kernel-adapters/llm` 公开。
+通信契约的权威实现已迁到 `driver-llm/src/types/`，原 llm-common 和 common 的 LLM 兼容转发已删除。通信消息 DTO 由 `driver-llm/src/types/message.ts` 定义；上下文领域消息仍归 `llm-context/src/domain/message.ts`。两包互不依赖，宿主将上下文结果映射为通信请求；目前兼容字段可直接按结构赋值。模型设备与配置实现已迁到 `kernel-adapters/src/llm-management/`，通过 `@itookit/kernel-adapters/llm` 公开。
