@@ -4,7 +4,8 @@ export { resolveBrowserTarget, browserTargetFolder, folderBrowserPath, folderPat
 export type { BrowserTarget } from './browser-routes';
 import { WORKSPACE_PATH, projectRelativePath } from '../vfs/workspace-namespace';
 import { sessionFamilyRoots } from '../projects/session-family';
-import { createFileSystemSource, FSError, type FSNode, type IStorageBackend, type IFileSystem } from '@itookit/vfs-core';
+import { containedProjectRoots, projectFileLocation, type ProjectFileLocation, type ProjectFileRoot } from '../projects/file-location';
+import { transferFileSystemEntry, checkOperation, createFileSystemSource, FSError, type FSNode, type IStorageBackend, type IFileSystem } from '@itookit/vfs-core';
 import { t, ENTITY_ICONS, ACTION_ICONS, fileTypeIcon } from '@itookit/common';
 import type { ISessionRepository, SessionFolder } from '@itookit/llm-session';
 import type { EventEnvelope, Kernel, TaskRecord } from '@itookit/durable-kernel';
@@ -21,6 +22,9 @@ import { SessionLifecycleService } from './session-lifecycle';
  * (project file paths only).
  */
 interface FileProjection {
+    projectId: string;
+    location(path: string): ProjectFileLocation;
+    roots: ProjectFileRoot[];
     mounts: readonly ProjectRemoteMount[];
     offline: boolean;
     favorite(path: string, type: 'file' | 'directory'): boolean;
@@ -68,6 +72,7 @@ class BrowserBackend implements IStorageBackend {
     }
     async init() {
         this.subscriptions.push(this.deps.repository.subscribe(() => this.invalidateNavigation()));
+        if (this.deps.projects) this.subscriptions.push(this.deps.projects.subscribeChanges(() => this.invalidateNavigation()));
         const unsubscribe = this.deps.kernel.onChanged?.(event => {
             if (event.reason !== 'content') this.invalidateNavigation();
         });
@@ -77,7 +82,8 @@ class BrowserBackend implements IStorageBackend {
     invalidateNavigation(): void { this.snapshot = undefined; }
     private navigation() {
         if (!this.snapshot) {
-            const pending = Promise.all([this.deps.repository.listFolders(), this.deps.repository.listSummaries?.() ?? this.deps.repository.list()]);
+            const pending = Promise.all([this.deps.repository.listFolders().then(folders => this.deps.projects?.navigationFolders(folders) ?? folders),
+                this.deps.repository.listSummaries?.() ?? this.deps.repository.list()]);
             this.snapshot = pending;
             void pending.catch(() => { if (this.snapshot === pending) this.invalidateNavigation(); });
         }
@@ -113,10 +119,13 @@ class BrowserBackend implements IStorageBackend {
     private async fileProjection(folder: string | null, withFavorites: boolean): Promise<FileProjection | undefined> {
         const projects = this.deps.projects;
         if (!projects) return undefined;
-        const project = await projects.forFolder(folder);
+        const catalog = await projects.list(), project = await projects.forFolder(folder, catalog);
         if (!project) return undefined;
         const id = project.project.id;
-        const projection: FileProjection = { mounts: projects.remoteMounts?.list(id) ?? [],
+        const mounts = projects.remoteMounts?.list(id) ?? [];
+        const projection: FileProjection = { projectId: id, mounts, location: path => projectFileLocation(project, projectRelativePath(path), mounts),
+            roots: catalog.map(item => ({ projectId: item.project.id, name: item.name,
+                location: projectFileLocation(item, '/', projects.remoteMounts?.list(item.project.id) ?? []) })),
             offline: !!projects.remoteMounts?.projectOffline(id), favorite: () => false };
         if (!withFavorites) return projection;
         await projects.favorites.list(id);
@@ -136,7 +145,11 @@ class BrowserBackend implements IStorageBackend {
         const routePath = (path: string) => prefix.endsWith('/@files') ? projectRelativePath(path) : path;
         const favorite = !!projection?.favorite(node.path, node.type === 'directory' ? 'directory' : 'file');
         const path = routePath(node.path), parent = node.parentPath ? routePath(node.parentPath) : '/';
+        const protectedRoots = projection && node.type === 'directory' && (node.path === WORKSPACE_PATH || node.path.startsWith(WORKSPACE_PATH + '/'))
+            ? containedProjectRoots(projection.location(node.path), projection.roots) : [];
         return { ...node, ...(node.type === 'file' && node.assetDirPath ? { assetDirPath: prefix + routePath(node.assetDirPath) } : {}), path: prefix + (path === '/' ? '' : path), parentPath: path === '/' ? prefix : prefix + (parent === '/' ? '' : parent), metadata: { ...node.metadata, _favorite: favorite, _showAll: true, _fileDetails: true, _readOnly: readOnly,
+            ...(protectedRoots.length ? { _fixedEntry: true, projectStorageRoots: protectedRoots.map(root => root.projectId),
+                navigationDescription: t('project.error.storageRoot', { projects: protectedRoots.map(root => root.name).join(', ') }) } : {}),
             ...(node.metadata?.unavailable ? { _disabled: true, navigationDescription: t('remote.state.offline') } : {}) } };
     }
     private sessionBrowserPath(id: string, folder: string | null | undefined): string {
@@ -162,12 +175,13 @@ class BrowserBackend implements IStorageBackend {
         const node = this.node(folderBrowserPath(folder.path), title, true, folder.updatedAt);
         const remote = this.deps.projects?.remoteMounts;
         const mounts = folder.project && remote ? remote.list(folder.project.id) : [];
+        const remoteRoot = folder.project?.source?.kind === 'remote' || mounts.some(mount => mount.at === '/');
         const offline = !!folder.project && !!remote && mounts.some(mount => remote.status(mount.mountId) === 'offline');
         // A shadowed or unavailable source is reported on the drawer instead of only inside the
         // mount dialog, so the workbench shows why a project is degraded.
         const degraded = !!folder.project && !!remote && remote.degraded(folder.project.id);
-        return { ...node, ...(folder.project ? { icon: mounts.length ? ENTITY_ICONS.remoteProject : ENTITY_ICONS.project } : {}),
-            metadata: { ...node.metadata, ...(folder.project ? { projectId: folder.project.id, directory: folder.project.directory, remoteProject: mounts.length > 0,
+        return { ...node, ...(folder.project ? { icon: remoteRoot ? ENTITY_ICONS.remoteProject : ENTITY_ICONS.project } : {}),
+            metadata: { ...node.metadata, ...(folder.project ? { projectId: folder.project.id, directory: folder.project.directory, remoteProject: remoteRoot,
                 remoteOffline: offline, _disabled: false, _readOnly: offline,
                 navigationDescription: mounts.length ? t(offline ? 'remote.projectOffline' : degraded ? 'remote.degraded' : 'remote.projectRemote') : '' } : {}) } };
     }
@@ -269,9 +283,16 @@ class BrowserBackend implements IStorageBackend {
         const nodes = await this.withFiles(target, async fs => {
             const raw = await fs.driver.getChildren(target.path);
             const visible = this.deps.filterDisplayedFiles ? await this.deps.filterDisplayedFiles(fs, raw) : raw;
-            return Promise.all(visible.map(node => this.mapped(fs, node, prefix, projection)));
+            return Promise.all(visible.filter(node => node.path !== '/workspace/.mindos' && !this.isOtherProjectRoot(node, projection))
+                .map(node => this.mapped(fs, node, prefix, projection)));
         });
         return nodes.map(node => this.withMountStatus(node, prefix, target, projection));
+    }
+    private isOtherProjectRoot(node: FSNode, projection?: FileProjection): boolean {
+        if (!projection || node.type !== 'directory' || !(node.path === WORKSPACE_PATH || node.path.startsWith(WORKSPACE_PATH + '/'))) return false;
+        const location = projection.location(node.path);
+        return projection.roots.some(root => root.projectId !== projection.projectId
+            && root.location.namespace === location.namespace && root.location.path === location.path);
     }
     /** Annotate a listed row with the remote grant that owns it, if any. */
     private withMountStatus(node: FSNode, prefix: string, target: FileTarget, projection?: FileProjection): FSNode {
@@ -303,10 +324,19 @@ class BrowserBackend implements IStorageBackend {
     private async fileEntry(path: string, folder: string | null): Promise<FSNode> {
         const projection = await this.fileProjection(folder, true);
         const offline = !!projection?.offline;
-        const readOnly = offline || !!folder && !!await this.deps.projects?.workspaceReadOnly(folder);
+        const availability = offline ? { readOnly: true } : await this.fileAvailability(folder);
+        const disabled = offline || !!availability.reason;
         return { ...this.node(path, t('project.files'), true), metadata: { title: t('project.files'),
-            _favorite: projection?.favorite(WORKSPACE_PATH, 'directory') ?? false, _fixedEntry: true, _disabled: offline, _readOnly: readOnly,
-            ...(offline ? { navigationDescription: t('remote.projectOffline') } : {}) } };
+            _favorite: projection?.favorite(WORKSPACE_PATH, 'directory') ?? false, _fixedEntry: true, _disabled: disabled, _readOnly: availability.readOnly,
+            ...(disabled ? { navigationDescription: offline ? t('remote.projectOffline') : t('project.filesUnavailable', { reason: availability.reason! }) } : {}) } };
+    }
+    private async fileAvailability(folder: string | null): Promise<{ readOnly: boolean; reason?: string }> {
+        try { return { readOnly: !!folder && !!await this.deps.projects?.workspaceReadOnly(folder) }; }
+        catch (error) {
+            // A missing source must not hide the project's Sessions and navigation entries.
+            if (!(error instanceof FSError) || !['ENOENT', 'ENOTDIR', 'EACCES'].includes(error.code)) throw error;
+            return { readOnly: true, reason: error.message };
+        }
     }
     private async assertAvailable(path: string): Promise<void> {
         if (!this.deps.projects?.remoteMounts) return;
@@ -334,6 +364,10 @@ class BrowserBackend implements IStorageBackend {
         await this.assertAvailable(parentBrowserPath(path));
         const parent = parentBrowserPath(path);
         if (this.isFolderContainer(parent)) {
+            if (parent === '/' && this.deps.projects) {
+                const project = await this.deps.projects.create(browserName(path));
+                return this.folderNode(project);
+            }
             const folderPath = `${folderPathFromBrowserPath(parent) ?? ''}/${browserName(path)}`;
             const folder = await this.deps.repository.createFolder(folderPath);
             return this.folderNode(folder);
@@ -393,7 +427,10 @@ class BrowserBackend implements IStorageBackend {
             // active-Task guard can no longer see them.
             for (const project of projects) await this.deps.projects?.remoteMounts?.assertUnmountable(project.project.id);
             await this.lifecycle.deleteFolder(folderPath, true);
-            for (const project of projects) await this.deps.projects?.remoteMounts?.forgetProject(project.project.id);
+            for (const project of projects) {
+                await this.deps.projects?.removeProjectSource(project);
+                await this.deps.projects?.remoteMounts?.forgetProject(project.project.id);
+            }
             return;
         }
         if (target.kind === 'session') {
@@ -402,6 +439,7 @@ class BrowserBackend implements IStorageBackend {
         }
         if (isFileTarget(target)) {
             if (target.path === '/' || target.kind === 'project-files' && target.path === WORKSPACE_PATH) throw new FSError('EACCES', 'Cannot delete a file root');
+            await this.assertOrdinaryFile(target);
             await this.withFiles(target, fs => fs.driver.delete([target.path], { recursive: true }));
             return;
         }
@@ -415,7 +453,11 @@ class BrowserBackend implements IStorageBackend {
         const source = resolveBrowserTarget(from);
         if (source.kind === 'session') {
             const manifest = await this.deps.repository.getManifest(source.sessionId);
-            await this.deps.projects?.assertMove(manifest.folder ?? null, folderPathFromBrowserPath(parentBrowserPath(targetPath)));
+            const destination = folderPathFromBrowserPath(parentBrowserPath(targetPath));
+            if (this.deps.projects && !await this.deps.projects.forFolder(destination)) throw new FSError('EACCES', 'Sessions require a project destination');
+            if (this.deps.projects && (destination !== manifest.folder || !await this.deps.projects.sessionMoves.ready(source.sessionId))) {
+                await this.deps.projects.sessionMoves.move(source.sessionId, destination!);
+            }
             await this.deps.repository.updateManifest(source.sessionId, {
                 title: browserName(targetPath) === browserName(from) ? manifest.title : browserName(targetPath).replace(/\.[^.]+$/, ''),
                 folder: folderPathFromBrowserPath(parentBrowserPath(targetPath)),
@@ -430,12 +472,21 @@ class BrowserBackend implements IStorageBackend {
             const folders = await this.deps.repository.listFolders();
             const containsProject = folders.some(folder => folder.project && (folder.path === fromFolder || folder.path.startsWith(fromFolder + '/')));
             await this.deps.projects?.assertMove(fromFolder, parentFolder, containsProject);
-            await this.deps.repository.renameFolder(fromFolder, `${parentFolder ?? ''}/${browserName(targetPath)}`);
+            const next = `${parentFolder ?? ''}/${browserName(targetPath)}`;
+            const project = folders.find(folder => folder.path === fromFolder)?.project;
+            if (project && this.deps.projects) await this.deps.projects.renameProject(fromFolder, next);
+            else await this.deps.repository.renameFolder(fromFolder, next);
             return;
         }
         if (isFileTarget(source)) {
+            await this.assertOrdinaryFile(source);
             const destination = resolveBrowserTarget(targetPath);
-            if (!isFileTarget(destination) || filesBrowserPrefix(from) !== filesBrowserPrefix(targetPath)) throw new FSError('EACCES', 'Cannot move files between projects or Sessions');
+            if (!isFileTarget(destination)) throw new FSError('EACCES', 'Files require a file directory destination');
+            if (filesBrowserPrefix(from) !== filesBrowserPrefix(targetPath)) {
+                if (browserName(from) !== browserName(targetPath)) throw new FSError('EINVAL', 'Move and rename separately');
+                await this.transfer('move', [from], parentBrowserPath(targetPath));
+                return;
+            }
             if (source.path === '/') throw new FSError('EACCES', 'Cannot rename a file root');
             await this.withFiles(source, async fs => {
                 if (parentBrowserPath(source.path) === parentBrowserPath(destination.path)) {
@@ -448,6 +499,49 @@ class BrowserBackend implements IStorageBackend {
             return;
         }
         throw new FSError('EROFS', 'Unsupported browser rename');
+    }
+    async transfer(mode: 'copy' | 'move', ids: string[], destinationPath: string): Promise<void> {
+        const destination = resolveBrowserTarget(destinationPath);
+        if (!isFileTarget(destination)) throw new FSError('EACCES', 'Files require a file directory destination');
+        if (ids.some(id => parentBrowserPath(id) === destinationPath)) throw new FSError('EINVAL', 'Transfer destination is already the source directory');
+        const roots = [...new Set(ids)].filter(id => !ids.some(parent => id !== parent && id.startsWith(parent + '/')));
+        for (const id of roots) {
+            const source = resolveBrowserTarget(id);
+            if (!isFileTarget(source) || source.path === '/' || source.kind === 'project-files' && source.path === WORKSPACE_PATH)
+                throw new FSError('EACCES', 'Cannot transfer a browser navigation entry');
+            await this.assertOrdinaryFile(source);
+            await this.assertTransferPaths(source, destination);
+            const sameNamespace = filesBrowserPrefix(id) === filesBrowserPrefix(destinationPath);
+            await this.withFiles(source, async fs => {
+                if (mode === 'move' && sameNamespace) {
+                    try { await fs.driver.move([source.path], destination.path); return; }
+                    catch (error) { if (!(error instanceof FSError) || error.code !== 'EXMOUNT') throw error; }
+                }
+                await this.withFiles(destination, target => transferFileSystemEntry(fs, source.path,
+                    target, destination.path, { move: mode === 'move', sameNamespace }));
+            });
+        }
+    }
+    private async assertTransferPaths(source: FileTarget, destination: FileTarget): Promise<void> {
+        if (source.kind !== 'project-files' || destination.kind !== 'project-files' || !this.deps.projects) return;
+        const from = await this.deps.projects.forFolder(source.folder), to = await this.deps.projects.forFolder(destination.folder);
+        if (!from || !to) throw new FSError('ENOENT', 'Transfer project unavailable');
+        const remote = this.deps.projects.remoteMounts;
+        const origin = projectFileLocation(from, projectRelativePath(source.path), remote?.list(from.project.id) ?? []);
+        const target = projectFileLocation(to, projectRelativePath(destination.path).replace(/\/$/, '') + '/' + browserName(source.path), remote?.list(to.project.id) ?? []);
+        if (origin.namespace === target.namespace && (target.path === origin.path || target.path.startsWith(origin.path + '/'))) {
+            throw Object.assign(new FSError('EINVAL', t('project.error.transferOverlap', { source: `${from.name}: ${origin.label}`, target: `${to.name}: ${target.label}` })),
+                { sourceProjectId: from.project.id, targetProjectId: to.project.id, sourceLocation: origin, targetLocation: target });
+        }
+    }
+    private async assertOrdinaryFile(target: FileTarget): Promise<void> {
+        if (!this.deps.projects || !(target.path === WORKSPACE_PATH || target.path.startsWith(WORKSPACE_PATH + '/'))) return;
+        const projection = await this.fileProjection(await this.filesFolder(target), false);
+        if (!projection) return;
+        const location = projection.location(target.path), protectedRoots = containedProjectRoots(location, projection.roots);
+        if (!protectedRoots.length) return;
+        throw Object.assign(new FSError('EBUSY', t('project.error.storageRoot', { projects: protectedRoots.map(root => root.name).join(', ') })),
+            { sourceLocation: location, protectedProjects: protectedRoots });
     }
     async updateMetadata(path: string, metadata: Record<string, unknown>): Promise<void> {
         const target = resolveBrowserTarget(path);
@@ -476,5 +570,18 @@ class BrowserBackend implements IStorageBackend {
 export async function createSessionBrowser(deps: SessionBrowserDependencies) {
     const backend = new BrowserBackend(deps);
     const owner = await createFileSystemSource({ tags: false, backend, viewId: 'session-browser:admin', access: 'rw' });
-    return Object.assign(owner, { invalidateNavigation: () => backend.invalidateNavigation() });
+    const rename = owner.fs.driver.rename.bind(owner.fs.driver);
+    owner.fs.driver.rename = async (path, name, options) => {
+        checkOperation(options);
+        if (!name || /[/\\\0]/.test(name) || ['.', '..'].includes(name)) throw new FSError('EINVAL', 'Invalid rename name');
+        const target = resolveBrowserTarget(path);
+        if (target.kind === 'session') {
+            await owner.fs.driver.updateMetadata(path, { title: name.replace(/\.[^.]+$/, '') });
+            return;
+        }
+        // Folder routes are encoded identities; display names are never event paths.
+        const segment = target.kind === 'folder' ? FOLDER_SEGMENT_PREFIX + encodeURIComponent(name) : name;
+        await rename(path, segment, options);
+    };
+    return Object.assign(owner, { transferItems: (mode: 'copy' | 'move', ids: string[], destination: string) => backend.transfer(mode, ids, destination), invalidateNavigation: () => backend.invalidateNavigation() });
 }

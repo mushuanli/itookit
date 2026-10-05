@@ -10,7 +10,7 @@
 
 核心决策：
 
-- 服务端采用 Axum + Tokio；只负责目录导出、文件操作、认证与请求生命周期，不装配 MindOS Kernel、Session 或数据库。
+- 服务端采用 Axum + Tokio；只负责目录导出、文件操作、认证与请求生命周期，不装配 MindOS Kernel 或 Session 运行时；SeqFile 结构化记录使用 SQLite。
 - vfs-core 后端拆为最小文件读取接口与可选写入、元数据、标签、记录、批量、搜索等能力；保留上层 IFileSystem 使用方式，通过增量扩展与适配迁移。
 - HTTP 元数据使用 JSON，内容使用原始二进制；完整操作下推服务端，优先减少网络往返。
 - 所有可能执行 I/O 的新接口支持 AbortSignal；取消贯穿消费者、视图、引擎、驱动、传输和服务端。
@@ -594,3 +594,21 @@ Rust 服务端采用单用户配置：顶层凭据可为内联 `password`、环�
 HTTP 单次内存读取默认限制 32 MiB。超过上限返回 `EFBIG`（不是网络 `EIO`）；无编码转换时可通过 Content-Length 提前拒绝并取消响应流，未知长度继续按实际接收字节计数。该错误不使项目断线。
 
 项目文件打开先读取文件 stat。超过 32 MiB 的文本仅用一次 Range 读取前 256 KiB，显示明确的只读截断提示并使用纯文本预览，不创建编辑器、不提供保存命令；已知二进制大文件只显示大小与无法内嵌预览说明。大小未知或 stat 后增长触发 `EFBIG` 时也转入预览。部分预览不代表完整文件，也不做跨版本分段拼接。
+
+
+## 15. SQLite SeqFile 接口（2026-10-04）
+
+fs-agent 在 export 内提供独立 `.seq` 文件的结构化记录读写。文件本身是 SQLite 数据库，记录表为 `entries(key TEXT PRIMARY KEY, value TEXT)`，value 保存 JSON。路径仍受 export 的认证、只读权限与禁止符号链接越界规则约束；不使用 sync 对象库，也不接受任意 SQL。
+
+| API | 请求 | 响应 |
+|---|---|---|
+| `POST /v1/fs/:alias/seq/snapshot` | `{path}` | `{revision, entries:[{key,value}]}` |
+| `POST /v1/fs/:alias/seq/transaction` | `{path, expectedRevision, changes}` | 标准文件操作回执，提交结果含新 `revision` |
+
+`changes` 支持 `{action:"set",key,value}` 与 `{action:"delete",key}`。创建使用 `expectedRevision:null`；更新携带快照 revision。读取不存在的文件返回空快照，不创建文件；父目录必须已存在。能力发现返回 `files.seq={version:1,sqlite:true,transactionScope:"file"}`。
+
+服务端在有界 blocking worker 中加载数据库，在内存 SQLite 事务里执行整批变更，再序列化到临时文件，通过现有文件 CAS 原子安装并持久化。并发写入只有满足 revision 条件的一方可以提交。SQL 事务成功不等于文件已发布；最终结果以文件操作回执为准。取消、响应丢失与结果未知复用 `X-Operation-Id` 及现有 operation 查询协议，客户端不得因 unknown 自动重放变更。
+
+限制为每文件 16 MiB、每请求最多 256 项变更、key 最多 1024 字节且非空、不含 NUL；额外受到 HTTP 请求体限制约束。存储错误不会被解释成空快照或已删除。无效 SQLite 文件保持原位并报告错误。
+
+`HttpSeqClient` 提供快照与条件事务 API。当前实现是**单文件事务**，没有把 HTTP 后端声明为完整的 VFS `IRecordStore`；跨多个 SeqFile 的会话、成员索引与身份更新尚不能作为一个事务提交。因此本接口为可写远程项目提供记录基础，但不等于完整远程项目会话存储已经开放。IndexedDB 的逻辑 SeqFile 仍由其记录后端实现，不要求与 SQLite 字节格式相同。

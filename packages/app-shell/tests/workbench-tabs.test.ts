@@ -8,9 +8,25 @@ import { connectEditorLifecycle } from '../src/browser/editor-connector';
 import { LatestViewLoad } from '../src/lifecycle/view-load';
 import { Workbench } from '../src/core/Workbench';
 import { FILE_ICONS } from '@itookit/common';
-import { createVFS, MemoryBackend } from '@itookit/vfs-core';
+import { createVFS, MemoryBackend, FSError } from '@itookit/vfs-core';
 
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks(); });
+
+it('clears a removed directory view, disables creation and recovers without hiding IO failures', async () => {
+    const refresh = vi.fn(async () => [{ id: '/docs/a.md', name: 'a.md', type: 'file' }]);
+    const list = createDirectoryList({ title: 'Docs', path: '/docs', entries: await refresh(), open() {}, refresh,
+        actions: [{ label: 'Create', run() {} }] });
+    refresh.mockRejectedValueOnce(new FSError('EIO', 'wrapped', undefined, undefined, new FSError('ENOENT', 'gone')));
+    await refreshDirectoryList(list);
+    expect(list.querySelector('[data-resource-id]')).toBeNull();
+    expect(list.querySelector<HTMLElement>('[role="status"]')!.hidden).toBe(false);
+    expect(list.querySelector<HTMLButtonElement>('[data-directory-action]')!.disabled).toBe(true);
+    await refreshDirectoryList(list);
+    expect(list.querySelector('[data-resource-id="/docs/a.md"]')).not.toBeNull();
+    expect(list.querySelector<HTMLButtonElement>('[data-directory-action]')!.disabled).toBe(false);
+    refresh.mockRejectedValueOnce(new FSError('EIO', 'offline'));
+    await expect(refreshDirectoryList(list)).rejects.toMatchObject({ code: 'EIO' });
+});
 
 it('shares selection with its owner across select-all, sidebar changes and list recreation', () => {
     let ids: readonly string[] = ['/docs/a.md'];

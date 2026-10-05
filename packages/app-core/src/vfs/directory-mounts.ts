@@ -16,6 +16,7 @@ const preferencesPath = '/var/lib/kernel/local-sources/session-directories.json'
 
 /** User commands and UI share this host-only service. It is never an Agent tool. */
 export class DirectoryMountService {
+    workspaceGuard?: (sessionId: string) => Promise<void>;
     private preferences: Preferences = { version: 1, external: {} };
     private closed = false;
     private tail: Promise<unknown> = Promise.resolve();
@@ -59,6 +60,7 @@ export class DirectoryMountService {
     }
     get canSelectHost(): boolean { return this.provider !== undefined; }
     async processMounts(sessionId: string): Promise<import('./session-process-context').SessionProcessMount[]> {
+        await this.workspaceGuard?.(sessionId);
         const record = await this.files.inspect(sessionId);
         if (!record || record.state !== 'active') return [];
         return record.mounts.map(mount => {
@@ -81,6 +83,18 @@ export class DirectoryMountService {
             const view = createFileSystemView({ viewId: `project:${directory}`, mounts: [{ mountId: 'project', at: '/', fs, root, access: 'rw' }] });
             return { fs: view, dispose: () => view.dispose() };
         });
+    }
+    /** Read a project identity without registering sources or entering the mutation queue. */
+    async inspectDirectory(directory: string): Promise<FileSystemSourceOwner> {
+        const normalized = directory === '~' ? '/home/admin' : directory.startsWith('~/') ? '/home/admin/' + directory.slice(2) : directory;
+        const internal = normalized === '/home/admin' || normalized.startsWith('/home/admin/');
+        const source = internal ? this.root : await this.provider!.openDirectory(normalized.replace(/^host:/, ''));
+        const root = internal ? normalized : '/';
+        const node = await source.driver.getNode(root);
+        if (!node) throw new FSError('ENOENT', 'Project directory not found', 'inspectDirectory', directory);
+        if (node.type !== 'directory') throw new FSError('ENOTDIR', 'Project source is not a directory');
+        const fs = createFileSystemView({ viewId: `project-info:${directory}`, mounts: [{ mountId: 'project', at: '/', fs: source, root, access: 'rw' }] });
+        return { fs, dispose: () => fs.dispose() };
     }
     setHome(directory: string): Promise<string> {
         return this.serial(async () => {
@@ -107,6 +121,11 @@ export class DirectoryMountService {
     setWorkspace(sessionId: string, directory: string, access: 'ro' | 'rw' = 'rw'): Promise<string> {
         return this.serial(async () => this.mount(sessionId, await this.resolve(directory), access, WORKSPACE_PATH, true, true));
     }
+    /** Boot recovery already holds the Session lease and runs before its tasks resume. */
+    restoreWorkspace(sessionId: string, directory: string, access: 'ro' | 'rw'): Promise<string> {
+        return this.serial(async () => this.mount(sessionId, await this.resolve(directory), access, WORKSPACE_PATH, true, true, true));
+    }
+    assertWorkspaceChange(sessionId: string): Promise<void> { return this.beforeChange(sessionId); }
     remove(sessionId: string, mountId: string): Promise<void> {
         return this.serial(async () => {
             await this.beforeChange(sessionId);
@@ -139,8 +158,8 @@ export class DirectoryMountService {
             await this.afterChange(sessionId);
         });
     }
-    private async mount(sessionId: string, source: DirectoryRef, access: 'ro' | 'rw', requestedAt?: string, asCwd = false, replace = false): Promise<string> {
-        await this.beforeChange(sessionId);
+    private async mount(sessionId: string, source: DirectoryRef, access: 'ro' | 'rw', requestedAt?: string, asCwd = false, replace = false, recovering = false): Promise<string> {
+        if (!recovering) await this.beforeChange(sessionId);
         const record = await this.files.inspect(sessionId);
         const mounts = record?.mounts ?? [];
         const same = mounts.find(m => m.sourceId === source.sourceId && (m.root ?? '/') === source.root);
@@ -164,8 +183,9 @@ export class DirectoryMountService {
             const expected = directory === '~' ? '/home/admin' : directory.startsWith('~/') ? '/home/admin/' + directory.slice(2) : directory;
             const internal = expected === '/home/admin' || expected.startsWith('/home/admin/');
             const label = internal ? normalizeVirtualPath(expected) : expected.replace(/^host:/, '');
+            const sameSource = primary?.sourceId === old?.sourceId && primary?.root === old?.root;
             if (!primary || (primary.sourceId === 'admin-home') !== internal || this.describe(primary) !== label
-                || next.cwd !== WORKSPACE_PATH || primary.access !== (old?.access ?? 'rw')) {
+                || next.cwd !== WORKSPACE_PATH || old && (sameSource && primary.access !== old.access || old.access === 'ro' && primary.access !== 'ro')) {
                 throw new FSError('EACCES', t('mount.error.fixedWorkspace'));
             }
         }
@@ -173,11 +193,14 @@ export class DirectoryMountService {
     }
     private async resolve(raw: string): Promise<DirectoryRef> {
         const path = raw.trim(); if (!path) throw new Error(t('mount.error.selectDirectory'));
+        if (/^project:[a-zA-Z0-9_-]+$/.test(path)) return { sourceId: path, root: '/', label: path };
         const internal = path === '~' ? '/home/admin' : path.startsWith('~/') ? '/home/admin/' + path.slice(2) : path;
         if (internal === '/home/admin' || internal.startsWith('/home/admin/')) {
             const normalized = normalizeVirtualPath(internal);
             if (normalized !== '/home/admin' && !normalized.startsWith('/home/admin/')) throw new Error(t('mount.error.outOfUserScope'));
-            if ((await this.root.driver.getNode(normalized))?.type !== 'directory') throw new Error(t('mount.error.notFound'));
+            const node = await this.root.driver.getNode(normalized);
+            if (!node) throw new FSError('ENOENT', t('mount.error.notFound'), 'openDirectory', normalized);
+            if (node.type !== 'directory') throw new FSError('ENOTDIR', 'Project source is not a directory', 'openDirectory', normalized);
             return { sourceId: 'admin-home', root: normalized.slice('/home/admin'.length) || '/', label: normalized };
         }
         if (!this.provider) throw new Error(t('mount.error.hostUnsupported'));

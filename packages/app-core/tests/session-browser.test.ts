@@ -27,6 +27,25 @@ async function setup(kernelOverrides: Record<string, unknown> = {}) {
     return { a, b, files, repository, browser, kernel, lifecycle };
 }
 describe('Session browser projection', () => {
+    it('emits canonical folder rename paths and keeps Session identities stable', async () => {
+        const f = await setup();
+        await f.repository.createFolder('/原项目文档');
+        const from = '/folder:' + encodeURIComponent('原项目文档'), to = '/folder:' + encodeURIComponent('新项目文档');
+        const renamed = vi.fn(); const stop = f.browser.fs.on('node:renamed', renamed);
+        try {
+            await f.browser.fs.driver.rename(from, '新项目文档');
+            expect(renamed).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({
+                nodes: [expect.objectContaining({ oldPath: from, newPath: to })],
+            }) }));
+            expect(await f.browser.fs.driver.getNode(to)).not.toBeNull();
+            expect(await f.browser.fs.driver.getNode(from)).toBeNull();
+            await f.browser.fs.driver.rename('/' + f.a, 'Updated Session');
+            expect((await f.browser.fs.driver.getNode('/' + f.a))?.metadata.title).toBe('Updated Session');
+            expect(renamed).toHaveBeenCalledOnce();
+            await expect(f.browser.fs.driver.rename(to, 'invalid/name')).rejects.toMatchObject({ code: 'EINVAL' });
+        } finally { stop(); }
+    });
+
     it('shares one catalog across expanded folders and refreshes after changes or explicit reload', async () => {
         const f = await setup();
         await f.repository.createFolder('/Work');

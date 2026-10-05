@@ -3,6 +3,7 @@ import { t, getLocale, FILE_BROWSER_ICONS, ACTION_ICONS, fileTypeIcon } from '@i
 import { decorateButton } from './controls';
 import { formatFileSize, type VFSUIShell } from '@itookit/vfs-ui';
 import { DirectorySelection, type DirectoryBulkAction } from './directory-selection';
+import { FSError } from '@itookit/vfs-core';
 
 export interface DirectoryEntry {
     id: string; name: string; type: string; created?: string | number; modified?: string | number;
@@ -46,10 +47,13 @@ export function createDirectoryList(options: DirectoryListOptions): HTMLElement 
     const toolbar = document.createElement('div'); toolbar.className = 'workbench-directory__toolbar';
     if (options.parent) toolbar.append(action(t('workbench.parent'), options.parent, FILE_BROWSER_ICONS.up, true));
     const fail = (error: unknown) => { const notice = document.createElement('p'); notice.setAttribute('role', 'alert'); notice.textContent = error instanceof Error ? error.message : String(error); panel.append(notice); };
-    const refresh = async () => { if (options.refresh) { options.entries = await options.refresh(); render(); } };
+    const missing = document.createElement('p'); missing.setAttribute('role', 'status'); missing.hidden = true;
+    missing.textContent = t('workbench.directoryMissing');
+    const refresh = () => refreshEntries(options, missing, toolbar, () => render());
     refreshers.set(panel, refresh);
     if (options.refresh) toolbar.append(action(t('workbench.refresh'), () => { void refresh().catch(fail); }, FILE_BROWSER_ICONS.refresh, true));
-    for (const entry of options.actions ?? []) { const button = action(entry.label, entry.run, entry.icon, true); button.disabled = !!entry.disabled; toolbar.append(button); }
+    for (const entry of options.actions ?? []) { const button = action(entry.label, entry.run, entry.icon, true); button.disabled = !!entry.disabled;
+        button.dataset.directoryAction = entry.disabled ? 'disabled' : 'enabled'; toolbar.append(button); }
     const search = document.createElement('input'); search.type = 'search'; search.placeholder = t('workbench.filter'); search.setAttribute('aria-label', t('workbench.filter')); toolbar.append(search);
     const table = document.createElement('table'); table.className = 'workbench-directory__table';
     const head = table.createTHead().insertRow(), body = table.createTBody();
@@ -61,8 +65,28 @@ export function createDirectoryList(options: DirectoryListOptions): HTMLElement 
         renderEntries(body, options, search.value, sort, ascending, selection);
     };
     selectionRefreshers.set(panel, render);
-    search.oninput = render; panel.append(header, path, toolbar); if (selection) panel.append(selection.bar); panel.append(table);
+    search.oninput = render; panel.append(header, path, toolbar, missing); if (selection) panel.append(selection.bar); panel.append(table);
     render(); return panel;
+}
+async function refreshEntries(options: DirectoryListOptions, missing: HTMLElement, toolbar: HTMLElement, render: () => void): Promise<void> {
+    if (!options.refresh) return;
+    try { options.entries = await options.refresh(); missing.hidden = true; }
+    catch (error) {
+        if (!isMissingDirectory(error)) throw error;
+        options.entries = []; missing.hidden = false;
+    }
+    for (const button of toolbar.querySelectorAll<HTMLButtonElement>('[data-directory-action]'))
+        button.disabled = !missing.hidden || button.dataset.directoryAction === 'disabled';
+    render();
+}
+function isMissingDirectory(error: unknown): boolean {
+    const seen = new Set<unknown>();
+    while (error instanceof Error && !seen.has(error)) {
+        seen.add(error);
+        if (error instanceof FSError && error.code === 'ENOENT') return true;
+        error = error.cause;
+    }
+    return false;
 }
 function addHeaders(head: HTMLTableRowElement, selection: DirectorySelection | undefined, sort: (key: keyof DirectoryEntry) => void): void {
     for (const key of ['name', 'size', 'modified', 'type'] as const) {

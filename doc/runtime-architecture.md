@@ -278,6 +278,8 @@ Tauri 每个页面先调用 `sidecar_open_scope`，Rust 以 WebView label 维护
 
 新建会话先根据目标分组查找项目，再配置项目目录挂载。`Read`、`Write`、`Edit`、`Glob`、`Grep` 在 Web 使用 VFS；没有原生进程能力时不启用 `Bash`。现有会话的授权不会被重开覆盖；拿到 Session 写租约后，可将目录已匹配的旧会话归入项目，保留原授权。
 
+项目身份来自工作台直属项目目录的 `.mindos/info.seq`，导航索引仅作缓存。本地根互不重叠；只读远程项目正文保持逻辑引用，本地 `.mindos/readonly/<项目名>/` 保存身份和会话领域数据。普通子目录不会被识别成独立项目。项目创建、文件访问、本地进程及受管 Web 同步均校验根边界；文件来源错误局部显示，不中断工作台。`SessionFilesService.workspaceProvider` 解析项目授权视图，视图所有者随会话释放。可移植会话数据位于项目 `.mindos/sessions/`，运行控制状态仍在 `/var/lib/`；Seq 索引保存实际位置并记录目录移动恢复意图。可写远程项目需额外的多文件事务能力，当前单 SeqFile HTTP API 不宣称完成此能力。
+
 `ProjectService.personal()` 独立于当前项目解析个人项目，以 `/etc/personal-project.json` 保存稳定项目 ID。旧 profile 首次使用时仅接纳已知中英文默认名称的托管个人项目，否则新建；改名、分组移动和重启后仍按 ID 找回。标题栏 AI 引用产生新的会话输入草稿：项目文件归其项目，Session 文件沿用 Session 所属项目，其余归个人项目。草稿先写入 `uiState.branchDrafts.main.inputText`，再导航到聊天，不触发模型请求。
 
 Web 与 Tauri 共用工作台导航、创建对话框和小屏幕列表／内容切换。项目可放入多级分组，各项目内有“会话”与“文件”；会话可继续用目录组织。旧 `projects` 路由指向工作台，桌面原有目录书签恢复到项目树。删除项目导航及会话不会递归删除其真实文件目录。
@@ -653,3 +655,9 @@ sequenceDiagram
 
 
 本批验证：Flow 358、Session 216、Driver 70、Adapters 217、UI 69、app-core 232 项回归通过；完整 app-shell 484 项通过、30 项按配置跳过，随后新增的初始化失败清理和销毁幂等 2 项也通过（该文件共 9 项）。全仓 TypeScript、相关 5 包构建、架构守卫和文档检查通过。Driver/UI tarball 在仓库外验证 ESM/CJS；严格 TS 消费者验证结构控制端口、必须注入的会话实例和 Flow workspace 公共类型。未执行包含 Rust 边界的全仓 pnpm test，未发布 npm。
+
+## 可选项目同步装配
+
+`ApplicationRuntimeOptions.sync` 注入 `ProjectSyncProvider` 和 `Coordinator`，运行时提供可选 `projectSync`。默认不初始化云端连接。app-core 用例负责范围策略和解绑，provider 按本地项目返回同一持久绑定的同步 session；HTTP、凭据及 IndexedDB 实现由宿主装配。关闭运行时先等待已接受用例，再释放 provider 与存储。契约与实施边界见 [项目同步设计](design/project-sync.md#22-实施工作清单与完成标准)。
+
+项目侧栏经 `createProjectModule` 透传 runtime.projectSync。app-shell 的 `projects/sync` 提供菜单、预览和服务器／同步目录选择面板；`AppOptions.projectSyncSetup` 注入宿主首次绑定。Web 的 [WebProjectSync](../apps/web-app/src/sync.ts) 复用 ProjectRemoteMountService 的远程服务器 catalog 和 HttpSourceProvider 的凭据，按同步能力开放已有目录绑定或新目录创建；控制记录仍在 IndexedDB 的 state.seq，刷新后恢复。它只支持受管本地项目，不把 export 远程视图当本地扫描来源。未提供同步端口的宿主点击时显示未接入说明。

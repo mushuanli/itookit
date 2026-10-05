@@ -19,7 +19,9 @@ export interface FilesRecord {
 
 /** Host-owned namespace configurations. Unconfigured sessions have no file grants. */
 export class SessionFilesService {
+    beforeAcquire?: (sessionId: string) => Promise<void>;
     workspaceComposer?: (id: string, mount: FileSystemMount) => Promise<FileSystemSourceOwner | undefined>;
+    workspaceProvider?: (id: string, mount: SessionMountRecord) => Promise<FileSystemSourceOwner | undefined>;
     invalidate(id: string): Promise<void> {
         return this.serial(id, async () => { await this.revokeSessionViews(id); this.notify(); });
     }
@@ -119,6 +121,7 @@ export class SessionFilesService {
     /** Host-owned isolated copy; read-only acquisition attenuates all user mounts without changing grants. */
     acquireWorkspaceFiles(sessionId: string, mountId: string, fs: IFileSystem, access: 'ro' | 'rw' = 'rw'): Promise<FileSystemContextOwner> {
         return this.serial(sessionId, async () => {
+            await this.beforeAcquire?.(sessionId);
             const record = await this.inspect(sessionId);
             const matches = record?.mounts.filter(item => item.mountId === mountId) ?? [];
             const mount = matches.length === 1 ? matches[0] : undefined;
@@ -161,6 +164,7 @@ export class SessionFilesService {
     /** Fixed revision: a change revokes all derived contexts, including tool scopes. */
     acquireFiles(sessionId: string, cwd?: string): Promise<FileSystemContextOwner> {
         return this.serial(sessionId, async () => {
+            await this.beforeAcquire?.(sessionId);
             const { view: source, configuredCwd } = await this.get(sessionId);
             const directory = normalizeVirtualPath(cwd ?? configuredCwd);
             if (directory !== '/' && !await this.isDirectory(source, directory)) throw new FSError('ENOTDIR', 'Working directory is unavailable');
@@ -202,37 +206,20 @@ export class SessionFilesService {
         this.key(id);
         const system = await this.intrinsicMounts(id);
         const missing = new Set<string>();
-        const mounts: FileSystemMount[] = await Promise.all(record.mounts.map(async mount => {
-            const at = normalizeVirtualPath(mount.at);
-            if (mount.access !== 'ro' && mount.access !== 'rw') throw new FSError('EINVAL', 'Invalid mount access');
-            if (!/^\/[a-zA-Z0-9_-]+$/.test(at) || ['attachments', 'etc', 'var', 'dev', 'run', 'history', 'session'].includes(at.slice(1))) throw new FSError('EACCES', 'Reserved or invalid mount point');
-            if (system.some(s => at === s.at)) throw new FSError('EACCES', 'Intrinsic mount cannot be overridden');
-            const replacement = workspace?.mountId === mount.mountId ? workspace.fs : undefined;
-            const root = normalizeVirtualPath(replacement ? '/' : mount.root ?? '/');
-            // Saved host sources are opened on first use rather than at startup.
-            const fs = replacement ?? this.sources.get(mount.sourceId) ?? await this.resolveSource?.(mount.sourceId);
-            try {
-                if (!fs) throw new FSError('EACCES', 'Namespace source is unavailable');
-                if (mount.access === 'rw' && (await fs.capabilitiesAt(root)).readonly) throw new FSError('EROFS', 'Source is read-only');
-                if (!await this.isDirectory(fs, root)) throw new FSError('ENOTDIR', 'Mount source must be a directory');
-                return { ...mount, root, at, fs };
-            } catch (error) {
-                if (!allowUnavailable) throw error;
-                if (!this.unavailable.has(mount.sourceId)) this.unavailable.set(mount.sourceId, createUnavailableDirectory(mount.sourceId));
-                missing.add(mount.sourceId);
-                return { ...mount, root: '/', at, fs: (await this.unavailable.get(mount.sourceId)!).fs };
-            }
-        }));
-        if (new Set(mounts.map(m => m.at)).size !== mounts.length) throw new FSError('EINVAL', 'Duplicate mount point');
         const owners: FileSystemSourceOwner[] = [];
+        const mounts: FileSystemMount[] = [];
+        let view: FileSystemView;
         try {
+            for (const mount of record.mounts) mounts.push(await this.prepareMount(id, mount, system,
+                { owners, missing, allowUnavailable, replacement: workspace?.mountId === mount.mountId ? workspace.fs : undefined }));
+            if (new Set(mounts.map(m => m.at)).size !== mounts.length) throw new FSError('EINVAL', 'Duplicate mount point');
             for (let index = 0; index < mounts.length; index++) {
                 if (mounts[index].at !== '/workspace' || !this.workspaceComposer) continue;
                 const owner = await this.workspaceComposer(id, mounts[index]);
                 if (owner) { owners.push(owner); mounts[index] = { ...mounts[index], fs: owner.fs, root: '/' }; }
             }
+            view = createFileSystemView({ viewId: `session:${id}`, revision: record.revision, mounts: [...system, ...mounts] });
         } catch (error) { await Promise.all(owners.map(owner => owner.dispose())); throw error; }
-        const view = createFileSystemView({ viewId: `session:${id}`, revision: record.revision, mounts: [...system, ...mounts] });
         const dispose = view.dispose.bind(view);
         let closing: Promise<void> | undefined;
         view.dispose = () => closing ??= (async () => { await dispose(); await Promise.all(owners.map(owner => owner.dispose())); })();
@@ -241,6 +228,29 @@ export class SessionFilesService {
             if (record.cwd !== '/' && !await this.isDirectory(view, record.cwd)) throw new FSError('ENOTDIR', 'Working directory must be mounted');
             return view;
         } catch (error) { await view.dispose(); throw error; }
+    }
+    private async prepareMount(id: string, mount: SessionMountRecord, system: readonly FileSystemMount[],
+        context: { owners: FileSystemSourceOwner[]; missing: Set<string>; allowUnavailable: boolean; replacement?: IFileSystem }): Promise<FileSystemMount> {
+        const at = normalizeVirtualPath(mount.at);
+        if (mount.access !== 'ro' && mount.access !== 'rw') throw new FSError('EINVAL', 'Invalid mount access');
+        if (!/^\/[a-zA-Z0-9_-]+$/.test(at) || ['attachments', 'etc', 'var', 'dev', 'run', 'history', 'session'].includes(at.slice(1))) throw new FSError('EACCES', 'Reserved or invalid mount point');
+        if (system.some(s => at === s.at)) throw new FSError('EACCES', 'Intrinsic mount cannot be overridden');
+        try {
+            const owner = !context.replacement && at === '/workspace' ? await this.workspaceProvider?.(id, mount) : undefined;
+            if (owner) context.owners.push(owner);
+            const root = normalizeVirtualPath(context.replacement || owner ? '/' : mount.root ?? '/');
+            const fs = context.replacement ?? owner?.fs ?? this.sources.get(mount.sourceId) ?? await this.resolveSource?.(mount.sourceId);
+            if (!fs) throw new FSError('EACCES', 'Namespace source is unavailable');
+            const readonly = (await fs.capabilitiesAt(root)).readonly;
+            if (!owner && mount.access === 'rw' && readonly) throw new FSError('EROFS', 'Source is read-only');
+            if (!await this.isDirectory(fs, root)) throw new FSError('ENOTDIR', 'Mount source must be a directory');
+            return { ...mount, root, at, access: owner && readonly ? 'ro' : mount.access, fs };
+        } catch (error) {
+            if (!context.allowUnavailable) throw error;
+            if (!this.unavailable.has(mount.sourceId)) this.unavailable.set(mount.sourceId, createUnavailableDirectory(mount.sourceId));
+            context.missing.add(mount.sourceId);
+            return { ...mount, root: '/', at, fs: (await this.unavailable.get(mount.sourceId)!).fs };
+        }
     }
     private async isDirectory(fs: IFileSystem, path: string): Promise<boolean> {
         const node = fs.driver.getNodeType ? await fs.driver.getNodeType(path) : await fs.driver.getNode(path);

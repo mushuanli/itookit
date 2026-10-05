@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DirectoryMountService, SessionFilesService, ProjectService, type ApplicationRuntime } from '@itookit/app-core';
+import { DirectoryMountService, SessionFilesService, ProjectService, folderBrowserPath, type ApplicationRuntime } from '@itookit/app-core';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { SessionRepository } from '@itookit/llm-session';
 import { defaultEditorFactory } from '@itookit/mdx-adapter';
@@ -51,7 +51,7 @@ async function fixture() {
     const ui = { createChatEditor: () => defaultEditorFactory, createAgentEditor: () => defaultEditorFactory,
         createFlowEditor: () => defaultEditorFactory, createSkillEditor: () => defaultEditorFactory,
         createAIContextMenu: () => ({}), createFlowContextMenu: () => ({}), llmUiEditors: {} };
-    return { root, projects, async start(overrides: Record<string, unknown> = {}) {
+    return { root, projects, repository, async start(overrides: Record<string, unknown> = {}) {
         document.body.innerHTML = '<div id="llm-workspace" class="workspace-view"></div>';
         return initApp({ runtime, workspaces: [workspace], defaultSlug: 'chat', routeAliases: { projects: 'llm-workspace' }, ui: ui as any, ...overrides });
     }, async dispose() { await mounts.dispose(); await files.dispose(); await repository.dispose(); await manager.dispose(); } };
@@ -65,22 +65,31 @@ beforeEach(() => {
 afterEach(() => { document.body.replaceChildren(); history.replaceState(null, '', '/'); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe('saved project routes at bootstrap', () => {
-    it('opens the old Chinese .prj bookmark, then reloads the canonical route without copying its data', async () => {
+    it('keeps the workbench running when a saved file refers only to a stale project cache', async () => {
+        const f = await fixture();
+        await f.repository.createFolder('/Legacy parent', { id: 'legacy-parent', directory: '/home/admin' });
+        const route = folderBrowserPath('/Legacy parent') + '/@files/' + documentName;
+        history.replaceState(null, '', '#/chat/' + encodeURIComponent(route));
+        const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        let app;
+        try {
+            app = await f.start();
+            expect(document.body.textContent).toContain('此地址无效或内容已不存在');
+            expect(document.querySelector('.project-workbench__tree')).not.toBeNull();
+            expect(defaultEditorFactory).not.toHaveBeenCalled();
+            expect(warning).not.toHaveBeenCalled();
+            expect(await f.root.driver.readContent('/home/admin/projects/' + documentName, { encoding: 'utf-8' })).toBe('original study notes');
+        } finally { await app?.destroy(); await f.dispose(); warning.mockRestore(); }
+    });
+    it('reports an overlapping legacy .prj root without failing startup or copying its data', async () => {
         const f = await fixture();
         history.replaceState(null, '', '#/projects/' + encodeURIComponent('/' + documentName));
         let app;
         try {
             app = await f.start();
-            expect(defaultEditorFactory).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ initialContent: 'original study notes' }));
-            expect(parseWorkspaceHash(location.hash, 'chat').resource).toContain('/@files/' + documentName);
-            expect(location.hash).toMatch(/^#\/chat\//);
-            const route = location.hash;
-            await app.destroy(); app = undefined;
-            history.replaceState(null, '', route);
-            app = await f.start();
-            expect(location.hash).toBe(route);
-            expect(defaultEditorFactory).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ initialContent: 'original study notes' }));
-            expect((await f.projects.list()).filter(p => p.project.directory === '/home/admin/projects')).toHaveLength(1);
+            expect(document.querySelector('[role="alert"]')?.textContent).toContain('重叠');
+            expect(defaultEditorFactory).not.toHaveBeenCalled();
+            expect((await f.projects.list()).filter(p => p.project.directory === '/home/admin/projects')).toHaveLength(0);
             expect(await f.root.driver.readContent('/home/admin/projects/' + documentName, { encoding: 'utf-8' })).toBe('original study notes');
         } finally { await app?.destroy(); await f.dispose(); }
     });
@@ -113,7 +122,9 @@ describe('saved project routes at bootstrap', () => {
 
     it('reveals the sidebar before opening a deep-linked document', async () => {
         const f = await fixture();
-        history.replaceState(null, '', '#/projects/' + encodeURIComponent('/' + documentName));
+        const project = (await f.projects.current())!;
+        await f.root.driver.createFile({ parentPath: project.project.directory, name: documentName, content: 'original study notes' });
+        history.replaceState(null, '', '#/chat/' + encodeURIComponent(folderBrowserPath(project.path) + '/@files/' + documentName));
         const phases: string[] = [];
         const app = await f.start({
             onWorkspaceMounted: () => {

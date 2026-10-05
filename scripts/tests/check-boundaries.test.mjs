@@ -4,7 +4,7 @@ import { dependencyError, manifestDependencyError, sourceErrors } from '../check
 
 const pkg = (name, host = false) => ({ name: '@itookit/' + name, dir: '/repo/' + (host ? 'apps/' : 'packages/') + name, host, exports: { '.': './src/index.ts', './style.css': './src/style.css' } });
 const core = pkg('app-core'), shell = pkg('app-shell'), vfs = pkg('vfs-ui'), host = pkg('web', true);
-const packages = [core, shell, vfs, host, pkg('vfs-core')];
+const packages = [core, shell, vfs, host, pkg('vfs-core'), pkg('vfs-sync')];
 const inspect = (source, text, file = source.dir + '/src/index.ts') => sourceErrors(source, file, text, packages);
 
 test('public execution and conversation capabilities cannot depend on legacy shared contracts', () => {
@@ -158,4 +158,14 @@ test('adapter diagnostics and UI creation state are instance scoped', () => {
     assert.match(dependencyError('@itookit/kernel-adapters', '@itookit/common'), /injected ports/);
     const ui = pkg('llm-ui');
     assert.match(sourceErrors(ui, ui.dir + '/src/StateManager.ts', "sessionStorage.getItem('app_create_params')", [ui])[0], /instance options/);
+});
+
+test('VFS drivers have no sync runtime or type dependencies', () => {
+    for (const name of ['vfsdriver-indexeddb', 'vfsdriver-agent', 'vfsdriver-local']) {
+        const driver = pkg(name);
+        assert.match(manifestDependencyError(driver.name, '@itookit/vfs-sync'), /only depend on vfs-core/);
+        assert.match(inspect(driver, "import type { StateStore } from '@itookit/vfs-sync'")[0], /only depend on vfs-core/);
+        assert.equal(inspect(driver, "import type { IStorageBackend } from '@itookit/vfs-core'").length, 0);
+    }
+    assert.match(dependencyError('@itookit/vfs-core', '@itookit/vfs-sync'), /remain independent/);
 });

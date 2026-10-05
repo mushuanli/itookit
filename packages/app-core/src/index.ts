@@ -8,7 +8,7 @@ export { createVFSToolContext } from './vfs/tool-context';
 export { createUnavailableDirectory } from './vfs/unavailable-directory';
 export { DirectorySourceUnavailableError, SessionUnfinishedTasksError } from './vfs/errors';
 export { workspaceRoot } from './session/workspace-paths';
-export { ProjectService, type ProjectFolder } from './projects/project-service';
+export { ProjectService, type ProjectFolder, type ProjectFileSource } from './projects/project-service';
 export { acquireSessionProcessContext } from './vfs/session-process-context';
 export type { SessionProcessFactory, SessionProcessMount } from './vfs/session-process-context';
 export { acquireWorkspaceProcessContext, type WorkspaceProcessSource } from './vfs/workspace-process-context';
@@ -100,3 +100,9 @@ export { createMindosFlowLibrary } from './presets/flow-library';
 export { DEFAULT_HARNESS_TOOL_IDS } from './presets/harness-tools';
 
 export { createMindosDirectAgentPolicy } from './presets/direct-agent-policy';
+
+export { ProjectSyncService } from './projects/sync/service';
+export type { ProjectSyncProvider, ProjectSyncSession } from './projects/sync/service';
+
+export { prepareProjectSync } from './projects/sync/prepare';
+export type { ProjectSyncPreparationRemote } from './projects/sync/prepare';

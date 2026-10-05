@@ -1,4 +1,5 @@
 import { DEFAULT_HARNESS_TOOL_IDS } from '@itookit/app-core';
+import { FSError } from '@itookit/vfs-core';
 import { RemoteFilesSettingsEditor } from './files/RemoteFilesSettingsEditor';
 import { createFileChatHandler } from './projects/file-chat';
 import { createOcrControls } from './configuration/ocr-controls';
@@ -297,7 +298,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                 options.onWorkspaceReady?.({ editor: editorEl });
                 return true;
             };
-            const module = createProjectModule({ runtime, sessionSkills, sidebar: sidebarEl, container: editorEl,
+            const module = createProjectModule({ runtime, sessionSkills, projectSyncSetup: options.projectSyncSetup, sidebar: sidebarEl, container: editorEl,
                 factory, fileFactory: defaultEditorFactory, createFlowContextMenu: options.ui.createFlowContextMenu,
                 initialResourceId, onSidebarReady: revealSidebar,
                 uiPersistence: await uiState.port(SESSION_BROWSER_SCOPE),
@@ -470,12 +471,18 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     };
 
     const performNavigation = async (workspaceId: string, resourceId?: string, sourceSlug?: string): Promise<void> => {
+        let projectRouteError: FSError | undefined;
         const movedSettings = toolboxId && (sourceSlug === 'settings' || workspaceId === routeMap.settings) ? toolboxSettingsRoute(resourceId) : undefined;
         if (movedSettings) { workspaceId = toolboxId!; resourceId = movedSettings; }
         const legacyToolbox = toolboxId ? legacyToolboxRoute(sourceSlug ?? workspaceId, resourceId) : undefined;
         if (legacyToolbox) { workspaceId = toolboxId!; resourceId = legacyToolbox.path ?? '/' + legacyToolbox.kind; }
         if (sourceSlug === 'projects' && resourceId && workspaces.some(ws => ws.elementId === workspaceId && ws.type === 'chat')) {
-            resourceId = await resolveLegacyProjectResource(resourceId, runtime.projects);
+            try { resourceId = await resolveLegacyProjectResource(resourceId, runtime.projects); }
+            catch (error) {
+                if (!(error instanceof FSError) || !('reason' in error) || error.reason !== 'PROJECT_ROOT_OVERLAP') throw error;
+                projectRouteError = error; resourceId = undefined;
+                console.warn('[Project route]', { stage: 'legacy-root-overlap', error });
+            }
         }
         visibleWorkspaceId = workspaceId;
         for (const [id, workbench] of managerCache) {
@@ -513,6 +520,13 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             }
         }
         if (movedSettings || legacyToolbox) updateHistory(workspaceId, resourceId ?? null, 'replace');
+        if (projectRouteError) {
+            const workspace = document.getElementById(workspaceId);
+            workspace?.querySelector('[data-project-route-error]')?.remove();
+            const notice = document.createElement('p'); notice.setAttribute('role', 'alert'); notice.dataset.projectRouteError = '';
+            notice.textContent = projectRouteError.message;
+            (workspace?.querySelector('.workbench-tabs__panel:not([hidden])') ?? workspace)?.append(notice);
+        }
     };
 
     const handleNavigationRequest = async (req: NavigationRequest): Promise<void> => {

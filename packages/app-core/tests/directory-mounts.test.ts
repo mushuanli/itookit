@@ -211,3 +211,10 @@ it('opens saved host directories on first use instead of at startup', async () =
     await expect(mounts.resolveSource('directory-unknown')).resolves.toBeUndefined();
     expect(await f.root.driver.exists(preferences)).toBe(true);
 });
+
+it('distinguishes missing project directories from paths occupied by a file', async () => {
+    const f = await setup();
+    await expect(f.mounts.openDirectory('/home/admin/not-found')).rejects.toMatchObject({ code: 'ENOENT', path: '/home/admin/not-found' });
+    await expect(f.mounts.openDirectory('/home/admin/notes/secret.md')).rejects.toMatchObject({ code: 'ENOTDIR', path: '/home/admin/notes/secret.md' });
+    expect(await f.root.driver.exists('/home/admin/not-found')).toBe(false);
+});

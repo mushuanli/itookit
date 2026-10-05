@@ -23,7 +23,8 @@
     "@itookit/app-core": "workspace:*",
     "@itookit/kernel-adapters": "workspace:*",
     "@itookit/tools": "workspace:*",
-    "@itookit/llm-flow": "workspace:*"
+    "@itookit/llm-flow": "workspace:*",
+    "@itookit/vfs-sync": "workspace:*"
   },
   "peerDependencies": {
     "@itookit/app-settings": "workspace:*",
@@ -60,6 +61,7 @@
     "@itookit/mdx-adapter": "workspace:*",
     "@itookit/llm-tasks": "workspace:*",
     "@itookit/llm-flow": "workspace:*",
-    "@itookit/llm-context": "workspace:*"
+    "@itookit/llm-context": "workspace:*",
+    "@itookit/sync-adapters": "workspace:*"
   }
 }

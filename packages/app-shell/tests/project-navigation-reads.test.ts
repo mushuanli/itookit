@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { createVFS, MemoryBackend } from '@itookit/vfs-core';
+import { createVFS, MemoryBackend, type IFileSystem } from '@itookit/vfs-core';
 import { SessionRepository } from '@itookit/llm-session';
 import { DirectoryMountService, ProjectService, SessionFilesService, folderBrowserPath } from '@itookit/app-core';
 import { ProjectNavigation } from '../src/projects/ProjectNavigation';
@@ -12,15 +12,25 @@ function actions() {
         exportItems: vi.fn(), report: vi.fn(), retryDeletions: vi.fn(), contentChanged: vi.fn() };
 }
 
+async function projectServices(root: IFileSystem, repository: SessionRepository) {
+    const files = new SessionFilesService(root); await files.initialize();
+    const mounts = new DirectoryMountService(root, files); await mounts.init();
+    return { files, mounts, projects: new ProjectService(root, repository, mounts, files) };
+}
+
 it('resolves project folders from one organization snapshot per sync and refresh', async () => {
     const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
     const root = await manager.openFileSystem('/');
     const repository = new SessionRepository(root); await repository.init();
+    const { projects, mounts, files } = await projectServices(root, repository);
     try {
-        const project = await repository.createFolder('/Demo', { id: 'p1', directory: '/home/admin/projects/p1' });
-        const projects = new ProjectService(root, repository, undefined as never, undefined as never);
+        const project = await projects.create('Demo');
         const commands = actions(); commands.createProject.mockResolvedValue(undefined);
         const navigation = new ProjectNavigation(projects, () => undefined, commands);
+        const create = navigation.header.querySelector<HTMLButtonElement>('[data-action="create-project"]')!;
+        expect(create.hidden).toBe(false); expect(create.getAttribute('aria-label')).toBe(create.title);
+        create.click(); expect(commands.createProject).toHaveBeenCalledWith('/');
+
         const list = vi.spyOn(repository, 'listSummaries'), folders = vi.spyOn(repository, 'listFolders');
         list.mockClear(); folders.mockClear();
         await navigation.sync(folderBrowserPath(project.path));
@@ -40,7 +50,7 @@ it('resolves project folders from one organization snapshot per sync and refresh
         await navigation.refresh();
         expect(list).not.toHaveBeenCalled();
         expect(navigation.currentProject()?.path).toBe('/Demo');
-    } finally { await repository.dispose(); await manager.dispose(); }
+    } finally { await mounts.dispose(); await files.dispose(); await repository.dispose(); await manager.dispose(); }
 });
 
 it('boots when the persisted selection names a route this build no longer serves', async () => {
@@ -155,7 +165,8 @@ it('shows session cleanup only while a deletion is pending, including its render
     const repository = new SessionRepository(root); await repository.init();
     const style = document.createElement('style');
     style.textContent = readFileSync('src/styles/workspace.css', 'utf8'); document.head.append(style);
-    const navigation = new ProjectNavigation(new ProjectService(root, repository, undefined as never, undefined as never), () => undefined, actions());
+    const { projects, mounts, files } = await projectServices(root, repository);
+    const navigation = new ProjectNavigation(projects, () => undefined, actions());
     document.body.append(navigation.header);
     try {
         await navigation.sync('/');
@@ -167,5 +178,5 @@ it('shows session cleanup only while a deletion is pending, including its render
         expect(getComputedStyle(cleanup).display).not.toBe('none');
         await repository.deleteSession(session); await navigation.refresh();
         expect(cleanup.hidden).toBe(true); expect(getComputedStyle(cleanup).display).toBe('none');
-    } finally { navigation.header.remove(); style.remove(); await repository.dispose(); await manager.dispose(); }
+    } finally { navigation.header.remove(); style.remove(); await mounts.dispose(); await files.dispose(); await repository.dispose(); await manager.dispose(); }
 });

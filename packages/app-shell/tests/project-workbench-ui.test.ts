@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it, vi } from 'vitest';
+import { t } from '@itookit/common';
 import { createVFS, MemoryBackend } from '@itookit/vfs-core';
 import { SessionRepository } from '@itookit/llm-session';
 import { DirectoryMountService, SessionFilesService, ProjectService, folderBrowserPath } from '@itookit/app-core';
@@ -33,11 +34,23 @@ it('creates project Sessions from the selected project and edits its files in th
     try {
         await workbench.start();
         await expect(workbench.createResource({ parentPath: '/' })).rejects.toThrow('请在项目内创建会话');
+        await workbench.openResource('/');
+        const selector = sidebar.querySelector<HTMLSelectElement>('.workbench-project-navigation select')!;
+        expect(selector.value).toBe('/');
+        const projectHeader = sidebar.querySelector<HTMLElement>(`[data-item-id="${projectPath}"] .vfs-directory-item__header`)!;
+        expect(projectHeader).not.toBeNull(); projectHeader.click();
+        await vi.waitFor(() => expect(workbench.getActiveResourceId()).toBe(projectPath));
+        const projectPanel = main.querySelector('.workbench-tabs__panel:not([hidden])')!;
+        await vi.waitFor(() => expect(projectPanel.querySelector(`[data-resource-id="${projectPath}/@files"]`)).not.toBeNull());
+        expect(selector.value).toBe('/');
+        expect(sidebar.querySelector(`[data-item-id="${folderBrowserPath((await projects.personal()).path)}"]`)).not.toBeNull();
+        selector.value = projectPath; selector.dispatchEvent(new Event('change', { bubbles: true }));
+        await vi.waitFor(() => expect(sidebar.querySelector<HTMLButtonElement>('.workbench-project-navigation button[title="文件"]:not([hidden])')?.title).toBe('文件'));
         await workbench.openResource(projectPath);
         const navigation = sidebar.querySelector('.workbench-sidebar__navigation')!;
         expect(navigation.textContent).toContain('Research');
         const header = navigation.querySelector('.workbench-project-navigation')!;
-        expect([...header.querySelectorAll<HTMLButtonElement>('button:not([hidden])')].map(button => button.title)).toEqual(['文件', '新会话', '导入', '导出']);
+        expect([...header.querySelectorAll<HTMLButtonElement>('button:not([hidden])')].map(button => button.title)).toEqual([t('project.create'), '文件', '新会话', '导入', '导出', t('project.sync.projectActions')]);
         expect(navigation.querySelectorAll('[data-action="import"]')).toHaveLength(1);
         expect(navigation.querySelector('[data-action="import"]')?.closest('.workbench-project-navigation')).toBe(header);
 
@@ -100,7 +113,7 @@ it('creates project Sessions from the selected project and edits its files in th
         expect(sidebar.querySelector('select')?.value).toBe('/');
         expect(navigation.textContent).toContain('Research');
         await workbench.openResource(projectPath + '/@files/renamed.txt');
-        expect(sidebar.querySelector('select')?.value).toBe(projectPath);
+        expect(sidebar.querySelector('select')?.value).toBe('/');
         expect(file).toHaveBeenCalledOnce();
         const linked = await projects.openFiles(other.path);
         await linked.fs.driver.createFile({ parentPath: '/', name: 'linked.md', content: '# Intro\nLinked content' }); await linked.dispose();

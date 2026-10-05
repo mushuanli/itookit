@@ -1,7 +1,101 @@
-import { it, expect } from 'vitest';
+import { it, expect, vi } from 'vitest';
 import { MemoryBackend, createFileSystemSource, createFileSystemView, createVFS, FSError, type FileSystemSourceOwner } from '@itookit/vfs-core';
 import { createSessionBrowser, folderBrowserPath } from '../src/session/session-browser';
 import { createApplicationRuntime } from '../src/runtime/create-application-runtime';
+
+it('removes the remote identity if navigation creation fails before a grant is published', async () => {
+    const runtime = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'web', remoteSourceProvider: {
+        setCredential() {}, async dispose() {}, async open() { throw new Error('not contacted'); },
+    } });
+    try {
+        const remote = runtime.projects.remoteMounts!;
+        const connection = await remote.saveConnection({ name: 'Server', endpoint: 'https://files.test', username: 'user' }, 'password');
+        const original = runtime.sessionRepository.createFolder.bind(runtime.sessionRepository);
+        const failure = vi.spyOn(runtime.sessionRepository, 'createFolder').mockImplementation(async (path, project) => {
+            if (path === '/Interrupted') throw new Error('index failed');
+            return original(path, project);
+        });
+        await expect(runtime.projects.createRemote('Interrupted', null, connection, '/docs')).rejects.toThrow('index failed');
+        expect((await runtime.projects.list()).some(project => project.name === 'Interrupted')).toBe(false);
+        const root = await runtime.vfs.openFileSystem('/');
+        expect(await root.driver.exists('/home/admin/projects/.mindos/readonly/Interrupted')).toBe(false);
+        failure.mockRestore();
+    } finally { await runtime.dispose(); }
+});
+
+it('moves files through a writable remote subdirectory of an ordinary project', async () => {
+    const backend = new MemoryBackend(); await backend.init();
+    await backend.write('/note.md', new TextEncoder().encode('remote content'));
+    const runtime = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'web', remoteSourceProvider: {
+        setCredential() {}, async dispose() {}, async open() {
+            return createFileSystemSource({ backend, viewId: 'remote-transfer', access: 'rw' });
+        },
+    } });
+    const browser = await createSessionBrowser({ repository: runtime.sessionRepository, files: runtime.sessionFiles,
+        projects: runtime.projects, kernel: runtime.kernel.kernel });
+    try {
+        const local = (await runtime.projects.current())!;
+        const remote = runtime.projects.remoteMounts!;
+        const connection = await remote.saveConnection({ name: 'Server', endpoint: 'https://files.test', username: 'user' }, 'password');
+        const project = await runtime.projects.create('Remote files');
+        const base = await runtime.projects.openFiles(project.path);
+        try { await remote.add(project.project.id, { endpoint: 'https://files.test', alias: 'docs', root: '/', at: '/remote', access: 'rw' }, 'password', base.fs); }
+        finally { await base.dispose(); }
+        const root = await runtime.vfs.openFileSystem('/');
+        expect(await root.driver.exists(project.project.directory + '/.mindos/info.seq')).toBe(true);
+        const from = folderBrowserPath(project.path) + '/@files/remote', to = folderBrowserPath(local.path) + '/@files';
+        await browser.transferItems('move', [from + '/note.md'], to);
+        expect(await browser.fs.driver.readContent(to + '/note.md', { encoding: 'utf-8' })).toBe('remote content');
+        expect(await browser.fs.driver.exists(from + '/note.md')).toBe(false);
+        await browser.transferItems('move', [to + '/note.md'], from);
+        expect(await browser.fs.driver.readContent(from + '/note.md', { encoding: 'utf-8' })).toBe('remote content');
+        expect(await browser.fs.driver.exists(to + '/note.md')).toBe(false);
+        const id = await runtime.sessionRepository.createSession('Move reader', await runtime.projects.sessionFolder(local));
+        await runtime.projects.sessionMoves.move(id, await runtime.projects.sessionFolder(project));
+        expect((await runtime.sessionFiles.inspect(id))?.mounts).toMatchObject([{ sourceId: 'admin-home' }]);
+        const session = await runtime.sessionFiles.acquireFiles(id);
+        try { expect(await session.context.fs.driver.readContent('/workspace/remote/note.md', { encoding: 'utf-8' })).toBe('remote content'); }
+        finally { await session.release(); }
+    } finally { await browser.dispose(); await runtime.dispose(); }
+});
+
+it('opens remote project files and Session workspaces using only the remote reference', async () => {
+    const backend = new MemoryBackend(); await backend.init();
+    await backend.write('/note.md', new TextEncoder().encode('remote content'));
+    const runtime = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'web', remoteSourceProvider: {
+        setCredential() {}, async dispose() {}, async open() {
+            return createFileSystemSource({ backend, viewId: 'remote-root', access: 'rw' });
+        },
+    } });
+    const browser = await createSessionBrowser({ repository: runtime.sessionRepository, files: runtime.sessionFiles,
+        projects: runtime.projects, kernel: runtime.kernel.kernel });
+    try {
+        const remote = runtime.projects.remoteMounts!;
+        const connection = await remote.saveConnection({ name: 'Server', endpoint: 'https://files.test', username: 'user' }, 'password');
+        const project = await runtime.projects.createRemote('Remote project', null, connection, '/docs');
+        const root = await runtime.vfs.openFileSystem('/');
+        const files = folderBrowserPath(project.path) + '/@files';
+        expect((await browser.fs.driver.getNode(files))?.metadata._disabled).toBe(false);
+        expect((await browser.fs.driver.getChildren(files)).map(node => node.name)).toContain('note.md');
+        expect(await browser.fs.driver.readContent(files + '/note.md', { encoding: 'utf-8' })).toBe('remote content');
+        expect(await root.driver.exists(`/home/admin/projects/${project.project.id}`)).toBe(false);
+        const id = await runtime.sessionRepository.createSession('Remote reader', await runtime.projects.sessionFolder(project));
+        expect(await root.driver.exists(`/home/admin/projects/.mindos/readonly/Remote project/info.seq`)).toBe(true);
+        expect(await root.driver.exists(`/home/admin/projects/.mindos/readonly/Remote project/sessions/${id}/history.seq`)).toBe(true);
+        expect((await runtime.sessionFiles.inspect(id))?.mounts).toMatchObject([{ sourceId: `project:${project.project.id}`, access: 'ro' }]);
+        await runtime.sessionRepository.writeDocument(id, 'round-local.json', '{"text":"local history"}');
+        await runtime.projects.renameProject(project.path, '/Renamed remote');
+        expect(await root.driver.exists('/home/admin/projects/.mindos/readonly/Remote project')).toBe(false);
+        expect(await root.driver.exists('/home/admin/projects/.mindos/readonly/Renamed remote/info.seq')).toBe(true);
+        expect(await runtime.sessionRepository.readDocument(id, 'round-local.json')).toBe('{"text":"local history"}');
+        expect((await runtime.sessionRepository.getManifest(id)).folder).toBe('/Renamed remote/@sessions');
+        const session = await runtime.sessionFiles.acquireFiles(id);
+        try {
+            expect(await session.context.fs.driver.readContent('/workspace/note.md', { encoding: 'utf-8' })).toBe('remote content');
+            await expect(session.context.fs.driver.writeContent('/workspace/note.md', 'bad')).rejects.toMatchObject({ code: 'EROFS' });
+        } finally { await session.release(); }
+    } finally { await browser.dispose(); await runtime.dispose(); }
+});
 
 it('shares project remote grants with Sessions, retains remote routing during shadow conflicts, and unmounts without deletion', async () => {
     const remoteBackend = new MemoryBackend();
@@ -122,6 +216,8 @@ it('shares named connections across distinct remote roots and reuses the same pr
         expect((await runtime.projects.list()).filter(project => project.name === 'Duplicate')).toHaveLength(0);
         const b = await runtime.projects.createRemote('B', null, connection, '/docs/b');
         expect(a.project.id).not.toBe(b.project.id);
+        await expect(runtime.projects.createRemote('Remote parent', null, connection, '/docs')).rejects.toMatchObject({ reason: 'PROJECT_ROOT_OVERLAP' });
+        expect((await runtime.projects.list()).some(project => project.name === 'Remote parent')).toBe(false);
         for (const [project, content] of [[a, 'project A'], [b, 'project B']] as const) {
             const files = await runtime.projects.openFiles(project.path);
             expect(await files.fs.driver.readContent('/note.txt', { encoding: 'utf-8' })).toBe(content);

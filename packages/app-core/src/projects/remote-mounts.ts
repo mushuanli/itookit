@@ -39,6 +39,7 @@ export type RemoteConnectionStatus = 'unknown' | 'checking' | 'online' | 'offlin
 
 /** Project-owned grants; credentials stay in the injected host provider. */
 export class ProjectRemoteMountService {
+    rootValidator?: (projectId: string, mount: ProjectRemoteMount) => Promise<void>;
     private catalog: Catalog = { version: 1, revision: 0, projects: {} };
     private readonly views = new Map<string, Set<FileSystemSourceOwner>>();
     private readonly sources = new Map<string, Promise<FileSystemSourceOwner>>();
@@ -199,6 +200,7 @@ export class ProjectRemoteMountService {
             const connection = this.connection(connectionId);
             const mount: ProjectRemoteMount = { endpoint: connection.endpoint, username: connection.username, credentialRef: connection.credentialRef,
                 connectionId, ...remoteProjectPath(path), access, at: '/', mountId: randomUUID() };
+            await this.rootValidator?.(projectId, mount);
             const owner = await this.provider.open(mount, options);
             try {
                 if ((await owner.fs.driver.getNode(mount.root, options))?.type !== 'directory') throw new FSError('ENOTDIR', 'Remote project path must be a directory');
@@ -253,6 +255,7 @@ export class ProjectRemoteMountService {
             checkOperation(options); await this.beforeChange(projectId);
             const id = randomUUID(), mount: ProjectRemoteMount = { ...input, mountId: id, credentialRef: id, access: input.access ?? 'ro' };
             validateMount(mount);
+            if (mount.at === '/') await this.rootValidator?.(projectId, mount);
             if (this.list(projectId).some(item => item.at === mount.at) || await base.driver.exists(mount.at, options)) throw new FSError('EEXIST', 'MOUNT_POINT_CONFLICT');
             const restore = this.provider.setCredential(id, secret);
             let owner: FileSystemSourceOwner;
@@ -300,14 +303,16 @@ export class ProjectRemoteMountService {
             try { await this.changed(projectId); } finally { await (await old)?.dispose(); }
         });
     }
-    async compose(projectId: string, base: FileSystemSourceOwner): Promise<FileSystemSourceOwner> {
+    async compose(projectId: string, input: FileSystemSourceOwner | (() => Promise<FileSystemSourceOwner>)): Promise<FileSystemSourceOwner> {
         const revision = this.catalog.revision;
-        const definitions = this.list(projectId); if (!definitions.length) return base;
-        const mounts: FileSystemMount[] = definitions.some(mount => mount.at === '/') ? [] : [{ mountId: 'primary', at: '/', fs: base.fs, access: 'rw' }];
+        const definitions = this.list(projectId), remoteRoot = definitions.some(mount => mount.at === '/');
+        const base = typeof input === 'function' ? remoteRoot ? undefined : await input() : input;
+        if (!definitions.length) return base!;
+        const mounts: FileSystemMount[] = remoteRoot ? [] : [{ mountId: 'primary', at: '/', fs: base!.fs, access: 'rw' }];
         const diagnostics: string[] = [];
         try {
             for (const mount of definitions) {
-                if (mount.at !== '/' && await base.fs.driver.exists(mount.at)) diagnostics.push(`MOUNT_SHADOW_CONFLICT:${mount.at}`);
+                if (base && mount.at !== '/' && await base.fs.driver.exists(mount.at)) diagnostics.push(`MOUNT_SHADOW_CONFLICT:${mount.at}`);
                 const source = await (this.status(mount.mountId) === 'offline' ? Promise.reject(new FSError('EIO', 'Source unavailable')) : this.resolve(mount))
                     .catch(() => { this.setStatus(mount.mountId, 'offline'); diagnostics.push(`SOURCE_UNAVAILABLE:${mount.at}`); return this.unavailable(mount.mountId); });
                 mounts.push({ ...mount, fs: this.statusView(mount, source.fs), root: mount.root });
@@ -317,11 +322,11 @@ export class ProjectRemoteMountService {
             const fs = createFileSystemView({ viewId: `project:${projectId}`, revision: this.catalog.revision, mounts });
             let closing: Promise<void> | undefined;
             const owner = { fs, dispose: () => closing ??= (async () => {
-                this.views.get(projectId)?.delete(owner); await fs.dispose(); await base.dispose();
+                this.views.get(projectId)?.delete(owner); await fs.dispose(); await base?.dispose();
             })() };
             if (!this.views.has(projectId)) this.views.set(projectId, new Set());
             this.views.get(projectId)!.add(owner); return owner;
-        } catch (error) { await base.dispose(); throw error; }
+        } catch (error) { await base?.dispose(); throw error; }
     }
     async dispose(): Promise<void> {
         this.closed = true; await this.tail.catch(() => {});

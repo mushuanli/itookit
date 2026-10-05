@@ -105,6 +105,8 @@ FSEventBus（vfs-core/src/impl/event/event-bus.ts）：
 
 ## 7. 消费方一览
 
+`LLMDeviceDriver` 在 `/etc` 文件视图上监听创建、更新、删除、移动和重命名，仅当受影响路径为 `/llm`、其子路径或整个配置根时，防抖 300ms 重载连接、MCP 和 Skill。移动和重命名检查源、目标两侧；`/ui` 状态持久化等无关写入不触发重载。异步重载失败通过 `[LLM config] refresh failed` 报告，不成为未处理的 Promise 异常。
+
 | 消费方 | 事件源 | 用途 |
 |---|---|---|
 | `cli`（RunStore） | `session.events(after)` | events.jsonl 落盘 + 运行渲染 |

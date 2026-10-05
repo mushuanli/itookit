@@ -263,3 +263,5 @@ export { hasCommittedSubmission } from './persistence/submission-receipt';
 
 export * from './contracts';
 export { createSessionHost, type SessionHostPorts, type SessionHost, type SessionLogger, type SessionTextKey } from './utils/host-ports';
+
+export { moveSessionDataDirectory } from "./persistence/session-storage-locations";

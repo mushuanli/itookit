@@ -126,6 +126,10 @@ export interface BootWorkspaceParts {
 }
 
 export interface AppOptions {
+    /** Optional runtime synchronization ports, supplied by the host. */
+    sync?: import('@itookit/app-core').ApplicationRuntimeOptions['sync'];
+    /** Host UI for selecting a server/project and persisting a fresh binding. */
+    projectSyncSetup?(projectId: string, signal: AbortSignal): Promise<void>;
     directorySourceProvider?: import('@itookit/app-core').DirectorySourceProvider;
     /** Host registration/configuration of durable Session file grants. */
     configureSessionFiles?(files: import('@itookit/app-core').SessionFilesService): Promise<void> | void;

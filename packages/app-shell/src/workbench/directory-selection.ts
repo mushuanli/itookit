@@ -1,8 +1,8 @@
-import { FILE_BROWSER_ICONS, t } from '@itookit/common';
+import { FILE_ICONS, FILE_BROWSER_ICONS, VFS_TOOLBAR_ICONS, t } from '@itookit/common';
 import { decorateButton } from './controls';
 
 export interface DirectoryBulkAction {
-    id: 'delete' | 'move'; label: string; allows(ids: string[]): boolean; run(ids: string[]): Promise<void>;
+    id: 'delete' | 'move' | 'export' | 'copy'; label: string; allows(ids: string[]): boolean; run(ids: string[]): Promise<void>;
 }
 export class DirectorySelection {
     readonly ids = new Set<string>();
@@ -19,7 +19,8 @@ export class DirectorySelection {
         this.bar.className = 'workbench-directory__selection'; this.bar.append(this.count);
         for (const action of actions) {
             const button = document.createElement('button'); button.type = 'button'; button.dataset.action = `bulk-${action.id}`;
-            decorateButton(button, FILE_BROWSER_ICONS[action.id], action.label); button.onclick = () => { void this.run(action); };
+            const icon = action.id === 'copy' ? FILE_ICONS.document : action.id === 'export' ? VFS_TOOLBAR_ICONS.export : FILE_BROWSER_ICONS[action.id];
+            decorateButton(button, icon, action.label); button.onclick = () => { void this.run(action); };
             this.buttons.push(button); this.bar.append(button);
         }
         const clear = document.createElement('button'); clear.type = 'button'; decorateButton(clear, FILE_BROWSER_ICONS.close, t('workbench.clearSelection'));

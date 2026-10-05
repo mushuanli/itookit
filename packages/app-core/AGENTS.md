@@ -5,7 +5,7 @@
 ## 定位与铁律
 
 - **平台无关**：`src/` 内不出现 `node:*`、DOM、`window`、`localStorage`；宿主差异一律通过注入传入（`ApplicationKernelPlatform`：`createSessionProcesses` / `skillSourceForSession` / `configureSession` / `configure`）。
-- **依赖只朝下**：只依赖 `llm-context`、`common`、`vfs-core`、`durable-kernel`、`kernel-adapters`、`llm-flow`、`llm-session`、`llm-tasks`、`tools`、`driver-llm`；不得依赖 `app-shell`、UI 包或任何 app。
+- **依赖只朝下**：只依赖 `llm-context`、`common`、`vfs-core`、`durable-kernel`、`kernel-adapters`、`llm-flow`、`llm-session`、`llm-tasks`、`tools`、`driver-llm`、`vfs-sync`；不得依赖 `app-shell`、UI 包或任何 app。
 - **用例与装配分开**：应用策略放入 configuration/projects/session 等可单测服务；`runtime/` 负责接线与生命周期，不内联业务用例。宿主差异通过端口注入，DOM、导航与确认交互归 app-shell。
 - **显式公共出口**：`src/index.ts` 按需导出服务与契约，不使用 `export *`，内部实现与辅助函数不默认公开。`pnpm architecture:check` 检查生产源码与运行依赖的层次边界。
 - 无构建脚本：`main` 直接指向 `src/index.ts`，由宿主 app（web-app / tauri-app / cli）打包。
@@ -71,6 +71,7 @@ const kernel = await createKernelRuntime({ systemFS, llmDriver, storageResolver,
 ## 约束
 
 - 工具路径相对 cwd 做 POSIX 解析（支持 `../reference`），再交给挂载视图授权；项目编辑器以 `/workspace` 为规范根（`vfs/workspace-namespace.ts` 是唯一换算点），source view 和导航路由只用于内部操作/展示。`openFiles()` 是 source view，`openWorkspace()` 才是编辑器/执行的规范视图。
+- 项目根是独立文件空间：新建本地根、远程绑定和访问均校验重复/父子重叠；旧重叠映射拒绝访问并保留数据。远程项目以 source.kind=remote 和 project:<id> 逻辑引用保存，不创建本地正文目录。SessionFiles.workspaceProvider 拥有远程来源句柄并随视图释放，本地来源继续沿用授权目录；远程根缺失不得回退本地。
 - 浏览器投影不得逐节点回查目录catalog：`session-browser` 每次列目录解析一次 `FileProjection`（项目、远端授权、收藏查询）；浏览器目标归属文件夹统一走 `browserTargetFolder`，Session 归属只认 manifest。
 - `projects/execution` 从远程项目根与服务器能力派生临时目录执行上下文；不依赖旧的持久绑定。只读目录要求进程侧内核强制权限。
 - `projects/execution` 将 contracts（来源/工作区端口）、policy（当前挂载、隔离能力与远程进程命名空间校验）、service（获取/释放编排）、remote-provider（端口适配）分开。远程根目录默认使用服务器声明的执行能力，不持久化工作台执行开关；旧 execution 记录不再读取。服务器不支持执行时保持文件访问，不得回退宿主 Shell。`REMOTE_EXECUTION_ISOLATION` 是自动派生执行上下文的隔离要求。
@@ -115,3 +116,7 @@ pnpm --filter @itookit/app-core typecheck
 MindOS 默认工具列表属于 `src/presets/harness-tools.ts`，通过 app-core 公共出口供 app-shell 装配聊天与 Agent 设置 UI；禁止从公共配置契约读取产品默认授权。
 
 MindOS Agent 默认执行策略位于 `src/presets/direct-agent.json`，createMindosDirectAgentPolicy 返回副本；ApplicationRuntimeOptions.directAgentPolicy 可替换整个策略（包括空对象），会话装配显式注入，不在 Session 机制中保留产品指令。
+
+- `projects/sync` 封装项目同步策略与绑定生命周期，`ApplicationRuntimeOptions.sync` 注入宿主 provider/coordinator 后开放 `runtime.projectSync`；默认不创建连接。文件机制归 `vfs-sync`，具体 HTTP 与 IndexedDB 不进入本包。
+
+- `projects/project-directory-recovery.ts` 恢复有数据的工作台直属旧目录：条件补建 info.seq、沿用旧项目身份与会话归属；不移动正文，读取故障或根重叠不能当作不存在。

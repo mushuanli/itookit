@@ -1,10 +1,12 @@
+import { ProjectSyncService, type ProjectSyncProvider } from '../projects/sync/service';
+import type { Coordinator } from '@itookit/vfs-sync';
 import { seedDefaultFlows } from '../presets/default-flows';
 import { createRemoteExecutionProvider } from '../projects/execution/remote-provider';
 import { ProjectExecutionService } from '../projects/execution/service';
 import type { ProjectExecutionProvider } from '../projects/execution/contracts';
 import { attachProjectDraftRecovery } from './project-draft-recovery';
 import { ProjectRemoteMountService, type RemoteFileSourceProvider } from '../projects/remote-mounts';
-import { createFileSystemView, FSError } from '@itookit/vfs-core';
+import { FSError } from '@itookit/vfs-core';
 import { ModelConfigurationCommands } from '../configuration/model-commands';
 import { resumeSessionDeletions } from './resume-session-deletions';
 import type { IStorageBackend, MountOptions } from '@itookit/vfs-core';
@@ -67,6 +69,7 @@ export interface ApplicationRuntime {
     sessionFiles: SessionFilesService;
     directoryMounts: DirectoryMountService;
     projects: ProjectService;
+    projectSync?: ProjectSyncService;
     kernel: HeadlessKernelRuntime;
     sessionManager: import('@itookit/llm-session').SessionManager;
     commandBus: import('@itookit/llm-session').CommandBus;
@@ -75,6 +78,7 @@ export interface ApplicationRuntime {
 }
 
 export interface ApplicationRuntimeOptions {
+    sync?: { provider: ProjectSyncProvider; coordinator: Coordinator };
     directAgentPolicy?: import('@itookit/llm-session/contracts').DirectAgentPolicy;
     contextEngineOptions?: CreateKernelRuntimeOptions['contextEngineOptions'];
     agentResolution?: import('@itookit/llm-session').AgentResolutionPolicy;
@@ -118,6 +122,8 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
 
         logStep(t('boot.coreServices'));
         const agentService   = new VFSAgentService(await vfs.openFileSystem(workspaceRoot('agents')), llmDriver, { translate: t, logger: createModuleLogger('llm-conversation'), traceBoot });
+        const projectSync = options.sync ? new ProjectSyncService(options.sync.provider, options.sync.coordinator) : undefined;
+        if (projectSync) cleanupFns.push(() => projectSync.dispose());
         const configuration = new ModelConfigurationCommands(agentService);
         cleanupFns.push(() => configuration.dispose());
         const sessionRepository     = new SessionRepository(await vfs.openFileSystem('/'), async id => {
@@ -166,13 +172,9 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
             projects.execution = new ProjectExecutionService(remote,
                 options.projectExecutionProvider ?? createRemoteExecutionProvider(sessionFiles, options.remoteSourceProvider));
             sourceCleanupFns.push(() => remote.dispose());
-            sessionFiles.workspaceComposer = async (id, mount) => {
-                const project = await projects.forFolder((await sessionRepository.getManifest(id)).folder);
-                if (!project || !remote.list(project.project.id).length) return undefined;
-                const fs = createFileSystemView({ viewId: `project-base:${id}`, mounts: [{ ...mount, at: '/' }] });
-                return remote.compose(project.project.id, { fs, dispose: () => fs.dispose() });
-            };
         }
+
+        await traceBoot('projects.sources', () => projects.initializeSources());
 
         if (options.ownerKind === 'web' || options.defaultSessionDirectory) {
             await traceBoot('projects.init', () => projects.ensureStartup(options.defaultSessionDirectory));
@@ -189,7 +191,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
                 const project = await projects.forFolder((await sessionRepository.getManifest(id)).folder);
                 const execution = project && await projects.execution?.acquire(project.project.id, id);
                 if (execution) return execution;
-                const remote = project && projects.remoteMounts?.list(project.project.id).length;
+                const remote = project && (projects.fileSource(project).kind === 'remote' || projects.remoteMounts?.list(project.project.id).length);
                 return acquireSessionProcessContext(sessionFiles, id, remote ? undefined : options.kernelPlatform?.createSessionProcesses,
                     () => directoryMounts.processMounts(id));
             },
@@ -199,7 +201,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
                 const project = await projects.forFolder((await sessionRepository.getManifest(id)).folder);
                 const execution = project && await projects.execution?.acquire(project.project.id, id, scopeId);
                 if (execution) return execution;
-                if (project && projects.remoteMounts?.list(project.project.id).length)
+                if (project && (projects.fileSource(project).kind === 'remote' || projects.remoteMounts?.list(project.project.id).length))
                     throw new FSError('ECAPABILITY', 'Remote server does not provide command execution');
                 if (!options.kernelPlatform?.fileContextForScope) throw new FSError('ECAPABILITY', 'Workspace scope provider is unavailable');
                 return options.kernelPlatform.fileContextForScope(id, scopeId);
@@ -230,6 +232,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         const ownerId = `${options.ownerKind ?? "tauri"}-${ownerToken}`;
         const excluded = await traceBoot('resumeSessionDeletions',
             () => resumeSessionDeletions(sessionRepository, kernelCore, leaseStore, { id: ownerId, kind: options.ownerKind ?? 'tauri' }));
+        for (const id of await sessionRepository.pendingStorageSessionIds()) excluded.add(id);
         // Boot recovery runs one callback per Session; accumulate them so the log attributes
         // the untraced part of createKernel to a concrete callback instead of leaving a gap.
         const observed: Record<string, number> = {};
@@ -258,6 +261,7 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         cleanupFns.push(() => recovery.release());
         cleanupFns.push(() => kernel.dispose());
         cleanupFns.push(async () => { kernelCore.dispose(); await kernelCore.waitIdle(); });
+        await traceBoot('projects.resumeSessionMoves', () => projects.sessionMoves.recoverPending(id => recovery.acquireMetadataLease(id)));
         if (Object.keys(observed).length) console.log(`[Boot]   ↳ beforeRecover totals: ${formatTimings(observed)}`);
         console.log(`[Boot]   ↳ createKernel: +${(performance.now() - ts).toFixed(0)}ms`);
 
@@ -282,7 +286,8 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         // gate acquires a lease on demand so a freshly created Session is writable immediately.
         const { sessionManager, commandBus, dispose: disposeConversations } = await traceBoot('initializeConversationSystem',
             () => createConversationSystem({ vfs, systemFS, directAgentPolicy: options.directAgentPolicy, agentResolution: options.agentResolution, agentService, sessionRepository, flowEngine, kernel,
-                ensureWritable: async sessionId => !await sessionRepository.isSessionDeletionPending(sessionId) && await recovery.acquireLater(sessionId),
+                ensureWritable: async sessionId => !await sessionRepository.isSessionDeletionPending(sessionId)
+                    && await recovery.acquireLater(sessionId) && await projects.sessionMoves.ready(sessionId),
                 flowWorkspaceManager: options.kernelPlatform?.flowWorkspaceManager }));
 
         cleanupFns.push(disposeConversations);
@@ -311,7 +316,8 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
             if (errors.length) throw new AggregateError(errors, 'Application runtime cleanup failed');
         };
         return { vfs, llmDriver, agentService, configuration, sessionRepository, flowEngine, sessionFiles, directoryMounts, projects,
-            kernel, sessionManager, commandBus, runCatalog, dispose };
+            kernel, sessionManager, commandBus, runCatalog, dispose,
+            projectSync };
     } catch (error) {
         for (const close of [...cleanupFns].reverse().concat([...sourceCleanupFns].reverse())) {
             try { await close(); } catch (cleanupError) { console.error('[Boot] Cleanup failed', cleanupError); }

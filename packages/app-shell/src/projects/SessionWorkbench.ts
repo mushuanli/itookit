@@ -1,3 +1,5 @@
+import { projectTransferTargets } from './transfer-targets';
+import { ProjectSyncMenu } from './sync/menu';
 import { createMindOSVFSUI as createVFSUI } from '../browser/vfs-presentation';
 import { WorkbenchTabs, type WorkbenchTab } from '../workbench/tabs';
 import { WorkbenchSidebar } from '../workbench/sidebar';
@@ -22,6 +24,7 @@ import { SessionFamilyActions } from './SessionFamilyActions';
 import { buildRenamedFilename, formatDefaultFileTitle, t, traceBoot } from '@itookit/common';
 import { type SessionSkillControls } from '@itookit/tools/contracts';
 import { ProjectNavigation, type ProjectFileView } from './ProjectNavigation';
+import { remapProjectPath } from './project-paths';
 import { showNameDialog, showProjectDialog } from '../files/project-dialog';
 import { showMountDialog } from '../files/mount-dialog';
 import { localizeMountError } from '../files/localize-mount-error';
@@ -29,7 +32,7 @@ import { localizeMountError } from '../files/localize-mount-error';
 import type { EditorFactory, IEditor, EditorHostContext, ContextMenuConfig } from '@itookit/ui-common';
 import type { ISessionRepository } from '@itookit/llm-session';
 import type { Kernel } from '@itookit/durable-kernel';
-import { allowsRowAction, filterGitignoredFiles, describeErrorReason, type VFSToolbarContext, type VFSUIShell, type VFSNodeUI, type UIPersistencePort } from '@itookit/vfs-ui';
+import { allowsRowAction, filterGitignoredFiles, describeErrorReason, describeCauseChain, type VFSToolbarContext, type VFSUIShell, type VFSNodeUI, type UIPersistencePort } from '@itookit/vfs-ui';
 import { FSError, createFileSystemView, type IFileSystem, type FileSystemContextOwner, type FileSystemView } from '@itookit/vfs-core';
 
 
@@ -52,6 +55,7 @@ export const SESSION_BROWSER_SCOPE = 'session-browser:v1:admin';
 export interface OpenResourceOptions {
     initialInputState?: { text?: string; agentId?: string };
     reload?: boolean;
+    preserveProject?: boolean;
     branch?: string;
     fileNavigation?: ProjectFileView;
 }
@@ -89,6 +93,8 @@ export interface SessionWorkbenchOptions {
     manageMemory?: (sessionId: string, signal: AbortSignal) => Promise<void>;
     flows?: { fs: IFileSystem; menu: ContextMenuConfig<VFSNodeUI> };
     projects?: ProjectService;
+    projectSync?: import('@itookit/app-core').ProjectSyncService;
+    projectSyncSetup?(projectId: string, signal: AbortSignal): Promise<void>;
     onSidebarReady?: () => boolean;
     initialResourceId?: string;
     /** Host-owned snapshot storage; omitted means the sidebar restores nothing. */
@@ -129,6 +135,7 @@ export class SessionWorkbench implements WorkspaceController {
     private initialSidebarSelection?: string;
     private sidebarStarting = true;
     private projectNavigation?: ProjectNavigation;
+    private readonly syncMenu: ProjectSyncMenu;
     private familyActions?: SessionFamilyActions;
     private lifecycle!: SessionLifecycleService;
     private active: string | null = null;
@@ -168,6 +175,8 @@ export class SessionWorkbench implements WorkspaceController {
     private readonly uiPersistence: SessionWorkbenchOptions['uiPersistence'];
     private readonly sessions: ProjectSessions;
     constructor(options: SessionWorkbenchOptions) {
+        this.syncMenu = new ProjectSyncMenu({ service: options.projectSync, setup: options.projectSyncSetup }, this.dialogs.signal,
+            error => this.report(error), async () => { if (!this.closed) { await this.sidebarUI?.refresh(); await this.projectNavigation?.refresh(); } });
         this.sidebar = options.sidebar;
         this.container = options.container;
         this.repository = options.repository;
@@ -193,6 +202,12 @@ export class SessionWorkbench implements WorkspaceController {
         }, options.workbenchState?.load()?.tabs);
         this.sidebarLayout = new WorkbenchSidebar(this.sidebar, this.tabs.opened, options.workbenchState);
     }
+    private isTransferFile(path: string): boolean {
+        if (isFlowPath(path)) return false;
+        const target = resolveBrowserTarget(path);
+        return (target.kind === 'files' && target.path !== '/') || (target.kind === 'project-files' && target.path !== WORKSPACE_PATH);
+    }
+
     async start(): Promise<void> {
         this.browser = await createSessionBrowser({ repository: this.repository, files: this.files, kernel: this.kernel, projects: this.projects,
             filterDisplayedFiles: filterGitignoredFiles });
@@ -212,10 +227,35 @@ export class SessionWorkbench implements WorkspaceController {
             toolbarOptions: this.projectNavigation?.options.navigationToolbarOptions,
             rowCreation: { visible: node => !isFlowPath(node.id) && ['project-files', 'files'].includes(resolveBrowserTarget(node.id).kind),
                 run: (node, type) => this.createDirectoryEntry(node.id, type) },
+            transferPolicy: {
+                targets: this.projects ? (ids, _mode, parent) => projectTransferTargets(this.projects!, this.navigationFiles!, ids, parent) : undefined,
+                source: (node, mode) => mode === 'move' || this.isTransferFile(node.id),
+                destination: (node, ids) => {
+                    if (!node) return false;
+                    const fileSources = ids.every(id => this.isTransferFile(id));
+                    const target = resolveBrowserTarget(node.id);
+                    return fileSources ? ['files', 'project-files'].includes(target.kind) : target.kind === 'folder';
+                },
+            },
+            transferItems: async (mode, ids, destination) => {
+                try {
+                    if (ids.every(id => this.isTransferFile(id))) await this.browser!.transferItems(mode, ids, destination ?? '/');
+                    else if (mode === 'move') await this.navigationFiles!.driver.move(ids, destination);
+                    else throw new Error('Only files and file directories can be copied');
+                } finally {
+                    const tabs = this.tabs.values();
+                    const refreshed = await Promise.allSettled(tabs.map(tab => refreshDirectoryList(tab.panel)));
+                    refreshed.forEach((result, index) => {
+                        if (result.status !== 'rejected') return;
+                        console.error('[Project transfer]', { stage: 'refresh-view', mode, sources: ids, destination,
+                            tabId: tabs[index]?.id, cause: describeCauseChain(result.reason), error: result.reason });
+                        this.report(result.reason);
+                    });
+                }
+            },
             toolbar: 'full', hideGitignored: false,
             searchPlaceholder: t(this.projects ? 'project.searchContents' : 'project.search'), showFileExtensions: true,
             readOnly: false, activateDirectories: true, autoSelectFirst: !this.projects, defaultUiSettings: { sortBy: 'lastModified' },
-            doubleClickActivation: this.projects ? item => resolveBrowserTarget(item.id).kind === 'folder' && !!item.metadata.custom.projectId : undefined,
             compareItems: compareSessionEntries,
             restoreExpandedDirectory: isExpandableDirectory,
             exportDirectories: true,
@@ -234,7 +274,8 @@ export class SessionWorkbench implements WorkspaceController {
                     if (target.kind === 'favorite' || target.kind === 'favorites') return [];
                     if (target.kind === 'project-files' && target.path === WORKSPACE_PATH) return [];
                     if (this.projects && item.metadata?.custom?.projectId)
-                        return defaults.filter(entry => !('id' in entry) || !['create-in-folder-session', 'create-in-folder-folder', 'import'].includes(entry.id));
+                        return [...defaults.filter(entry => !('id' in entry) || !['create-in-folder-session', 'create-in-folder-folder', 'import'].includes(entry.id)),
+                            { type: 'separator' }, ...this.syncMenu.items(String(item.metadata.custom.projectId))];
                     if (target.kind === 'folder' && folderPathFromBrowserPath(item.id)?.endsWith('/@sessions'))
                         return defaults.filter(entry => !('id' in entry) || !['delete', 'rename'].includes(entry.id));
                     if (target.kind === 'task') {
@@ -244,7 +285,7 @@ export class SessionWorkbench implements WorkspaceController {
                     // Closing stops the run but keeps the Session history, so it is offered
                     // next to (not instead of) the destructive delete.
                     if (target.kind === 'session') {
-                        return [...defaults.filter(entry => !this.familyActions || !('id' in entry) || !['delete', 'move', 'create-in-folder-session', 'create-in-folder-folder'].includes(entry.id)),
+                        return [...defaults.filter(entry => !this.familyActions || !('id' in entry) || !['delete', 'create-in-folder-session', 'create-in-folder-folder'].includes(entry.id)),
                             ...(this.familyActions ? this.familyMenu(target.sessionId) : []),
                             { id: 'session-tasks', label: t('project.sessionTasks'), onClick: () => { void this.openResource(item.id + '/tasks').catch(error => this.report(error)); } },
                             { id: 'session-files', label: t('project.sessionFiles'), onClick: () => { void this.openResource(item.id + '/files').catch(error => this.report(error)); } },
@@ -260,7 +301,7 @@ export class SessionWorkbench implements WorkspaceController {
             // Expanding ancestors during selectPath can emit intermediate selections too.
             if (!item || this.selectionSync) return;
             if (this.sidebarStarting) this.initialSidebarSelection = item.id;
-            else void this.openResource(item.id).catch(error => this.report(error));
+            else void this.openResource(item.id, { preserveProject: true }).catch(error => this.report(error));
         }), this.sidebarUI.on('sidebarStateChanged', ({ isCollapsed }) => this.sidebar.classList.toggle('is-collapsed', isCollapsed)),
         this.repository.subscribe(change => { if (change?.kind !== 'ui-state') this.scheduleRefresh('repository'); }),
         this.files.subscribe(() => this.scheduleRefresh('files')),
@@ -337,14 +378,22 @@ export class SessionWorkbench implements WorkspaceController {
      * into one sidebar re-render. Content changes never reach here.
      */
     private updateRemoteAvailability(): void {
+        const path = this.active;
+        void this.applyRemoteAvailability(path).catch(error => this.report(error));
+    }
+    private async applyRemoteAvailability(path: string | null): Promise<void> {
         if (!this.projects?.remoteMounts) return;
-        const project = this.projectNavigation?.currentProject();
-        const target = this.active && !this.active.startsWith('draft:') ? resolveBrowserTarget(parseSessionRoute(this.active).path) : undefined;
-        const offline = (target?.kind === 'project-files' || target?.kind === 'files') && !!project && !!this.projects?.remoteMounts?.projectOffline(project.project.id);
+        const target = path && !path.startsWith('draft:') ? resolveBrowserTarget(parseSessionRoute(path).path) : undefined;
+        const folder = target?.kind === 'project-files' ? target.folder : target?.kind === 'files'
+            ? (await this.repository.getManifest(target.sessionId)).folder : undefined;
+        const project = folder ? await this.projects.forFolder(folder) : undefined;
+        if (this.closed || path !== this.active) return;
+        const offline = !!project && this.projects.remoteMounts.projectOffline(project.project.id);
         this.container.inert = offline;
         this.container.classList.toggle('project-workbench--offline', offline);
         this.container.setAttribute('aria-disabled', String(offline));
     }
+
     private scheduleRefresh(source: string): void {
         if (this.closed || !this.visible) return;
         this.refreshSources.add(source);
@@ -380,7 +429,7 @@ export class SessionWorkbench implements WorkspaceController {
             if (this.active?.startsWith('/')) {
                 const target = resolveBrowserTarget(this.active);
                 if (target.kind === 'task') await this.showTask(this.active);
-                else if ((target.kind === 'folder' && !this.projectNavigation) || target.kind === 'tasks' || ((target.kind === 'files' || target.kind === 'project-files') && !this.editor && !this.previewCleanup)) await this.showDirectory(this.active);
+                else if (target.kind === 'folder' || target.kind === 'tasks' || ((target.kind === 'files' || target.kind === 'project-files') && !this.editor && !this.previewCleanup)) await this.showDirectory(this.active);
             }
         }).catch(error => this.report(error));
     }
@@ -511,7 +560,7 @@ export class SessionWorkbench implements WorkspaceController {
                 this.tabs.activate(tabId); this.restoreEditor(existing.value);
                 await refreshDirectoryList(existing.panel); load.check();
                 const navigationPath = openingManifest ? `${folderBrowserPath(openingManifest.folder)}/${openingManifest.id}` : path;
-                await this.projectNavigation?.sync(navigationPath, { reveal: true }); load.check();
+                await this.projectNavigation?.sync(navigationPath, { reveal: true, preserveProject: true }); load.check();
                 this.onSelect(this.getActiveResourceId()!); return;
             }
             if (existing?.value) await this.tabs.close(tabId, false);
@@ -520,7 +569,7 @@ export class SessionWorkbench implements WorkspaceController {
             if (target.kind === 'folder' || target.kind === 'favorites') {
                 this.active = id;
                 this.activeBranch = undefined;
-                await load.read(async () => this.projectNavigation?.sync(path, { reveal: true })); load.check();
+                await load.read(async () => this.projectNavigation?.sync(path, { reveal: true, preserveProject: options.preserveProject })); load.check();
                 await this.showDirectory(path);
                 this.onSelect(id);
                 this.selectionSync = path;
@@ -536,7 +585,7 @@ export class SessionWorkbench implements WorkspaceController {
             const suffix = target.kind === 'session' ? '' : target.kind === 'files' ? '/files' + (target.path === '/' ? '' : target.path)
                 : target.kind === 'tasks' ? '/tasks' : '/tasks/' + target.taskId;
             path = `${folderBrowserPath(manifest.folder)}/${target.sessionId}${suffix}`;
-            await load.read(async () => this.projectNavigation?.sync(path)); load.check();
+            await load.read(async () => this.projectNavigation?.sync(path, { preserveProject: true })); load.check();
             if (target.kind === 'session' || target.kind === 'files') {
                 const cwd = target.kind === 'session' ? undefined : target.path.slice(0, target.path.lastIndexOf('/')) || '/';
                 let acquired: FileSystemContextOwner | undefined;
@@ -645,6 +694,11 @@ export class SessionWorkbench implements WorkspaceController {
                 this.retainEditor(this.viewLoads.detach(load));
             }
         }).catch(error => {
+            if (this.viewLoads.isCurrent(load) && error instanceof FSError
+                && (error as FSError & { reason?: string }).reason === 'PROJECT_ROOT_OVERLAP') {
+                this.showProjectAccessError(error, id);
+                return;
+            }
             if (!(error instanceof ViewLoadCancelled)) {
                 if (!this.editor && this.tabs.current?.value) this.restoreEditor(this.tabs.current.value);
                 throw error;
@@ -655,6 +709,17 @@ export class SessionWorkbench implements WorkspaceController {
             if (this.viewLoads.isCurrent(load)) this.pendingTarget = undefined;
         });
         this.tail = result.catch(() => {}); return result;
+    }
+    private showProjectAccessError(error: FSError, resourceId: string): void {
+        const details = error as FSError & { projectId?: string; location?: unknown; conflictingProjects?: unknown };
+        console.warn('[Project access] Root overlap', { resourceId, projectId: details.projectId,
+            location: details.location, conflictingProjects: details.conflictingProjects });
+        const panel = document.createElement('div'); panel.className = 'session-detail';
+        const notice = document.createElement('p'); notice.setAttribute('role', 'alert');
+        notice.dataset.projectAccessError = ''; notice.textContent = error.message;
+        panel.append(notice); this.tabs.content.replaceChildren(panel);
+        this.active = resourceId; this.activeBranch = undefined;
+        this.onSelect(resourceId);
     }
     private async syncBranchRoute(): Promise<void> {
         // Serialize reconciliation with navigation so a stale read cannot close a newer editor.
@@ -771,8 +836,8 @@ export class SessionWorkbench implements WorkspaceController {
         if (this.navigationFiles?.on) this.tabs.current!.subscriptions.push(watchDirectoryList(this.navigationFiles, panel, error => this.report(error)));
     }
     private async directoryEntries(path: string) {
-        await this.sidebarUI?.refresh(); await this.sidebarUI?.expandPath(path);
         const nodes = await this.navigationFiles!.driver.getChildren(path);
+        await this.sidebarUI?.refresh(); await this.sidebarUI?.expandPath(path);
         return nodes.map(node => ({ id: node.path, name: directoryEntryName(node), type: resolveBrowserTarget(node.path).kind === 'session' ? 'session' : node.type,
             icon: this.sidebarUI!.getResourceIcon(node), created: node.createdAt, modified: node.modifiedAt, size: node.type === 'file' ? node.size : undefined,
             disabled: node.metadata._disabled === true, description: String(node.metadata.navigationDescription ?? '') }));
@@ -926,7 +991,7 @@ export class SessionWorkbench implements WorkspaceController {
             if (!current()) return;
             this.selectionSync = path;
             try {
-                await traceBoot('projectFile.navigation', async () => this.projectNavigation?.sync(path, { reveal: true, fileView: mode }));
+                await traceBoot('projectFile.navigation', async () => this.projectNavigation?.sync(path, { reveal: true, fileView: mode, preserveProject: true }));
                 if (current() && mode !== 'preserve') await this.sidebarUI?.selectPath(path);
             } finally { if (this.selectionSync === path) this.selectionSync = undefined; }
         }).catch(error => { if (current()) this.report(error); });
@@ -986,6 +1051,12 @@ export class SessionWorkbench implements WorkspaceController {
             report: error => this.report(error),
         });
         this.projectNavigation = new ProjectNavigation(this.projects!, () => this.sidebarUI, {
+            projectRenamed: (from, to) => this.remapProjectRoutes(folderBrowserPath(from.path), folderBrowserPath(to.path), to.name),
+            projectMenu: async (event, project) => {
+                await this.syncMenu.refresh(project.project.id);
+                if (!this.dialogs.signal.aborted) await this.sidebarUI?.showItemMenu(event, folderBrowserPath(project.path));
+            },
+            projectsChanged: projects => { for (const project of projects) void this.syncMenu.refresh(project.project.id).catch(error => this.report(error)); },
             navigate: path => this.openResource(path),
             createSession: path => this.startSessionDraft(path), createChild: id => this.createChild(id),
             retryDeletions: async () => {
@@ -1032,6 +1103,20 @@ export class SessionWorkbench implements WorkspaceController {
         if (this.projects) this.actionButton(panel, t('project.create'), () => this.createProject('/'));
         this.tabs.content.replaceChildren(panel);
     }
+    private remapProjectRoutes(from: string, to: string, title: string): void {
+        ++this.fileNavigationRevision;
+        for (const tab of this.tabs.values()) {
+            const next = remapProjectPath(tab.id, from, to);
+            if (next !== tab.id) this.tabs.rename(tab.id, next, tab.id === from ? title : tab.title);
+            if (tab.value?.active) tab.value.active = remapProjectPath(tab.value.active, from, to);
+        }
+        if (this.selectionSync) this.selectionSync = remapProjectPath(this.selectionSync, from, to);
+        if (this.active) {
+            const next = remapProjectPath(this.active, from, to);
+            if (next !== this.active) { this.active = next; this.onSelect(this.getActiveResourceId() ?? '', 'replace'); }
+        }
+    }
+
     private async editorMount(folder?: string | null, sessionId?: string): Promise<HTMLElement> {
         const mount = document.createElement('div'); mount.className = 'session-editor-mount';
         const project = await this.projects?.forFolder(folder);

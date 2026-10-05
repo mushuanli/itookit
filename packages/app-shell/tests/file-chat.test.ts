@@ -27,7 +27,7 @@ it('uses the personal project for unassociated files even when another project i
     runtime = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'web' });
     const { projects, sessionRepository: repository } = runtime;
     const personal = await projects.personal();
-    await repository.renameFolder(personal.path, '/Renamed personal');
+    await projects.renameProject(personal.path, '/Renamed personal');
     const other = await projects.create('AAA work');
     await projects.ensureStartup(other.project.directory);
     expect((await projects.current())!.project.id).toBe(other.project.id);

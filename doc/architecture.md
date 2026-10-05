@@ -183,3 +183,5 @@ App:   bootstrap → initializeConversationSystem → SessionManager
        → sendMessage → ConversationRunCoordinator → (llm.chat | DurableFlowExecutor)
        → 事件经 TaskHandle.events() / SessionEventBus 渲染到 llm-ui
 ```
+
+同步与 VFS 的模块依赖、端口边界及插件可行性见 [同步模块与 VFS 边界](design/sync-vfs-module-boundaries.md)，包含 C4 与预览、提交、恢复事件流。

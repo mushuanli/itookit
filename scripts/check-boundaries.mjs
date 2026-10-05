@@ -7,12 +7,15 @@ import ts from 'typescript';
 
 const application = new Set(['@itookit/app-core', '@itookit/app-shell', '@itookit/app-settings']);
 const coreDependencies = new Set(['common', 'llm-context', 'vfs-core', 'durable-kernel', 'kernel-adapters',
-    'llm-flow', 'llm-session', 'llm-tasks', 'tools', 'driver-llm'].map(name => '@itookit/' + name));
+    'llm-flow', 'llm-session', 'llm-tasks', 'tools', 'driver-llm', 'vfs-sync'].map(name => '@itookit/' + name));
 const browserGlobals = new Set(['window', 'document', 'localStorage', 'sessionStorage', 'navigator',
     'Window', 'Document', 'Element', 'Node', 'MutationObserver', 'ResizeObserver']);
 
 export function dependencyError(source, target) {
     if (source === target) return;
+    if ((source === '@itookit/vfs-core' || source.startsWith('@itookit/vfsdriver-')) && target.startsWith('@itookit/') && target !== '@itookit/vfs-core')
+        return 'VFS core and drivers must remain independent; drivers may only depend on vfs-core';
+    if (source === '@itookit/vfs-sync') return 'vfs-sync must receive all I/O through owned ports';
     if (source === '@itookit/common' && target.startsWith('@itookit/')) return 'common must not depend on capability packages';
     if (source === '@itookit/ui-common' && target.startsWith('@itookit/') && !['@itookit/common', '@itookit/vfs-core'].includes(target)) return 'shared UI must receive domain data through generic ports';
     if (source === '@itookit/kernel-adapters' && ['@itookit/llm-tasks', '@itookit/llm-flow', '@itookit/llm-session'].includes(target)) return 'adapters must not depend on execution or conversation layers';

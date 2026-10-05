@@ -11,13 +11,26 @@ beforeEach(async () => {
 afterEach(async () => { await repository.dispose(); await manager.dispose(); });
 
 describe('Session data repository', () => {
+    it('conditionally migrates project references while preserving identity and rejecting stale updates', async () => {
+        const previous = { id: 'legacy', directory: '/home/admin/projects/legacy' };
+        await repository.createFolder('/Legacy', previous);
+        const next = { id: 'legacy', directory: 'project:legacy', source: { kind: 'remote' as const } };
+        await repository.replaceProjectReference('/Legacy', previous, next);
+        expect((await repository.listFolders()).find(folder => folder.path === '/Legacy')?.project).toEqual(next);
+        await expect(repository.replaceProjectReference('/Legacy', previous, next)).rejects.toMatchObject({ code: 'ECONFLICT' });
+        await expect(repository.replaceProjectReference('/Legacy', next, { ...next, id: 'other', directory: 'project:other' }))
+            .rejects.toMatchObject({ code: 'EINVAL' });
+        await expect(repository.replaceProjectReference('/Legacy', next, { ...next, directory: previous.directory }))
+            .rejects.toMatchObject({ code: 'EINVAL' });
+        expect((await repository.listFolders()).find(folder => folder.path === '/Legacy')?.project).toEqual(next);
+    });
     it('loads fresh navigation summaries in batches without history or editor state', async () => {
         const id = await repository.createSession('One');
         await repository.updateUIState(id, { scrollPosition: 123 });
         await fs.driver.createDirectory({ name: 'interrupted', parentPath: '/var/lib/sessions' });
         const batch = vi.fn(fs.meta.seq!.getEntriesMany.bind(fs.meta.seq));
         const reader = new SessionRepository({ ...fs, meta: { ...fs.meta,
-            seq: { ...fs.meta.seq!, getEntriesMany: batch } } });
+            seq: { ...fs.meta.seq!, walkEntries: fs.meta.seq!.walkEntries.bind(fs.meta.seq), getEntriesMany: batch } } });
         const manifest = vi.spyOn(repository, 'getManifest');
         const summaries = await reader.listSummaries();
         expect(summaries).toHaveLength(1);
@@ -51,7 +64,7 @@ describe('Session data repository', () => {
             try { return await operation(wrapped); }
             finally { expect(active).toBe(0); }
         });
-        const reader = new SessionRepository({ ...fs, meta: { ...fs.meta, seq: { ...fs.meta.seq!, transaction: traced } } });
+        const reader = new SessionRepository({ ...fs, meta: { ...fs.meta, seq: { ...fs.meta.seq!, walkEntries: fs.meta.seq!.walkEntries.bind(fs.meta.seq), transaction: traced } } });
         await expect(reader.list()).rejects.toThrow('Read failed');
         expect(peak).toBeGreaterThan(1);
         await reader.dispose();

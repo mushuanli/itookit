@@ -20,6 +20,7 @@
     "@codemirror/view": "^6.38.8",
     "@fortawesome/fontawesome-free": "^7.1.0",
     "@itookit/app-core": "workspace:*",
+    "@itookit/vfs-sync": "workspace:*",
     "@itookit/app-settings": "workspace:*",
     "@itookit/app-shell": "workspace:*",
     "@itookit/common": "workspace:*",
@@ -38,7 +39,8 @@
     "marked": "^16.4.2",
     "mermaid": "^11.12.1",
     "@itookit/vfsdriver-agent": "workspace:*",
-    "@itookit/tools": "workspace:*"
+    "@itookit/tools": "workspace:*",
+    "@itookit/sync-adapters": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.19.25",

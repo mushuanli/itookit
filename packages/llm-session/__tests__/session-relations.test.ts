@@ -49,6 +49,16 @@ it('promotes direct children on deletion and preserves deeper descendants and th
     expect(await repo.readDocument(c, 'note.json')).toBe('{}');
     expect(await repo.pendingSessionDeletions()).toEqual([]);
 });
+it('moves a subtree to another project folder, detaches its old parent and preserves history', async () => {
+    const a = await create('A'), b = await create('B', a), c = await create('C', b);
+    await repo.writeDocument(c, 'note.json', '{"text":"keep"}');
+    await repo.updateManifest(b, { folder: '/Q' });
+    expect((await repo.getManifest(b)).parentSessionId).toBeNull();
+    expect((await repo.getManifest(a)).folder).toBe('/P/a');
+    expect((await repo.getManifest(c)).parentSessionId).toBe(b);
+    expect((await repo.getManifest(c)).folder).toBe('/Q');
+    expect(await repo.readDocument(c, 'note.json')).toBe('{"text":"keep"}');
+});
 it('keeps children reachable after a delete failure and retries after reopening', async () => {
     const a = await create('A'), b = await create('B', a);
     const original = fs.driver.delete.bind(fs.driver);

@@ -12,7 +12,8 @@ export interface ProjectNavigationSnapshot {
 type SessionOrganizationStore = Pick<ISessionRepository, 'list' | 'listSummaries' | 'listFolders' | 'pendingSessionDeletions' | 'getManifest' | 'updateManifest' | 'createSession'>;
 /** Organization queries and commands; repository transactions remain the write authority. */
 export class ProjectSessions {
-    constructor(private readonly repository: SessionOrganizationStore) {}
+    constructor(private readonly repository: SessionOrganizationStore,
+        private readonly projectFolders: (folders: readonly SessionFolder[]) => Promise<SessionFolder[]> = async folders => [...folders]) {}
     private summaries(): Promise<SessionSummary[]> {
         return this.repository.listSummaries?.() ?? this.repository.list();
     }
@@ -20,7 +21,7 @@ export class ProjectSessions {
         const [sessions, folders, pending] = await Promise.all([
             options.includeSessions === false ? Promise.resolve([]) : this.summaries(), this.repository.listFolders(), this.repository.pendingSessionDeletions(),
         ]);
-        return { sessions, folders, pending, roots: sessionFamilyRoots(sessions) };
+        return { sessions, folders: await this.projectFolders(folders), pending, roots: sessionFamilyRoots(sessions) };
     }
     async family(id: string): Promise<{ root: string; members: SessionSummary[] }> {
         const snapshot = await this.navigation(), root = snapshot.roots.get(id);

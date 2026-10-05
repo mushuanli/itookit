@@ -15,6 +15,7 @@ import {
 } from '@itookit/llm-settings-ui';
 import { WORKSPACES } from './config/modules';
 import { BrowserSkillToolHandlerFactory } from './kernel/browser-skill-tools';
+import { WebProjectSync } from './sync';
 
 // Dev must always load the current workspace source graph.
 void configureAppCache(import.meta.env.DEV).catch(error => console.warn('App cache setup failed', error));
@@ -50,8 +51,11 @@ async function main() {
             SystemPromptSettingsEditor,
         },
     };
+    const remoteSourceProvider = createHttpSourceProvider();
+    const sync = new WebProjectSync(backend, remoteSourceProvider);
     const runtime = await createApplicationRuntime({
-        remoteSourceProvider: createHttpSourceProvider(),
+        remoteSourceProvider,
+        sync: { provider: sync, coordinator: sync.coordinator },
         backend,
         ownerKind: 'web',
         // Same tab keeps its lease identity across reloads; other tabs keep their own.
@@ -60,9 +64,11 @@ async function main() {
             skillToolHandlerFactory: new BrowserSkillToolHandlerFactory(),
         },
     });
+    sync.projects = runtime.projects;
     try {
         await initApp({
             runtime,
+            projectSyncSetup: (id, signal) => sync.setup(id, signal),
             workspaces: WORKSPACES,
             defaultSlug: 'chat',
             routeAliases: { home: 'llm-workspace', projects: 'llm-workspace', workbench: 'llm-workspace' },

@@ -1,11 +1,11 @@
 import { FSError, type IFileSystem, type ISeqFileTransaction } from '@itookit/vfs-core';
 import type { ConversationManifest, SessionFolder } from './types';
-import { sessionStorageRoot } from './session-storage-layout';
+import { resolveSessionStorageRoot } from './session-storage-locations';
 
 export const RELATIONS_PATH = '/var/lib/sessions/folders.seq';
 const REVISION = 'relations-revision';
 const deletionKey = (id: string) => `deleting/${id}`;
-const metadataPath = (id: string) => `${sessionStorageRoot(id)}/session.seq`;
+const metadataPath = async (tx: ISeqFileTransaction, id: string) => `${await resolveSessionStorageRoot(tx, id)}/session.seq`;
 export interface SessionDeletion { id: string; parentSessionId: string | null; children: string[] }
 
 export async function touchSessionRelations(tx: ISeqFileTransaction): Promise<void> {
@@ -16,7 +16,7 @@ export async function assertSessionAvailable(tx: ISeqFileTransaction, id: string
     if (await tx.getEntry(RELATIONS_PATH, deletionKey(id))) throw new FSError('EBUSY', 'Session deletion is pending');
 }
 export async function readSessionMetadata(tx: ISeqFileTransaction, id: string): Promise<ConversationManifest> {
-    const raw = await tx.getEntry(metadataPath(id), 'session');
+    const raw = await tx.getEntry(await metadataPath(tx, id), 'session');
     if (!raw) throw new FSError('ENOENT', 'Session not found');
     return JSON.parse(raw);
 }
@@ -45,7 +45,7 @@ export class SessionRelations {
     async move(id: string, parent: string | null | undefined, folder?: string | null): Promise<void> {
         await this.mutate(async (tx, sessions) => {
             const source = required(sessions, id);
-            const parentId = parent === undefined ? source.parentSessionId ?? null : parent;
+            const parentId = parent === undefined ? folder !== undefined && folder !== source.folder ? null : source.parentSessionId ?? null : parent;
             const destination = parentId ? required(sessions, parentId) : undefined;
             const subtree = descendants(sessions, id);
             if (parentId && subtree.has(parentId)) throw new FSError('EINVAL', 'Cannot move a Session into itself or its descendants');
@@ -55,7 +55,7 @@ export class SessionRelations {
             if (destination && (destination.folder ?? null) !== targetFolder) throw new FSError('EINVAL', 'Child Sessions must share their parent folder');
             const folders: SessionFolder[] = JSON.parse(await tx.getEntry(RELATIONS_PATH, 'folders') ?? '[]');
             if (targetFolder && !folders.some(item => item.path === targetFolder)) throw new FSError('ENOENT', 'Session folder not found');
-            if (projectOf(folders, source.folder) && projectOf(folders, source.folder) !== projectOf(folders, targetFolder)) throw new FSError('EACCES', 'Cannot move Sessions between projects');
+            if (folder === undefined && projectOf(folders, source.folder) && projectOf(folders, source.folder) !== projectOf(folders, targetFolder)) throw new FSError('EACCES', 'Cannot move Sessions between projects');
             for (const item of sessions.filter(item => subtree.has(item.id))) {
                 await this.patch(tx, item.id, { folder: targetFolder, ...(item.id === id ? { parentSessionId: parentId } : {}) });
             }
@@ -87,10 +87,10 @@ export class SessionRelations {
         });
     }
     private async patch(tx: ISeqFileTransaction, id: string, patch: Partial<ConversationManifest>): Promise<void> {
-        const raw = await tx.getEntry(metadataPath(id), 'session');
+        const raw = await tx.getEntry(await metadataPath(tx, id), 'session');
         if (!raw) throw new FSError('ENOENT', 'Session not found');
         const current = JSON.parse(raw);
-        await tx.setEntry(metadataPath(id), 'session', JSON.stringify({ ...current, ...patch, updatedAt: Date.now(), revision: current.revision + 1 }));
+        await tx.setEntry(await metadataPath(tx, id), 'session', JSON.stringify({ ...current, ...patch, updatedAt: Date.now(), revision: current.revision + 1 }));
     }
 }
 

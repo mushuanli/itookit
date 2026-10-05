@@ -55,8 +55,8 @@ export interface SessionFolder {
     name: string;
     parentPath: string | null;
     updatedAt: number;
-    /** A project root owns a file directory; descendants organize its Sessions. */
-    project?: { id: string; directory: string };
+    /** Local roots keep a directory; remote roots keep a logical project reference. */
+    project?: { id: string; directory: string; source?: { kind: 'local' | 'remote' } };
 }
 
 /** A fresh, single-transaction snapshot for one editor load; never a persistent cache. */
@@ -99,7 +99,12 @@ export interface ISessionRepository extends SessionDeletionStore {
     /** Delete a Session and its owned storage. */
     deleteSession(sessionId: string): Promise<void>;
     listFolders(): Promise<SessionFolder[]>;
+    promoteProjectFolder?(path: string, project: NonNullable<SessionFolder['project']>): Promise<void>;
+    setStorageDirectoryResolver?(resolver: (folder: string | null) => Promise<string | undefined>): void;
+    relocateProjectStorage?(id: string): Promise<void>;
+    indexProjectSessions?(directory: string): Promise<void>;
     createFolder(path: string, project?: SessionFolder['project']): Promise<SessionFolder>;
+    replaceProjectReference?(path: string, expected: NonNullable<SessionFolder['project']>, next: NonNullable<SessionFolder['project']>): Promise<void>;
     deleteFolder(path: string, recursive?: boolean): Promise<void>;
     renameFolder(from: string, to: string): Promise<void>;
     updateManifest(sessionId: string, patch: Partial<ConversationManifest>): Promise<void>;

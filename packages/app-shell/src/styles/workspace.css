@@ -361,3 +361,7 @@
 .workbench-tabs__menu[open] { min-width: 0; }
 .workbench-tabs__menu-panel { position: fixed; right: 8px; z-index: 1000; min-width: 200px; padding: 6px; border: 1px solid var(--mm-border-color, #e5e7eb); border-radius: 8px; background: var(--mm-bg-color, #fff); box-shadow: 0 8px 24px #0002; }
 .workbench-tabs__menu-panel button { display: flex; width: 100%; }
+
+.project-sync-dialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; }
+.project-sync-dialog ul { padding-inline-start: 20px; overflow-wrap: anywhere; }
+.project-sync-dialog .project-dialog__actions { flex-wrap: wrap; }

@@ -5,8 +5,8 @@ import { setupHitlVfsBridge } from '../workspaces/hitl-bridge';
 import { createWorkspaceModule, type WorkspaceModule } from '../workspaces/module';
 import { SessionWorkbench, type SessionWorkbenchOptions } from './SessionWorkbench';
 
-interface ProjectModuleOptions extends Pick<SessionWorkbenchOptions, 'sidebar' | 'container' | 'factory' | 'fileFactory' | 'onSelect' | 'hostContext' | 'sessionSkills' | 'onSidebarReady' | 'initialResourceId' | 'uiPersistence' | 'workbenchState'> {
-    runtime: Pick<ApplicationRuntime, 'sessionRepository' | 'sessionFiles' | 'kernel' | 'directoryMounts' | 'sessionManager' | 'flowEngine' | 'projects' | 'commandBus'>;
+interface ProjectModuleOptions extends Pick<SessionWorkbenchOptions, 'sidebar' | 'container' | 'factory' | 'fileFactory' | 'onSelect' | 'hostContext' | 'sessionSkills' | 'onSidebarReady' | 'initialResourceId' | 'uiPersistence' | 'workbenchState' | 'projectSyncSetup'> {
+    runtime: Pick<ApplicationRuntime, 'sessionRepository' | 'sessionFiles' | 'kernel' | 'directoryMounts' | 'sessionManager' | 'flowEngine' | 'projects' | 'commandBus' | 'projectSync'>;
     createFlowContextMenu: AppUI['createFlowContextMenu'];
 }
 
@@ -15,7 +15,7 @@ export function createProjectModule(options: ProjectModuleOptions): WorkspaceMod
     const { runtime } = options, { sessionManager } = runtime;
     const workbench = new SessionWorkbench({ ...options, repository: runtime.sessionRepository,
         files: runtime.sessionFiles, kernel: runtime.kernel.kernel, directoryMounts: runtime.directoryMounts,
-        projects: runtime.projects,
+        projects: runtime.projects, projectSync: runtime.projectSync,
         manageMemory: async (id, signal) => showMemoryDialog(sessionManager.memory.forSession(id), await sessionManager.getAvailableAgents(), signal),
         flows: { fs: runtime.flowEngine.engine, menu: options.createFlowContextMenu({ commands: runtime.commandBus,
             navigate: id => options.hostContext?.navigate({ target: 'chat', resourceId: id }) ?? Promise.resolve() }) },

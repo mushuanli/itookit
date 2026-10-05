@@ -35,6 +35,13 @@ export class ProjectFavorites {
             ? items.filter(item => favoriteKey(item.target) !== key) : [...items, favorite]);
     }
     async remove(projectId: string, id: string): Promise<void> { await this.change(projectId, items => items.filter(item => item.id !== id)); }
+    async include(projectId: string, favorites: readonly ProjectFavorite[]): Promise<void> {
+        for (const item of favorites) validateTarget(item.target);
+        await this.change(projectId, items => {
+            const keys = new Set(items.map(item => favoriteKey(item.target)));
+            return [...items, ...favorites.filter(item => !keys.has(favoriteKey(item.target))).map(item => structuredClone(item))];
+        });
+    }
     async deleteFiles(projectId: string, paths: readonly string[]): Promise<void> {
         await this.change(projectId, items => withoutDeletedFiles(items, paths));
     }

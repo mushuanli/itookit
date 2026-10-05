@@ -82,3 +82,6 @@ const factory = factories[strategyType] ?? defaultEditorFactory;
 Files 页 Memory 管理使用固定 Session controls；冲突保留草稿并支持比较最新版本后显式重提。memory-sharing-dialog 经宿主 controls 管理资源、授权与审计，不从 UI 直接修改 SeqFile。
 
 - 项目导航的纯列表展示策略位于 `projects/navigation-policy.ts`。异步收藏解析/远程探测属于导航请求，过期结果不得覆盖新的页面。
+
+- `projects/sync` 提供项目同步菜单、预览与状态 UI；命令交给 ProjectSyncService，首次绑定经 AppOptions.projectSyncSetup 注入。面板不直接访问 HTTP 或 SeqFile，不把无在途操作显示为已同步；冲突选侧先生成新预览再确认执行。
+- `showProjectSyncSetup` 通过注入端口列出服务器的同步项目目录或新建目录；切换服务器使原列表失效。目录探测可关闭面板，绑定提交仍保存恢复依据；同步目录不是 export 路径。

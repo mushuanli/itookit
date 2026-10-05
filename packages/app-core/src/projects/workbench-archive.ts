@@ -80,7 +80,10 @@ export class WorkbenchArchiveExporter {
     }
     private async files(folder: string, paths: string[]): Promise<FileArchiveEntry[]> {
         const owner = await this.projects.openFiles(folder);
-        try { return await exportFileArchive(owner.fs, paths); } finally { await owner.dispose(); }
+        try {
+            const selected = paths.includes('/') ? (await owner.fs.driver.getChildren('/')).filter(node => node.name !== '.mindos').map(node => node.path) : paths;
+            return await exportFileArchive(owner.fs, selected);
+        } finally { await owner.dispose(); }
     }
     private async folder(path: string): Promise<WorkbenchArchiveItem> {
         const folder = this.folders.find(item => item.path === path);

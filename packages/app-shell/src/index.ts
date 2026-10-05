@@ -31,3 +31,5 @@ export type { ThemeMode } from './ThemeService';
 export { Workbench } from './core/Workbench';
 
 export { installMobileNavigation } from './navigation/mobile-navigation';
+export { showProjectSyncSetup } from './projects/sync/setup';
+export type { ProjectSyncSetupPorts } from './projects/sync/setup';
