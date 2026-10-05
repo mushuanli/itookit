@@ -958,19 +958,25 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     }
 
     private bindVFSEvents(): void {
-        const debounce = () => {
+        const debounce = (paths: string[]) => {
+            if (!paths.some(path => path === '/' || path === '/llm' || path.startsWith('/llm/'))) return;
             if (this._syncTimer) clearTimeout(this._syncTimer);
             this._syncTimer = setTimeout(async () => {
-                await this.connectionManager.reload();
-                await this.mcpManager.reload();
-                await this.skillManager.reload();
-                this.notify();
+                this._syncTimer = null;
+                try {
+                    await this.connectionManager.reload();
+                    await this.mcpManager.reload();
+                    await this.skillManager.reload();
+                    this.notify();
+                } catch (error) { console.error('[LLM config] refresh failed', error); }
             }, 300);
         };
         this._eventUnsubs.push(
-            this.engine.on('node:created', debounce),
-            this.engine.on('node:updated', debounce),
-            this.engine.on('node:deleted', debounce),
+            this.engine.on('node:created', event => debounce(event.payload.nodes.map(node => node.path))),
+            this.engine.on('node:updated', event => debounce(event.payload.nodes.map(node => node.path))),
+            this.engine.on('node:deleted', event => debounce(event.payload.requestedPaths)),
+            this.engine.on('node:moved', event => debounce(event.payload.nodes.flatMap(node => [node.oldPath, node.newPath]))),
+            this.engine.on('node:renamed', event => debounce(event.payload.nodes.flatMap(node => [node.oldPath, node.newPath]))),
         );
     }
 
