@@ -55,3 +55,7 @@ tests/test_sidecar/
 localhost-recording*.json
 /Trace-*.json
 /t[0-9]*.json
+
+# Local fs-agent executable and pre-upgrade backup
+/tools/svr
+/tools/svr.bak-before-autoinit

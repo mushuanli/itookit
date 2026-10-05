@@ -257,7 +257,7 @@ pnpm --filter @itookit/cli exec tsx tests/fixtures/profile-boot-cost.ts
 pnpm --filter @itookit/vfsdriver-local test -- tests/25-journal-probe.test.ts
 
 # 两进程 SIGKILL / 跨进程可见性
-pnpm --filter @itookit/vfsdriver-local test -- tests/20-kernel-ipc.test.ts
+pnpm --filter @itookit/cli test -- tests/20-kernel-ipc.test.ts
 
 # 会话恢复写入预算（干净恢复 0 写、记录读次数上限）
 pnpm --filter @itookit/durable-kernel test -- src/session-open-cost.test.ts
