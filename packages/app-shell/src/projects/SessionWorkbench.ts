@@ -1018,7 +1018,10 @@ export class SessionWorkbench implements WorkspaceController {
     private async creationFolder(parent?: string | null): Promise<string | null> {
         const root = this.sidebarUI?.getContentRoot?.();
         const selected = this.active?.startsWith('/') ? this.active : this.sidebarUI?.getActiveSession()?.id;
-        const path = parent ?? (root && selected?.startsWith(root + '/') ? selected : root) ?? selected ?? (this.active?.startsWith('draft:') ? folderBrowserPath(this.projectNavigation?.currentProject()?.path) : this.active);
+        const draftProject = parent == null && this.active?.startsWith('draft:') && this.projects
+            ? await this.projects.get(this.active.slice(6)) : undefined;
+        const path = parent ?? (draftProject ? folderBrowserPath(draftProject.path) : undefined)
+            ?? (root && selected?.startsWith(root + '/') ? selected : root) ?? selected ?? this.active;
         let folder = path ? folderPathFromBrowserPath(path) : null;
         if (path && !isFlowPath(path)) {
             const target = resolveBrowserTarget(path.startsWith('/') ? path : '/' + path);
@@ -1184,9 +1187,10 @@ export class SessionWorkbench implements WorkspaceController {
         const work = this.tail.then(async () => {
             await this.leaveEditor(); load.check();
             this.container.inert = false; this.container.classList.remove('project-workbench--offline');
-            await this.projectNavigation?.sync(folderBrowserPath(folder), { draft: true }); load.check();
             const project = await this.projects?.forFolder(folder);
+            load.check();
             if (!project || !this.projects || !folder) throw new Error('Project required for a draft');
+            this.projectNavigation?.showDraft(project);
             const draftId = `draft:${project.project.id}`;
             const retained = this.tabs.get(draftId);
             await this.tabs.open(draftId, t('project.createSession'), false);

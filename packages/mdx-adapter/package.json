@@ -45,13 +45,13 @@
   "dependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/ui-common": "workspace:*",
-    "@itookit/vfs-core": "workspace:*"
+    "@itookit/vfs-core": "5.3.1"
   },
   "peerDependencies": {
-    "@itookit/mdxeditor": "workspace:*"
+    "@itookit/mdxeditor": "0.5.1"
   },
   "devDependencies": {
-    "@itookit/mdxeditor": "workspace:*",
+    "@itookit/mdxeditor": "0.5.1",
     "@types/node": "^20.19.25",
     "jsdom": "^27.2.0",
     "tsup": "^8.5.1",

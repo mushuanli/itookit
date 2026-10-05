@@ -164,7 +164,7 @@ function step(state, event) {
 
 ## 8. SeqFile 与普通文件各做什么
 
-当前 [SeqFile 接口](../../packages/vfs-core/src/interfaces/capabilities/seq-file.ts) 的 `ISeqFileOperations` 提供 getEntry/getEntries/setEntry/setEntries/deleteEntry/hasEntry/walkEntries 和可选的 `transaction`；CAS/increment/append 只在事务内的 `ISeqFileTransaction` 上，事务可跨同一后端的多个 SeqFile。它本质上是带有序键的记录空间，不是普通 JSONL 日志。Kernel 要求真实 transactionalSeqFiles；整体文件覆盖式 fallback 不满足多进程恢复要求。
+当前 [SeqFile 接口](https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/capabilities/seq-file.ts) 的 `ISeqFileOperations` 提供 getEntry/getEntries/setEntry/setEntries/deleteEntry/hasEntry/walkEntries 和可选的 `transaction`；CAS/increment/append 只在事务内的 `ISeqFileTransaction` 上，事务可跨同一后端的多个 SeqFile。它本质上是带有序键的记录空间，不是普通 JSONL 日志。Kernel 要求真实 transactionalSeqFiles；整体文件覆盖式 fallback 不满足多进程恢复要求。
 
 | 存储 | 放什么 | 不放什么 |
 |---|---|---|
@@ -175,9 +175,9 @@ function step(state, event) {
 
 普通内容发布顺序：先写完整不可变 blob，校验 hash/长度并达到 backend 声明的持久级别，再用 SeqFile 事务提交引用、状态和消息；事务失败只留下未引用内容，由保留策略清理。SeqFile 回滚不会回滚普通文件。对象存储可用唯一 key + 完成写确认，不能强制所有后端支持 rename；文件系统上的 atomic rename 也不等于掉电持久，需对应 sync 契约。
 
-这是 [FSDriver 事务接口](../../packages/vfs-core/src/interfaces/services/fs-driver.ts) 已明确的边界：文件操作原子性取决于 backend；记录原子性由 `meta.seq.transaction` 提供。Memory 只能验证算法，SQLite 的事务隔离/提交持久配置、IndexedDB 的持久策略和真实进程故障仍需验收。
+这是 [FSDriver 事务接口](https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/services/fs-driver.ts) 已明确的边界：文件操作原子性取决于 backend；记录原子性由 `meta.seq.transaction` 提供。Memory 只能验证算法，SQLite 的事务隔离/提交持久配置、IndexedDB 的持久策略和真实进程故障仍需验收。
 
-最小 durable mailbox = SeqFile 消息/ref + 幂等 identity + 消费记录 + Task checkpoint 原子提交。payload 可放普通文件。现有 [pipe()](../../packages/vfs-core/src/utils/pipe.ts) 只有运行时复制循环，没有这些记录；不能直接作为 durable IPC 使用。
+最小 durable mailbox = SeqFile 消息/ref + 幂等 identity + 消费记录 + Task checkpoint 原子提交。payload 可放普通文件。现有 [pipe()](https://github.com/mushuanli/vfs-core/blob/main/src/utils/pipe.ts) 只有运行时复制循环，没有这些记录；不能直接作为 durable IPC 使用。
 
 资源表只给普通文件增加身份/权限/生命周期，不能把任意可变文件自动变成事务型共享内存。共享小状态用 SeqFile CAS；共享大状态发布新 blob 并 CAS head。相同 blob 的 metadata/引用参与同一回收屏障；不能在提交引用前被 GC 误删。
 

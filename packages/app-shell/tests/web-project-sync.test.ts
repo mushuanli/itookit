@@ -1,5 +1,5 @@
 // @vitest-environment node
-import '../../vfsdriver-indexeddb/tests/setup';
+import 'fake-indexeddb/auto';
 import { expect, it, vi } from 'vitest';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
 import { IndexedDBSyncStore } from '@itookit/sync-adapters';
-import { createHttpSourceProvider } from '../../vfsdriver-agent/src/provider';
+import { createHttpSourceProvider } from '@itookit/vfsdriver-agent';
 import { webcrypto } from 'node:crypto';
 import { randomId } from '@itookit/vfs-sync';
 import type { ProjectService } from '@itookit/app-core';

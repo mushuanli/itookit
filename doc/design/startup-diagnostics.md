@@ -43,7 +43,7 @@ CLI 使用 `uncaughtExceptionMonitor` 记录致命异常，不安装吞错的异
 - `packages/app-shell/tests/tauri-sidecar-close.test.ts`：宿主 pool 命令接线、定向关闭、初始化失败保留原因、暖启动跳过 DDL、缺对象补齐。
 - `apps/tauri-app/src-tauri/src/sidecar.rs`：真实 SQLite 验证重载回滚、旧代次/旧 close 拒绝、pool 租约转移、等待中 begin 拒绝、其它窗口隔离和新事务提交；另有单测固定「失败语句、慢阶段或需要新建连接时记录」、追踪开关的真值解析，以及真实 pool 上失败与解码路径仍留下计时。
 - `apps/cli/tests/http-server.test.ts`：HTTP 宿主跨页面复用连接、拒绝旧 scope close，并保持记录可读。
-- `packages/vfsdriver-local/tests/25-journal-probe.test.ts`：journal 初始化失败关闭 sidecar，随后可重试。
+- `https://github.com/mushuanli/vfsdriver-local/blob/main/tests/25-journal-probe.test.ts`：journal 初始化失败关闭 sidecar，随后可重试。
 - `apps/cli/tests/diagnostics.test.ts`：轮换/长度限制、真实 CLI 缺文件失败、未捕获异常/未处理 rejection 的落盘与失败退出码、stdout 不受影响。
 
 2026-09-22 Linux 真实 Tauri 临时 profile 验收：首次完整 bootstrap 9828 ms，留下一笔未提交事务后刷新为 2246 ms；原生 `sidecar.scope.open` 记录回滚 1 笔事务，重载后未提交记录不存在，新事务提交可读。上述为本机虚拟显示器中的单次观测，首次启动包含默认配置初始化，不能作为同一场景优化前后的速度比较。验收使用真实应用入口和真实 Rust IPC，仅在临时构建中注入诊断事件观察钩子。
@@ -103,7 +103,7 @@ Context GC 的 `observeSession` 不再枚举全部 Session 寻找一条记录：
 
 桌面 workspace intent 核对在没有待处理 intent 文件时直接返回（不再 inspect Session、读全部 Task 与 workspace lease），`.intents` 目录每个进程只创建一次。LLM 设备节点按每批 8 个并发创建（父目录先建），节点数很多时不会无限并发。`VFSUIShell.start()` 新增 `vfsUi.loadData` / `vfsUi.restoreExpansion` 两个 `traceBoot`，用于区分侧栏读数据与展开恢复；`create-application-runtime` 新增 `resumeSessionDeletions`、`recoverSessionsWithLeases` 两个 `traceBoot`，以及 `beforeRecover totals`（`adoptSession` / `platformBeforeRecovery` / `contextGcObserve` 逐 Session 累加后打印一次，避免逐 Session 刷屏）。
 
-`createVFS` 的额外挂载改走 `mountBackends`：互不相关的后端并发 `prepare`（init + 根校验），再按声明顺序 `register`，因此 `mountId` 与 `listMounts()` 顺序保持确定；准备阶段失败时关闭本次已准备但未注册的后端（`close` 幂等），注册阶段失败只关闭尚未注册的尾部。原来的单点 `mountBackend` 仍是 `prepare + register`，语义不变。回归在 `packages/vfs-core/tests/11-mount.test.ts`：批量挂载保持声明顺序与不同 ID、失败时关闭已准备后端、同批重复路径拒绝并关闭未被注册的那个。注意基线 `IO after createVFS: stat=9` 说明该阶段读取很少，收益主要来自并发准备而非减少调用，需同场景桌面数据确认。
+`createVFS` 的额外挂载改走 `mountBackends`：互不相关的后端并发 `prepare`（init + 根校验），再按声明顺序 `register`，因此 `mountId` 与 `listMounts()` 顺序保持确定；准备阶段失败时关闭本次已准备但未注册的后端（`close` 幂等），注册阶段失败只关闭尚未注册的尾部。原来的单点 `mountBackend` 仍是 `prepare + register`，语义不变。回归在 `https://github.com/mushuanli/vfs-core/blob/main/tests/11-mount.test.ts`：批量挂载保持声明顺序与不同 ID、失败时关闭已准备后端、同批重复路径拒绝并关闭未被注册的那个。注意基线 `IO after createVFS: stat=9` 说明该阶段读取很少，收益主要来自并发准备而非减少调用，需同场景桌面数据确认。
 
 ### 2026-09-27 第三轮：重载身份、目录懒连接与调用标记
 
@@ -129,7 +129,7 @@ Kernel 的 Task 扫描原本是「每个 Task 读一次记录」：`listTasks`/`
 
 durable-kernel 的 `taskEntries`（`listTasks`/`listTaskIds` 共用）改为：一次目录枚举 → 在一个事务内一次 `getEntriesMany` 读全部 Task 记录 → 崩溃残留的空目录（无 seq 文件）自然得到 `null` 并被跳过。实测（CLI 引导成本 fixture，临时 LocalFS + Node SQLite，3 Session + 9 个终态 Task）：sidecar 调用 **994 → 814**，事务 **220 → 175**；`getRecordField` 热点中的 `tasks/task_<uuid>/task.seq :: record` 由每次 1 条降为 9 次批量调用（每次 3 条请求）。3 个空 Session 场景（无 Task）保持 **697 / 157** 不变，作为该改动只影响 Task 扫描路径的对照组。
 
-回归：`packages/vfs-core/tests/06-seq-file.test.ts`（请求顺序与缺失 → `null`、事务内同样语义、后端批量能力被调用一次、后端缺少能力时退化）、`packages/durable-kernel/src/protocol.test.ts`「reads Task records once per scan and observes later changes while skipping crash leftovers」（现在断言一次事务内的一次批量调用，且崩溃残留目录被请求但不产出 Task）、`packages/durable-kernel/src/session-open-cost.test.ts`（干净恢复仍为 0 次投影写入，Task 记录读收敛为一次批量读、事务数上限不变）。
+回归：`https://github.com/mushuanli/vfs-core/blob/main/tests/06-seq-file.test.ts`（请求顺序与缺失 → `null`、事务内同样语义、后端批量能力被调用一次、后端缺少能力时退化）、`packages/durable-kernel/src/protocol.test.ts`「reads Task records once per scan and observes later changes while skipping crash leftovers」（现在断言一次事务内的一次批量调用，且崩溃残留目录被请求但不产出 Task）、`packages/durable-kernel/src/session-open-cost.test.ts`（干净恢复仍为 0 次投影写入，Task 记录读收敛为一次批量读、事务数上限不变）。
 
 剩余可继续压缩的同类热点（本轮未动）：每个 Task 仍有约 3 次 `getMetaExt`（`tasks/task_<uuid>` 前缀检查/元数据读取）与 `graph.seq` 的 `listRecordFields` 前缀遍历；`session.seq :: record` 每个事务重复读取一次（`requireSessionTx`）。这些都不属于「按 Task 逐条记录读」，需要各自的批量原语。
 
@@ -151,7 +151,7 @@ durable-kernel 的 `taskEntries`（`listTasks`/`listTaskIds` 共用）改为：�
 
 启动只恢复项目/会话分组及 Flow 库的展开，不恢复历史项目文件分支；恢复深层文件路由时，正文先打开，侧栏随后仅展开定位需要的祖先。后台导航串行执行，路由切换使旧查询/选择失效，销毁时等待在途任务后释放资源。`VFSUIShell.selectPath` 采用选择版本，慢目录返回后不能发出过期的选中事件。
 
-新增 `projectFile.source`、`projectFile.type`、`projectFile.read`、`projectFile.editor`、`projectFile.navigation` 分段诊断。回归位于 `packages/app-shell/tests/project-navigation-reads.test.ts`（历史文件展开不打开项目目录、导航被阻塞时正文先就绪、文件导航不读会话摘要），以及 `packages/vfs-ui/tests/06-browser-navigation.test.ts`（慢祖先枚举后丢弃过期选择）。真实项目 UI 与启动路由测试继续覆盖编辑、保存、重命名及旧链接恢复。
+新增 `projectFile.source`、`projectFile.type`、`projectFile.read`、`projectFile.editor`、`projectFile.navigation` 分段诊断。回归位于 `packages/app-shell/tests/project-navigation-reads.test.ts`（历史文件展开不打开项目目录、导航被阻塞时正文先就绪、文件导航不读会话摘要），以及 `https://github.com/mushuanli/vfs-ui/blob/main/tests/06-browser-navigation.test.ts`（慢祖先枚举后丢弃过期选择）。真实项目 UI 与启动路由测试继续覆盖编辑、保存、重命名及旧链接恢复。
 
 边界：目录列举仍读取当前目录的全部直接子项，尚未实现分页；正文仍整文件读取与解码。此轮减少首屏前置工作，并把目录导航移出正文等待链，不代表单次目录列举或大文件渲染已经加速。桌面实际耗时需结合新增分段日志复测。
 

@@ -77,25 +77,25 @@
 | 场景 | 文件 |
 |---|---|
 | LLMDeviceDriver（IDeviceDriver + LLM_IOCTL） | `kernel-adapters/src/llm-management/device/llm-device-driver.ts` |
-| Provider 基类 + OpenAI/Responses/Anthropic/Gemini | `driver-llm/src/providers/` |
-| Responses API（web_search/reasoning/citations） | `driver-llm/src/providers/responses.ts` |
-| Gemini grounding citations | `driver-llm/src/providers/gemini.ts` |
+| Provider 基类 + OpenAI/Responses/Anthropic/Gemini | `https://github.com/mushuanli/driver-llm/blob/main/src/providers/` |
+| Responses API（web_search/reasoning/citations） | `https://github.com/mushuanli/driver-llm/blob/main/src/providers/responses.ts` |
+| Gemini grounding citations | `https://github.com/mushuanli/driver-llm/blob/main/src/providers/gemini.ts` |
 | MCP 客户端 | `kernel-adapters/src/llm-management/skills/mcp-client.ts` |
-| LLM 错误族 | `driver-llm/src/errors.ts` |
+| LLM 错误族 | `https://github.com/mushuanli/driver-llm/blob/main/src/errors.ts` |
 
 ## VFS（@itookit/vfs-core）
 
 | 场景 | 文件 |
 |---|---|
-| 协议 barrel（接口/类型/常量） | `vfs-core/src/protocol.ts`、`interfaces/` |
-| createVFS 工厂 | `vfs-core/src/impl/factory.ts` |
-| VFSEngine / VFSManager / FileSystemView | `vfs-core/src/impl/engine/`、`impl/services/` |
-| 通用 IO（IIOStream + pipe） | `vfs-core/src/interfaces/`、`impl/file-io/` |
-| 事件总线（EventBus/FSEventBus） | `vfs-core/src/eventbus/`、`impl/event/` |
-| IndexedDB 后端 | `vfsdriver-indexeddb/src/` |
-| HTTP 外挂驱动 | `vfsdriver-agent/src/` |
+| 协议 barrel（接口/类型/常量） | `https://github.com/mushuanli/vfs-core/blob/main/src/protocol.ts`、`interfaces/` |
+| createVFS 工厂 | `https://github.com/mushuanli/vfs-core/blob/main/src/impl/factory.ts` |
+| VFSEngine / VFSManager / FileSystemView | `https://github.com/mushuanli/vfs-core/blob/main/src/impl/engine/`、`impl/services/` |
+| 通用 IO（IIOStream + pipe） | `https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/`、`impl/file-io/` |
+| 事件总线（EventBus/FSEventBus） | `https://github.com/mushuanli/vfs-core/blob/main/src/eventbus/`、`impl/event/` |
+| IndexedDB 后端 | `https://github.com/mushuanli/vfsdriver-indexeddb/blob/main/src/` |
+| HTTP 外挂驱动 | `https://github.com/mushuanli/vfsdriver-agent/blob/main/src/` |
 | 远程连接与项目 | `app-core/src/projects/remote-mounts.ts`、`app-core/src/projects/remote-mount-store.ts`、`app-core/src/projects/remote-connections.ts`、`app-shell/src/files/RemoteFilesSettingsEditor.ts`、`app-shell/src/files/remote-project-fields.ts` |
-| LocalFS 后端 | `vfsdriver-local/src/localfs-backend.ts` |
+| LocalFS 后端 | `https://github.com/mushuanli/vfsdriver-local/blob/main/src/localfs-backend.ts` |
 
 ## CLI（@itookit/cli）
 
@@ -115,10 +115,10 @@
 | 流式历史 / Session 渲染 | `llm-ui/src/components/history/` |
 | 会话事件消费 | `llm-ui/src/shell/SessionEventHandler.ts` |
 | DagWorkbench（流程可视化） | `llm-ui/src/components/DagWorkbench.ts` |
-| VFSUIShell（文件树） | `vfs-ui/src/shell/` |
-| 资源浏览契约与数据源 | `vfs-ui/src/browser/`、`vfs-ui/src/contracts/source.ts` |
+| VFSUIShell（文件树） | `https://github.com/mushuanli/vfs-ui/blob/main/src/shell/` |
+| 资源浏览契约与数据源 | `https://github.com/mushuanli/vfs-ui/blob/main/src/browser/`、`https://github.com/mushuanli/vfs-ui/blob/main/src/contracts/source.ts` |
 | 文件编辑器装配与预览 | `app-shell/src/browser/` |
-| MDX 编辑器 | `packages/mdx/src/` |
+| MDX 编辑器 | [mdxeditor/src](https://github.com/mushuanli/mdxeditor/tree/main/src) |
 | MDX 宿主/VFS 适配 | `packages/mdx-adapter/src/` |
 | 设置（Provider/Connection/Agent/MCP/Skill/Cost） | `packages/llm-settings-ui/src/editors/` |
 

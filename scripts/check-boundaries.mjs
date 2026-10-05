@@ -4,6 +4,7 @@ import { resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { builtinModules } from 'node:module';
 import ts from 'typescript';
+import { libraries } from './npm-libraries.mjs';
 
 const application = new Set(['@itookit/app-core', '@itookit/app-shell', '@itookit/app-settings']);
 const coreDependencies = new Set(['common', 'llm-context', 'vfs-core', 'durable-kernel', 'kernel-adapters',
@@ -144,6 +145,11 @@ async function readPackages(root, group) {
 
 export async function checkBoundaries(root) {
     const packages = (await Promise.all(['packages', 'apps'].map(group => readPackages(root, group)))).flat();
+    for (const library of libraries) {
+        if (packages.some(pkg => pkg.name === library.name)) continue;
+        const dir = resolve(root, 'node_modules', library.name);
+        packages.push({ ...JSON.parse(await readFile(resolve(dir, 'package.json'), 'utf8')), dir, external: true });
+    }
     const errors = [];
     for (const pkg of packages) {
         for (const name of Object.keys({ ...pkg.dependencies, ...pkg.peerDependencies })) {
@@ -152,7 +158,7 @@ export async function checkBoundaries(root) {
             const error = target?.host ? 'packages must not depend on app hosts' : manifestDependencyError(pkg.name, name);
             if (error) errors.push(`${relative(root, pkg.dir)}/package.json: ${error} (${name})`);
         }
-        for (const file of await filesIn(resolve(pkg.dir, 'src'))) {
+        for (const file of pkg.external ? [] : await filesIn(resolve(pkg.dir, 'src'))) {
             if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(file)) continue;
             errors.push(...sourceErrors(pkg, file, await readFile(file, 'utf8'), packages));
         }

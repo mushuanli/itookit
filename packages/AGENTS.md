@@ -1,6 +1,6 @@
 # packages/ 模块协作指南
 
-22 个 package + 4 个 app 的协作关系（`packages/{coreutils,harness,llm-programs,stdio}` 无 package.json，非包）。各模块自身的架构和命令详见 `packages/<pkg>/AGENTS.md`。
+20 个工作区 package + 4 个 app（另有 8 个独立 npm 库） 的协作关系（`packages/{coreutils,harness,llm-programs,stdio}` 无 package.json，非包）。各模块自身的架构和命令详见 `packages/<pkg>/AGENTS.md`。
 
 ## 模块分层
 
@@ -62,7 +62,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 
 | 任务 | 文档引用 |
 |---|---|
-| 新增 Provider | [dev-patterns](../doc/dev-patterns.md) → `driver-llm/AGENTS.md` |
+| 新增 Provider | [dev-patterns](../doc/dev-patterns.md) → `https://github.com/mushuanli/driver-llm/blob/main/AGENTS.md` |
 | 修改 ChatInput UI | [file-index](../doc/file-index.md) `#chat-input` |
 | 新增 i18n | [dev-patterns](../doc/dev-patterns.md) `#i18n` → `common/AGENTS.md` |
 | 新增工具 | [dev-patterns](../doc/dev-patterns.md) `#tools` → `tools/AGENTS.md` |

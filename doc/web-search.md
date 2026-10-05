@@ -111,9 +111,9 @@ Provider.collectCitations
 | `resolveWebSearchStrategy` | `kernel-adapters/src/llm-management/contracts/connection.ts` | 纯函数，`(capabilities?, enabled?, protocol?) → WebSearchMode` |
 | `LLMProvider.capabilities.serverSideWebSearch` | `kernel-adapters/src/llm-management/contracts/connection.ts` | 服务端内置联网搜索能力（唯一事实源） |
 | `LLMProvider.responses.defaultThinkingEnabled` | `kernel-adapters/src/llm-management/contracts/connection.ts` | Responses 推理行为（DeepSeek 默认开启思考） |
-| `Citation` | `driver-llm/src/types/response.ts` | `{ text, source?, title?, page?, url? }`，统一 web_search / grounding / MCP 来源 |
+| `Citation` | `https://github.com/mushuanli/driver-llm/blob/main/src/types/response.ts` | `{ text, source?, title?, page?, url? }`，统一 web_search / grounding / MCP 来源 |
 | `ExecutorConfig.webSearchMode` | `llm-session/core/types.ts` | 三态策略下发到 Direct Chat 编排层 |
-| `ChatCompletionParams.webSearch` | `driver-llm/src/types/response.ts` | 请求级布尔，仅 `builtin` 态为 true |
+| `ChatCompletionParams.webSearch` | `https://github.com/mushuanli/driver-llm/blob/main/src/types/response.ts` | 请求级布尔，仅 `builtin` 态为 true |
 
 ## 5. Provider 适配矩阵
 
@@ -134,8 +134,8 @@ Provider.collectCitations
 | 策略解析 | `llm-session/src/session/agent-resolver.ts` |
 | 派生 + 剥离客户端工具 + 事件投影 | `llm-session/src/session/conversation-run-coordinator.ts` |
 | override（toggle 关闭 → disabled） | `llm-session/src/session/session-run-coordinator.ts` |
-| Responses API（web_search/reasoning/citations） | `driver-llm/src/providers/responses.ts` |
-| Gemini grounding citations | `driver-llm/src/providers/gemini.ts` |
+| Responses API（web_search/reasoning/citations） | `https://github.com/mushuanli/driver-llm/blob/main/src/providers/responses.ts` |
+| Gemini grounding citations | `https://github.com/mushuanli/driver-llm/blob/main/src/providers/gemini.ts` |
 | citations 事件发射 + 流式聚合 | `kernel-adapters/src/effects/llm-chat-effect.ts` |
 | citations 渲染 | `llm-ui/src/components/{HistoryView,history/StreamController,templates/NodeTemplates}.ts` |
 | 联网搜索开关 | `llm-ui/src/components/input/ChatInputView.ts`、`templates/ChatInputTemplates.ts` |

@@ -7,7 +7,8 @@
 // 等，Web 端漏了另一批），长驻 dev server 因此在改库源码后可能同时提供新旧两份转译结果，
 // 表现为 `x is not a function`。这里改成单一来源，两端都从这里取。
 //
-// 维护：新增/删除 package 后更新 `WORKSPACE_SOURCES`（条目必须存在且能被浏览器打包）。
+// Registry libraries resolve through package exports and must not appear in this source map.
+// 维护：新增/删除本地 package 后更新 `WORKSPACE_SOURCES`（条目必须存在且能被浏览器打包）。
 
 import path from 'node:path';
 
@@ -18,7 +19,6 @@ export const WORKSPACE_SOURCES = [
     ['@itookit/app-shell', 'packages/app-shell/src/index.ts'],
     ['@itookit/common', 'packages/common/src/index.ts'],
     ['@itookit/llm-context', 'packages/llm-context/src/index.ts'],
-    ['@itookit/driver-llm', 'packages/driver-llm/src/index.ts'],
     ['@itookit/device-tty', 'packages/device-tty/src/index.ts'],
     ['@itookit/durable-kernel', 'packages/durable-kernel/src/index.ts'],
     ['@itookit/kernel-adapters', 'packages/kernel-adapters/src/index.ts'],
@@ -27,14 +27,9 @@ export const WORKSPACE_SOURCES = [
     ['@itookit/llm-settings-ui', 'packages/llm-settings-ui/src/index.ts'],
     ['@itookit/llm-tasks', 'packages/llm-tasks/src/index.ts'],
     ['@itookit/llm-ui', 'packages/llm-ui/src/index.ts'],
-    ['@itookit/mdxeditor', 'packages/mdx/src/index.ts'],
     ['@itookit/sanbox', 'packages/sanbox/src/index.ts'],
     ['@itookit/tools', 'packages/tools/src/index.ts'],
     ['@itookit/ui-common', 'packages/ui-common/src/index.ts'],
-    ['@itookit/vfs-core', 'packages/vfs-core/src/index.ts'],
-    ['@itookit/vfs-ui', 'packages/vfs-ui/src/index.ts'],
-    ['@itookit/vfsdriver-indexeddb', 'packages/vfsdriver-indexeddb/src/index.ts'],
-    ['@itookit/vfsdriver-local', 'packages/vfsdriver-local/src/index.ts'],
 ];
 
 /**
@@ -48,8 +43,6 @@ const WORKSPACE_SUBPATHS = [
     ['@itookit/app-shell/navigation.css', 'packages/app-shell/src/styles/navigation.css'],
     ['@itookit/app-settings/style.css', 'packages/app-settings/src/styles/styles.css'],
     ['@itookit/llm-ui/style.css', 'packages/llm-ui/src/styles/index.css'],
-    ['@itookit/mdxeditor/style.css', 'packages/mdx/src/styles/index.css'],
-    ['@itookit/vfs-ui/style.css', 'packages/vfs-ui/src/styles/index.css'],
 ];
 
 /** 仓库根目录：调用方（vite.config.ts）用 `path.resolve(__dirname, '../..')` 传入。 */

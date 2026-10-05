@@ -17,7 +17,7 @@ interface Actions {
 }
 /** Compatibility hint: favorites may preserve selection while their file opens. */
 export type ProjectFileView = 'preserve' | 'directory';
-export interface ProjectNavigationOptions { reveal?: boolean; project?: ProjectFolder; draft?: boolean; preserveProject?: boolean; fileView?: ProjectFileView }
+export interface ProjectNavigationOptions { reveal?: boolean; project?: ProjectFolder; preserveProject?: boolean; fileView?: ProjectFileView }
 
 /** Project context replaces the contents of one sidebar; file details belong to main tabs. */
 export class ProjectNavigation {
@@ -99,8 +99,14 @@ export class ProjectNavigation {
         button.onclick = () => { void action().catch(this.actions.report); };
     }
     cancelPending(): void { ++this.revision; }
+    showDraft(project: ProjectFolder): void {
+        this.cancelPending();
+        this.session = undefined;
+        this.draftActive = this.project?.project.id === project.project.id;
+        this.create.setAttribute('aria-current', this.draftActive ? 'page' : 'false');
+    }
     async sync(path: string, options: ProjectNavigationOptions = {}): Promise<void> {
-        this.path = path; this.draftActive = options.draft ?? false;
+        this.path = path; this.draftActive = false;
         const target = resolveBrowserTarget(path); this.session = 'sessionId' in target ? target.sessionId : undefined;
         const revision = ++this.revision;
         const snapshot = await this.projects.sessions.navigation({ includeSessions: target.kind !== 'project-files' });

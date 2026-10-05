@@ -10,35 +10,3 @@
 [submodule "tools/fs-agent"]
 	path = tools/fs-agent
 	url = git@github.com:mushuanli/fs-agent.git
-[submodule "packages/vfs-core"]
-	path = packages/vfs-core
-	url = git@github.com:mushuanli/vfs-core.git
-	branch = main
-[submodule "packages/vfs-ui"]
-	path = packages/vfs-ui
-	url = git@github.com:mushuanli/vfs-ui.git
-	branch = main
-
-[submodule "packages/vfsdriver-indexeddb"]
-	path = packages/vfsdriver-indexeddb
-	url = git@github.com:mushuanli/vfsdriver-indexeddb.git
-	branch = main
-
-[submodule "packages/vfsdriver-local"]
-	path = packages/vfsdriver-local
-	url = git@github.com:mushuanli/vfsdriver-local.git
-	branch = main
-
-[submodule "packages/vfsdriver-agent"]
-	path = packages/vfsdriver-agent
-	url = git@github.com:mushuanli/vfsdriver-agent.git
-	branch = main
-
-[submodule "packages/vfs-sync"]
-	path = packages/vfs-sync
-	url = git@github.com:mushuanli/vfs-sync.git
-	branch = main
-[submodule "packages/driver-llm"]
-	path = packages/driver-llm
-	url = git@github.com:mushuanli/driver-llm.git
-	branch = main

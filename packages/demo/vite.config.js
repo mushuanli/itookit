@@ -9,17 +9,12 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
 
       // ========== CSS 别名 ==========
-      '@itookit/vfs-ui/style.css': path.resolve(__dirname, '../../packages/vfs-ui/src/styles/index.css'),
-      '@itookit/mdxeditor/style.css': path.resolve(__dirname, '../../packages/mdx/src/styles/index.css'),
       '@itookit/llm-ui/style.css': path.resolve(__dirname, '../../packages/llm-ui/src/styles/index.css'),
       '@itookit/app-settings/style.css': path.resolve(__dirname, '../../packages/app-settings/src/styles/styles.css'),
 
       // ========== 包别名（指向源码）==========
       '@itookit/common': path.resolve(__dirname, '../../packages/common/src/index.ts'),
       '@itookit/vfs': path.resolve(__dirname, '../../packages/vfs/src/index.ts'),
-      '@itookit/mdxeditor': path.resolve(__dirname, '../../packages/mdx/src/index.ts'),
-      '@itookit/vfs-ui': path.resolve(__dirname, '../../packages/vfs-ui/src/index.ts'),
-      '@itookit/driver-llm': path.resolve(__dirname, '../../packages/driver-llm/src/index.ts'),
       '@itookit/llm-ui': path.resolve(__dirname, '../../packages/llm-ui/src/index.ts'),
       '@itookit/app-settings': path.resolve(__dirname, '../../packages/app-settings/src/index.ts'),
     },
@@ -39,9 +34,6 @@ export default defineConfig({
     exclude: [
       '@itookit/common',
       '@itookit/vfs',
-      '@itookit/mdxeditor',
-      '@itookit/vfs-ui',
-      '@itookit/driver-llm',
       '@itookit/llm-ui',
       '@itookit/app-settings'
     ],

@@ -26,15 +26,15 @@
 
 | 当前实现 | 可复用能力 / 缺口 |
 |---|---|
-| [IStorageBackend](../../packages/vfs-core/src/interfaces/storage/backend.ts) | 路径式后端接口；metadata/tags 仍为必需方法，write 只接收完整字节 |
-| [FileSystemSource](../../packages/vfs-core/src/impl/services/FileSystemSource.ts) | 将外部 backend 包装为独立来源，不向外部目录初始化系统目录 |
-| [FileSystemView](../../packages/vfs-core/src/impl/services/FileSystemView.ts) | 挂载映射、只读校验、前缀类型检查和释放；目前 dispose 等待活动操作，没有主动取消 |
-| [VFSEngine](../../packages/vfs-core/src/impl/engine/vfs-engine.ts) | 目前 expectedVersion 为先 stat 再 write；append/offset 为客户端读改写 |
-| [能力探测](../../packages/vfs-core/src/impl/engine/capabilities.ts) | 部分能力默认 true，须改为真实能力派生 |
+| [IStorageBackend](https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/storage/backend.ts) | 路径式后端接口；metadata/tags 仍为必需方法，write 只接收完整字节 |
+| [FileSystemSource](https://github.com/mushuanli/vfs-core/blob/main/src/impl/services/FileSystemSource.ts) | 将外部 backend 包装为独立来源，不向外部目录初始化系统目录 |
+| [FileSystemView](https://github.com/mushuanli/vfs-core/blob/main/src/impl/services/FileSystemView.ts) | 挂载映射、只读校验、前缀类型检查和释放；目前 dispose 等待活动操作，没有主动取消 |
+| [VFSEngine](https://github.com/mushuanli/vfs-core/blob/main/src/impl/engine/vfs-engine.ts) | 目前 expectedVersion 为先 stat 再 write；append/offset 为客户端读改写 |
+| [能力探测](https://github.com/mushuanli/vfs-core/blob/main/src/impl/engine/capabilities.ts) | 部分能力默认 true，须改为真实能力派生 |
 | [SessionFilesService](../../packages/app-core/src/vfs/session-files.ts) | sourceId 注册、授权挂载、revision、不可用来源占位 |
 | [DirectoryMountService](../../packages/app-core/src/vfs/directory-mounts.ts) | 当前来源是内部/宿主目录，并被转换为进程目录 |
 | [ProjectService](../../packages/app-core/src/projects/project-service.ts) | 当前项目绑定单一 directory；项目级额外挂载尚不存在 |
-| [文件发现接口](../../packages/vfs-core/src/interfaces/services/file-discovery.ts) | 已有 signal，但普通文件接口尚未端到端传播 |
+| [文件发现接口](https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/services/file-discovery.ts) | 已有 signal，但普通文件接口尚未端到端传播 |
 
 现有 [CLI HTTP 模式](../http-mode.md) 是宿主桥接与应用服务，不等同于本文文件协议。项目授权继续遵守 [Session 挂载与访问边界](./vfs-session-mount-access.md)，本文提出的项目组合视图是其增量扩展。
 
@@ -253,7 +253,7 @@ If-Match 使用强比较，If-Range 不匹配会忽略 Range；以上行为依�
 
 上传使用一次 PUT，不支持跨多个请求持续追加上传数据；未来若引入分块上传、快照游标、订阅或远程句柄，必须另行定义 open/finish/abort、租约和遗弃回收，不能直接复用 operationId 当会话 ID。未来 watch 才需要显式订阅生命周期，当前不实现。
 
-现有仓库的 begin/commit 不产生新协议要求：[CLI HTTP sidecar](../../apps/cli/src/http-server.ts) 的 sidecarBegin/sidecarFinish 用于 SQLite BEGIN/COMMIT/ROLLBACK；[DirectoryDriver.transaction](../../packages/vfs-core/src/impl/services/DirectoryDriver.ts) 当前主要缓冲事件，[LocalFS 外层 transaction](../../packages/vfsdriver-local/src/localfs-backend.ts) 与 [IndexedDB 外层 transaction](../../packages/vfsdriver-indexeddb/src/idb-backend.ts) 直接执行回调，不提供跨文件 ACID。记录存储事务另有实现，不应与上述外层文件回调混淆。end 是结束语义的泛称，不是当前统一文件 API。
+现有仓库的 begin/commit 不产生新协议要求：[CLI HTTP sidecar](../../apps/cli/src/http-server.ts) 的 sidecarBegin/sidecarFinish 用于 SQLite BEGIN/COMMIT/ROLLBACK；[DirectoryDriver.transaction](https://github.com/mushuanli/vfs-core/blob/main/src/impl/services/DirectoryDriver.ts) 当前主要缓冲事件，[LocalFS 外层 transaction](https://github.com/mushuanli/vfsdriver-local/blob/main/src/localfs-backend.ts) 与 [IndexedDB 外层 transaction](https://github.com/mushuanli/vfsdriver-indexeddb/blob/main/src/idb-backend.ts) 直接执行回调，不提供跨文件 ACID。记录存储事务另有实现，不应与上述外层文件回调混淆。end 是结束语义的泛称，不是当前统一文件 API。
 
 新 HTTP backend 不声明跨操作文件事务能力。未来若有人要求 mkdir + 多文件替换整体提交，应作为新增需求评估；仅把多次 HTTP 调用放入 transaction(fn) 不能提供该保证。
 

@@ -5,6 +5,5 @@
     "rootDir": "./src"
   },
   "include": ["src"],
-  "files": ["../mdx/src/types/turndown-plugin-gfm.d.ts"],
   "exclude": ["node_modules", "dist"]
 }

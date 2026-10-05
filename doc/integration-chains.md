@@ -12,10 +12,10 @@ vfs-ui (VFSUIShell)
 
 | 步骤 | 组件 | 关键文件 |
 |---|---|---|
-| 1. 创建 | `createVFS({ rootBackend, additionalMounts, devices, plugins })` | `vfs-core/src/impl/factory.ts` |
-| 2. 引擎 | `VFSEngine` — 路径解析、系统节点映射 | `vfs-core/src/impl/engine/` |
-| 3. 管理器 | `VFSManager` — 挂载/设备/插件 | `vfs-core/src/impl/services/` |
-| 4. 文件视图 | `FileSystemView`（组合多个挂载点，按路径归一化） | `vfs-core/src/impl/services/` |
+| 1. 创建 | `createVFS({ rootBackend, additionalMounts, devices, plugins })` | `https://github.com/mushuanli/vfs-core/blob/main/src/impl/factory.ts` |
+| 2. 引擎 | `VFSEngine` — 路径解析、系统节点映射 | `https://github.com/mushuanli/vfs-core/blob/main/src/impl/engine/` |
+| 3. 管理器 | `VFSManager` — 挂载/设备/插件 | `https://github.com/mushuanli/vfs-core/blob/main/src/impl/services/` |
+| 4. 文件视图 | `FileSystemView`（组合多个挂载点，按路径归一化） | `https://github.com/mushuanli/vfs-core/blob/main/src/impl/services/` |
 | 5. 存储 | `IStorageBackend`（IndexedDB / LocalFS） | `vfsdriver-*/src/` |
 
 重命名使用路径型节点 ID，因此必须同步整条运行链：
@@ -58,7 +58,7 @@ ChatInput.send (llm-ui)
 | 程序 | `DurableChatProgram` / `DurableAgentProgram` | `llm-tasks/src/durable/` |
 | 能力绑定 | `bindCapabilities` → capabilities signal | `durable-kernel/src/application/capabilities.ts` |
 | Effect | `LlmChatEffectAdapter`（llm.chat） | `kernel-adapters/src/effects/llm-chat-effect.ts` |
-| LLM | `ILLMService.chatStream` → provider | `kernel-adapters/llm/llm-service-adapter.ts`、`driver-llm/src/` |
+| LLM | `ILLMService.chatStream` → provider | `kernel-adapters/llm/llm-service-adapter.ts`、`https://github.com/mushuanli/driver-llm/blob/main/src/` |
 
 输入工具栏提供「对话 / 执行」：`executionMode` 随 Session settings 保存，发送时写入 `SendIntent.execution.mode`，在异步上传/任务准入前复制。Task 固定 `labels.executionMode`、工具列表和预算；执行中的模式按钮禁用，程序恢复不重新读取 UI 设置。对话模式只允许已授权的 WebSearch 客户端工具或 Provider 内置搜索；执行模式使用 llm.agent，最多 50 次模型交换，外部操作继续审批。Flow 选择后禁用该开关，按 Flow 定义执行。两种模式均使用既有 Context/GC。
 
@@ -117,7 +117,7 @@ apps/web-app (entry)
 | 运行时装配 | `app-core/src/runtime/create-application-runtime.ts::createApplicationRuntime()` |
 | 内核装配 | `app-core/src/runtime/create-kernel-runtime.ts::createKernelRuntime()` |
 | 启动 | `app-shell/src/bootstrap.ts::initApp()` |
-| VFS | `vfs-core/src/impl/factory.ts::createVFS()` |
+| VFS | `https://github.com/mushuanli/vfs-core/blob/main/src/impl/factory.ts::createVFS()` |
 | 内核 | `durable-kernel/src/application/kernel.ts::new Kernel()` |
 | 能力 | `kernel-adapters/src/runtime/create-kernel-adapters-runtime.ts::createKernelAdaptersRuntime()` |
 | LLM 系统 | `llm-session/src/index.ts::initializeConversationSystem()` |

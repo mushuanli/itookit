@@ -7,7 +7,6 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@itookit/vfs-core": ["../vfs-core/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts"],

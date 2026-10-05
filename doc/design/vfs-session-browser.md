@@ -67,7 +67,7 @@ files 直接代理受限 Session 文件上下文，不使用目录黑名单。�
 
 Session 的 `/tasks`、`/files` 是展示投影，不是 Session 拥有的物理子树。删除或重命名 Session/分组不遍历挂载目录；访问授权（包括 rw）不赋予 Session 对挂载目录的生命周期所有权。`BrowserBackend.assertMutableSubtree` 把保护责任留给实际 Session lifecycle / 文件变更入口；VFS 保留祖先固定布局检查，存在嵌套引擎挂载时仍回退递归检查。普通物理后端不实现此可选端口，保持原有子树保护。
 
-回归使用包含 65 个文件的挂载目录：一次删除原本打开文件上下文 69 次、读 manifest 82 次、读 Task 预览 1 次；修复后分别为 0、7、0。此为内存后端调用计数，不是 Tauri 耗时。目录离线也能删除 Session；显式删除挂载文件仍检查物理固定布局，Session 删除后项目文件仍存在。证据见 `packages/app-core/tests/session-browser.test.ts`、`packages/vfs-core/tests/24-layout-guard.test.ts`；VFS/Core 回归分别 186/124 项通过。
+回归使用包含 65 个文件的挂载目录：一次删除原本打开文件上下文 69 次、读 manifest 82 次、读 Task 预览 1 次；修复后分别为 0、7、0。此为内存后端调用计数，不是 Tauri 耗时。目录离线也能删除 Session；显式删除挂载文件仍检查物理固定布局，Session 删除后项目文件仍存在。证据见 `packages/app-core/tests/session-browser.test.ts`、`https://github.com/mushuanli/vfs-core/blob/main/tests/24-layout-guard.test.ts`；VFS/Core 回归分别 186/124 项通过。
 
 导入/导出协议为 `itookit.session` v2（`session-bundle.ts`，浏览器投影与 `SessionWorkbench` 导出共用一份实现）：
 
@@ -322,7 +322,7 @@ Session browser 与项目/家族导航优先使用 `ISessionRepository.listSumma
 
 移动/复制文件时，目标选择器把各项目直接显示为该项目的文件根，仅加载实际子目录；移动会话时，项目名称直接代表其会话目录，不展示文件、收藏及任务入口。目录列表由宿主 `transferPolicy.targets` 独立提供，不修改主侧栏的展开与激活状态。对话框保持固定高度的滚动容器，保留 scrollTop，并预留滚动条宽度。
 
-侧栏单击项目在右侧打开项目目录列表，单击会话或文件打开对应内容；均不根据打开资源自动切换侧栏项目范围。项目选择器执行显式切换，折叠按钮只控制展开与收起。侧栏顶部始终提供带加号的“新建项目”图标按钮，复用工作台根目录创建流程，不在当前项目下创建嵌套项目。文件标签与收藏打开同样保留当前侧栏范围。
+侧栏单击项目在右侧打开项目目录列表，单击会话或文件打开对应内容；均不根据打开资源自动切换侧栏项目范围。项目选择器执行显式切换，折叠按钮只控制展开与收起。侧栏顶部始终提供带加号的“新建项目”图标按钮，复用工作台根目录创建流程，不在当前项目下创建嵌套项目。文件标签与收藏打开同样保留当前侧栏范围。点击“新会话”及恢复草稿仅打开正文编辑器并更新按钮状态，不调用侧栏导航同步，不切换项目、重载目录或重置展开状态；正式会话按草稿所属项目创建，列表成员变化仍可刷新当前范围。
 
 会话归属以 manifest.folder 为准，项目 ID 从项目目录索引解析，不复制一份容易漂移的项目名称。跨项目会话移动经 `ProjectSessionMoves`：预检整棵子树的租约/未完成任务门禁，持久化 `/var/lib/projects/session-moves.seq`，撤销旧文件视图，提交子树归属，再逐成员更新默认 `/workspace` 授权和收藏。额外挂载、历史正文、Round 文件引用、Session ID 与物理存储路径保留；工作区原有只读权限保留。未完成记录阻止新文件上下文及新会话执行，失败可重试，取得会话租约后的启动接入恢复剩余步骤。恢复发现归属尚未改变时取消该成员的准备记录。
 

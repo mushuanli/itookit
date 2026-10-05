@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ProjectSyncService } from '../src/projects/sync/service';
-import { MemoryState, SerialCoordinator } from '../../vfs-sync/tests/helpers';
+import { MemoryState, SerialCoordinator } from '../../../tests/helpers/sync';
 import { bindingToken, type StoredFilePlan, type FilePlan } from '@itookit/vfs-sync';
 function setup(cancel: () => Promise<void> = async () => {}) {
     const store = new MemoryState();

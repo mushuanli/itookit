@@ -12,7 +12,7 @@
 
 宿主侧统一经 app-shell 的 `VfsJsonStore` 落到 `etc:/ui/`，与 `/ui/theme.json`、`/ui/toolbox-drawers.json` 同一处，可查看、可备份、可手工修复：浏览器快照 `/ui/<scope>.ui.json`（Session 侧栏、标准工作区、工具箱），工具箱过滤器与查询记忆 `/ui/mindos_toolbox_v1.preferences.json`，日志级别覆盖 `/ui/log-levels.json`。写入按文档串行排队；读取时逐字段校验，未知版本、损坏 JSON 与非法条目一律丢弃（日志级别只接受已知模块名与 `LogLevel`）。
 
-原有项目/工具箱的高级配置保留，使用同一底层列表和状态。简明 source 入口适合新资源浏览；没有另起一套渲染器，也没有移除既有文件操作。当前具体 API 见 [组件接口](../../packages/vfs-ui/doc/components.md)。
+原有项目/工具箱的高级配置保留，使用同一底层列表和状态。简明 source 入口适合新资源浏览；没有另起一套渲染器，也没有移除既有文件操作。当前具体 API 见 [组件接口](https://github.com/mushuanli/vfs-ui/blob/main/doc/components.md)。
 
 以下保留原审查依据与后续演进取舍；“唯一直接依赖”和“移除 immer”现已实施，“所有高级调用改为 panes”仍非当前实现。
 
@@ -20,14 +20,14 @@
 
 | 优先级 | 证据 | 问题与影响 |
 | --- | --- | --- |
-| 高 | [NodeList](../../packages/vfs-ui/src/ui/components/NodeList/NodeList.ts)、[ContextMenuHandler](../../packages/vfs-ui/src/ui/components/NodeList/handlers/ContextMenuHandler.ts)、[ItemActionHandler](../../packages/vfs-ui/src/ui/components/NodeList/handlers/ItemActionHandler.ts)、[DragDropHandler](../../packages/vfs-ui/src/ui/components/NodeList/handlers/DragDropHandler.ts) | 工具栏覆盖、菜单回调、行内删除、底部批量删除和拖拽分别分派；覆盖菜单不等于覆盖操作。底部批量删除直接执行 `bulk:delete`。业务授权、确认和删除语义容易不一致；底层只读检查仍然存在，不能仅凭静态分析断言已发生误删。 |
-| 高 | [types](../../packages/vfs-ui/src/contracts/types.ts)、[ColumnState](../../packages/vfs-ui/src/shell/ColumnState.ts)、宿主 ToolboxWorkbench | `id` 同时是显示身份和文件路径；抽屉通过伪目录参与渲染，上层再展开成真实资源。ColumnState 与 Shell 根据 `/` 推导祖先。合成分组和真实目录尚未形成明确类型边界。 |
-| 高 | [入口](../../packages/vfs-ui/src/index.ts)、[VFSUIShell](../../packages/vfs-ui/src/shell/VFSUIShell.ts)、[editor-connector](../../packages/app-shell/src/browser/editor-connector.ts) | 公共 API 继承 `ISessionUI`，包含会话命名、编辑器工厂、内容写入、任务统计及等待输入状态。树组件与编辑器装配边界混合。 |
-| 中 | [CommandBus](../../packages/vfs-ui/src/interaction/CommandBus.ts)、[ports](../../packages/vfs-ui/src/contracts/ports.ts) | execute 返回 void，异步 handler 的 Promise 没有被等待；同步 try/catch 无法统一接住异步拒绝。难以集中处理 pending、错误、重复点击和操作完成。部分 handler 自行 catch，不能消除结构问题。 |
-| 中 | [入口](../../packages/vfs-ui/src/index.ts)、[shell 入口](../../packages/vfs-ui/src/shell/index.ts)、[Shell](../../packages/vfs-ui/src/shell/VFSUIShell.ts) | Options 三处声明且字段不同；还有两套 FileTypeDefinition/ParseResult。上层直接访问 store.dispatch，内部 action 字符串成为事实上的 API。 |
-| 中 | [ColumnLayout](../../packages/vfs-ui/src/shell/ColumnLayout.ts)、[templates](../../packages/vfs-ui/src/ui/components/NodeList/items/itemTemplates.ts)、[helpers](../../packages/vfs-ui/src/utils/helpers.ts) | 返回按钮使用“项目”，菜单使用 toolbox 翻译 key；隐藏所有单下划线前缀路径等规则内置在映射器中。业务词汇、资产目录约定与展示机制耦合。 |
-| 中 | [main.css](../../packages/vfs-ui/src/styles/main.css) | 设置全局 `:root` 变量及 body/button/ul 等样式，会影响宿主；部分菜单依赖 Font Awesome 类名。仅拆 TS 依赖不足以成为独立控件。 |
-| 中 | [persistence](../../packages/vfs-ui/src/contracts/persistence.ts)、[Assembler](../../packages/vfs-ui/src/shell/Assembler.ts) | 默认读写 localStorage，存内部状态结构，每次 store 更新都保存；持久化规则和状态版本应有明确边界。**已修正**：`persistence` 改为可注入端口，默认不写任何存储，宿主经 `etc:/ui/<scope>.ui.json` 持久化版本化快照。 |
+| 高 | [NodeList](https://github.com/mushuanli/vfs-ui/blob/main/src/ui/components/NodeList/NodeList.ts)、[ContextMenuHandler](https://github.com/mushuanli/vfs-ui/blob/main/src/ui/components/NodeList/handlers/ContextMenuHandler.ts)、[ItemActionHandler](https://github.com/mushuanli/vfs-ui/blob/main/src/ui/components/NodeList/handlers/ItemActionHandler.ts)、[DragDropHandler](https://github.com/mushuanli/vfs-ui/blob/main/src/ui/components/NodeList/handlers/DragDropHandler.ts) | 工具栏覆盖、菜单回调、行内删除、底部批量删除和拖拽分别分派；覆盖菜单不等于覆盖操作。底部批量删除直接执行 `bulk:delete`。业务授权、确认和删除语义容易不一致；底层只读检查仍然存在，不能仅凭静态分析断言已发生误删。 |
+| 高 | [types](https://github.com/mushuanli/vfs-ui/blob/main/src/contracts/types.ts)、[ColumnState](https://github.com/mushuanli/vfs-ui/blob/main/src/shell/ColumnState.ts)、宿主 ToolboxWorkbench | `id` 同时是显示身份和文件路径；抽屉通过伪目录参与渲染，上层再展开成真实资源。ColumnState 与 Shell 根据 `/` 推导祖先。合成分组和真实目录尚未形成明确类型边界。 |
+| 高 | [入口](https://github.com/mushuanli/vfs-ui/blob/main/src/index.ts)、[VFSUIShell](https://github.com/mushuanli/vfs-ui/blob/main/src/shell/VFSUIShell.ts)、[editor-connector](../../packages/app-shell/src/browser/editor-connector.ts) | 公共 API 继承 `ISessionUI`，包含会话命名、编辑器工厂、内容写入、任务统计及等待输入状态。树组件与编辑器装配边界混合。 |
+| 中 | [CommandBus](https://github.com/mushuanli/vfs-ui/blob/main/src/interaction/CommandBus.ts)、[ports](https://github.com/mushuanli/vfs-ui/blob/main/src/contracts/ports.ts) | execute 返回 void，异步 handler 的 Promise 没有被等待；同步 try/catch 无法统一接住异步拒绝。难以集中处理 pending、错误、重复点击和操作完成。部分 handler 自行 catch，不能消除结构问题。 |
+| 中 | [入口](https://github.com/mushuanli/vfs-ui/blob/main/src/index.ts)、[shell 入口](https://github.com/mushuanli/vfs-ui/blob/main/src/shell/index.ts)、[Shell](https://github.com/mushuanli/vfs-ui/blob/main/src/shell/VFSUIShell.ts) | Options 三处声明且字段不同；还有两套 FileTypeDefinition/ParseResult。上层直接访问 store.dispatch，内部 action 字符串成为事实上的 API。 |
+| 中 | [ColumnLayout](https://github.com/mushuanli/vfs-ui/blob/main/src/shell/ColumnLayout.ts)、[templates](https://github.com/mushuanli/vfs-ui/blob/main/src/ui/components/NodeList/items/itemTemplates.ts)、[helpers](https://github.com/mushuanli/vfs-ui/blob/main/src/utils/helpers.ts) | 返回按钮使用“项目”，菜单使用 toolbox 翻译 key；隐藏所有单下划线前缀路径等规则内置在映射器中。业务词汇、资产目录约定与展示机制耦合。 |
+| 中 | [main.css](https://github.com/mushuanli/vfs-ui/blob/main/src/styles/main.css) | 设置全局 `:root` 变量及 body/button/ul 等样式，会影响宿主；部分菜单依赖 Font Awesome 类名。仅拆 TS 依赖不足以成为独立控件。 |
+| 中 | [persistence](https://github.com/mushuanli/vfs-ui/blob/main/src/contracts/persistence.ts)、[Assembler](https://github.com/mushuanli/vfs-ui/blob/main/src/shell/Assembler.ts) | 默认读写 localStorage，存内部状态结构，每次 store 更新都保存；持久化规则和状态版本应有明确边界。**已修正**：`persistence` 改为可注入端口，默认不写任何存储，宿主经 `etc:/ui/<scope>.ui.json` 持久化版本化快照。 |
 
 已有的好基础：VFS 事件适配、懒加载目录、独立列选择、自然排序、批量选择、宿主投影和菜单注入都可复用。项目和工具箱的主要业务逻辑已在 app-shell 中，迁移应修正边界，而非推倒重写。
 

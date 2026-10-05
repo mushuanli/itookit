@@ -15,21 +15,11 @@
       "@/*": ["src/*"],
       "@itookit/common": ["../../packages/common/src/index.ts"],
       "@itookit/common/*": ["../../packages/common/src/*"],
-      "@itookit/vfs-core": ["../../packages/vfs-core/src/index.ts"],
-      "@itookit/vfsdriver-indexeddb": ["../../packages/vfsdriver-indexeddb/src/index.ts"],
-      "@itookit/vfs-ui": ["../../packages/vfs-ui/src/index.ts"],
-      "@itookit/mdxeditor": ["../../packages/mdx/src/index.ts"],
-      "@itookit/driver-llm": ["../../packages/driver-llm/src/index.ts"],
       "@itookit/llm-session": ["../../packages/llm-session/src/index.ts"],
       "@itookit/llm-ui": ["../../packages/llm-ui/src/index.ts"],
       "@itookit/app-settings": ["../../packages/app-settings/src/index.ts"]
     }
   },
-  "include": [
-    "src",
-    // Ambient module declarations from workspace packages that have no @types coverage.
-    // Needed because web-app compiles package sources directly via `paths` aliases.
-    "../../packages/mdx/src/types"
-  ],
+  "include": ["src"],
   "exclude": ["node_modules", "dist"]
 }

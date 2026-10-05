@@ -118,6 +118,6 @@ VFS 层的已修问题和后续架构建议见 [VFS 读取性能与架构审查]
 
 空闲资源维护从两次事务、六次前缀扫描降为一次事务、三次前缀扫描；UI 状态更新从两条记录的读写降为一条，重复保存只有一次记录读取、零写入。没有新增通用 VFS 缓存或宿主批量 SQL 协议，外层事务的 journal 恢复核对完整保留。
 
-验证入口：`durable-kernel/src/session-open-cost.test.ts`、`llm-session/__tests__/history-snapshot.test.ts`、`vfsdriver-local/tests/25-journal-probe.test.ts`、`app-shell/tests/session-load-localfs.test.ts`、`app-shell/tests/session-sidebar-order.test.ts` 和 `app-shell/tests/flow-invocation-polling.test.ts`。本轮未完成真实桌面改动后的录制对比，不能据操作次数宣称切换已降至某个毫秒值。录制中 WebKit 主线程高负载、约 40–60 ms 的部分 IPC 响应仍需关闭截图录制并结合宿主计时验证。
+验证入口：`durable-kernel/src/session-open-cost.test.ts`、`llm-session/__tests__/history-snapshot.test.ts`、`https://github.com/mushuanli/vfsdriver-local/blob/main/tests/25-journal-probe.test.ts`、`app-shell/tests/session-load-localfs.test.ts`、`app-shell/tests/session-sidebar-order.test.ts` 和 `app-shell/tests/flow-invocation-polling.test.ts`。本轮未完成真实桌面改动后的录制对比，不能据操作次数宣称切换已降至某个毫秒值。录制中 WebKit 主线程高负载、约 40–60 ms 的部分 IPC 响应仍需关闭截图录制并结合宿主计时验证。
 
 本轮验证：Kernel 266 项、llm-session 167 项、llm-ui 51 项、LocalFS 86 项（含跨进程崩溃恢复）、app-core 125 项通过。app-shell 全包 314 项通过、30 项按既有配置跳过；受沙箱限制的 4 项宿主恢复测试在沙箱外重跑通过，随后新增的绑定 I/O 实验及编辑器加载共 8 项定向复跑通过。6 个相关包类型检查、Tauri 前端构建和文档检查通过；文档保留原有 5 条历史表述告警。

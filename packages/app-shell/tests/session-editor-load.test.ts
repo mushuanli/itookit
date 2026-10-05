@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createVFS, MemoryBackend, type IStorageBackend } from '@itookit/vfs-core';
 import { openLocalFSBackend } from '@itookit/vfsdriver-local';
-import { NodeFsOps } from '../../vfsdriver-local/src/fs/node-fs-ops';
+import { NodeFsOps } from '@itookit/vfsdriver-local/node';
 import { Kernel } from '@itookit/durable-kernel';
 import { SessionRepository, SessionManager, SessionCommand } from '@itookit/llm-session';
 import { SessionDirectoryStorageResolver } from '../../llm-session/src/persistence/session-directory-storage';

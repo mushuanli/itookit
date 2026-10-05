@@ -8,7 +8,7 @@ import { openLocalFSBackend } from '@itookit/vfsdriver-local';
 import { SessionRepository } from '@itookit/llm-session';
 import { SessionRegistry } from '../../llm-session/src/session/session-registry';
 import { Kernel } from '@itookit/durable-kernel';
-import { NodeFsOps } from '../../vfsdriver-local/src/fs/node-fs-ops';
+import { NodeFsOps } from '@itookit/vfsdriver-local/node';
 
 it('measures cold history loading on LocalFS without reading each round twice', async () => {
     const root = await mkdtemp(join(tmpdir(), 'session-load-cost-'));

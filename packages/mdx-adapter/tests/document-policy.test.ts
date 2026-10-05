@@ -4,15 +4,13 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { language } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
 import { defaultEditorFactory } from '../src/factory';
-import { MarkedAdapter } from '../../mdx/src/renderer/marked-adapter';
-import { MDxEditor } from '@itookit/mdxeditor';
-import { isLargeDocument } from '../../mdx/src/editor/document-policy';
+import { MDxEditor, MDxRenderer } from '@itookit/mdxeditor';
 
 beforeEach(() => vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} })));
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); document.body.replaceChildren(); });
 
 it.each(['pnpm-lock.yaml', 'package.json', 'debug.log', 'LICENSE', 'source.txt'])('opens %s as editable source without Markdown parsing', async name => {
-    const parse = vi.spyOn(MarkedAdapter.prototype, 'parse');
+    const render = vi.spyOn(MDxRenderer.prototype, 'render');
     const save = vi.fn(async (_path: string, _text: string) => {});
     const element = document.createElement('div'); document.body.append(element);
     const content = '# literal\n- [ ] text\n<script>literal</script>';
@@ -23,7 +21,7 @@ it.each(['pnpm-lock.yaml', 'package.json', 'debug.log', 'LICENSE', 'source.txt']
         expect(editor.getEditorView()!.state.facet(language)).toBeNull();
         expect(editor.getText()).toBe(content);
         await editor.switchToMode('render');
-        expect(editor.getMode()).toBe('edit'); expect(parse).not.toHaveBeenCalled();
+        expect(editor.getMode()).toBe('edit'); expect(render).not.toHaveBeenCalled();
         editor.setText(content + '\nchanged'); editor.setDirty(true);
         await editor.flushPendingSave();
         expect(save).toHaveBeenCalledWith('/' + name, content + '\nchanged');
@@ -31,7 +29,7 @@ it.each(['pnpm-lock.yaml', 'package.json', 'debug.log', 'LICENSE', 'source.txt']
 });
 
 it('keeps explicit source mode and Markdown document aliases while deferring large previews', async () => {
-    const parse = vi.spyOn(MarkedAdapter.prototype, 'parse');
+    const render = vi.spyOn(MDxRenderer.prototype, 'render');
     for (const options of [
         { target: { kind: 'file' as const, path: '/note.md' }, initialMode: 'edit' as const, initialContent: '# normal' },
         { target: { kind: 'file' as const, path: '/large.md' }, initialContent: 'line\n'.repeat(5001) },
@@ -39,25 +37,17 @@ it('keeps explicit source mode and Markdown document aliases while deferring lar
     ]) {
         const element = document.createElement('div');
         const editor = await defaultEditorFactory(element, options) as MDxEditor;
-        expect(editor.getMode()).toBe('edit'); expect(parse).not.toHaveBeenCalled();
+        expect(editor.getMode()).toBe('edit'); expect(render).not.toHaveBeenCalled();
         await editor.destroy();
     }
     const editor = await defaultEditorFactory(document.createElement('div'), { target: { kind: 'file', path: '/lesson.prj' },
         contentFormat: 'markdown', initialContent: '# Lesson' }) as MDxEditor;
-    expect(editor.getMode()).toBe('render'); expect(parse).toHaveBeenCalledOnce(); await editor.destroy();
-});
-
-it('counts UTF-8 bytes, lines and long individual lines for the source-first budget', () => {
-    expect(isLargeDocument('中'.repeat(90_000))).toBe(true);
-    expect(isLargeDocument('x\n'.repeat(5000))).toBe(true);
-    expect(isLargeDocument('x'.repeat(10_001))).toBe(true);
-    expect(isLargeDocument('x'.repeat(10_000) + '\n')).toBe(false);
-    expect(isLargeDocument('small')).toBe(false);
+    expect(editor.getMode()).toBe('render'); expect(render).toHaveBeenCalledOnce(); await editor.destroy();
 });
 
 it('opens the repository lockfile without a Markdown parser and respects readonly access', async () => {
     const content = readFileSync('../../pnpm-lock.yaml', 'utf8');
-    const parse = vi.spyOn(MarkedAdapter.prototype, 'parse');
+    const render = vi.spyOn(MDxRenderer.prototype, 'render');
     const element = document.createElement('div'); document.body.append(element);
     const editor = await defaultEditorFactory(element, { target: { kind: 'file', path: '/pnpm-lock.yaml' },
         initialContent: content, readOnly: true }) as MDxEditor;
@@ -66,18 +56,8 @@ it('opens the repository lockfile without a Markdown parser and respects readonl
         expect(editor.getMode()).toBe('edit');
         expect(editor.getEditorView()!.state.facet(EditorView.editable)).toBe(false);
         expect(editor.getEditorView()!.state.facet(language)).toBeNull();
-        expect(parse).not.toHaveBeenCalled();
+        expect(render).not.toHaveBeenCalled();
     } finally { await editor.destroy(); }
-});
-
-it('shares an immutable document policy without mutating caller options', async () => {
-    const { documentProfile } = await import('../../mdx/src/editor/document-policy');
-    const options = { contentFormat: 'markdown' as const, initialMode: 'render' as const };
-    const profile = documentProfile(options, 'line\n'.repeat(5_001));
-    expect(profile).toMatchObject({ largeReason: 'lines', initialMode: 'edit',
-        enableMarkdown: false, enableLineWrapping: false, showSourceNotice: true });
-    expect(Object.isFrozen(profile)).toBe(true);
-    expect(options.initialMode).toBe('render');
 });
 
 it('toggles source wrapping without changing content, selection or dirty state', async () => {
@@ -104,14 +84,14 @@ it('exposes independent source and preview wrapping through the titlebar without
     const mount = document.createElement('div');
     const editor = await defaultEditorFactory(mount, { initialContent: '```text\nlong line\n```' }) as MDxEditor;
     try {
-        const parse = vi.spyOn(MarkedAdapter.prototype, 'parse');
+        const render = vi.spyOn(MDxRenderer.prototype, 'render');
         const button = mount.querySelector<HTMLButtonElement>('[data-button-id="toggle-line-wrapping"]')!;
         expect(button.getAttribute('aria-pressed')).toBe('false');
         const code = mount.querySelector('pre code');
         button.click(); await Promise.resolve();
         expect(editor.getLineWrapping('render')).toBe(true);
         expect(mount.querySelector('.mdx-editor-renderer--wrap pre code')).toBe(code);
-        expect(parse).not.toHaveBeenCalled();
+        expect(render).not.toHaveBeenCalled();
         await editor.switchToMode('edit');
         editor.setLineWrapping(false);
         await vi.waitFor(() => expect(button.getAttribute('aria-pressed')).toBe('false'));

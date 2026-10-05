@@ -8,7 +8,7 @@
 - **itookit**：pnpm monorepo，承载 **MindOS**（浏览器/桌面的个人知识 OS：虚拟文件系统 + Markdown 编辑器 + LLM 对话/Agent 执行）
 - 工具链：`pnpm@10.20.0`（`workspace:*`）、TypeScript 5.9 strict（`target: ES2022`、`moduleResolution: bundler`，见 `tsconfig.base.json`）
 - 无前端框架：原生 DOM + TypeScript
-- 23 个 package + 4 个 app，详见 [包结构](./doc/pkgstructure.md)
+- 20 个工作区 package + 4 个 app（另有 8 个独立 npm 库），详见 [包结构](./doc/pkgstructure.md)
 
 ## 开发原则
 SOLID / DRY / KISS / YAGNI / CoC / LoD — 函数≤30行，圈复杂度≤10
@@ -38,7 +38,7 @@ pnpm --filter @itookit/<pkg> typecheck
 
 | 文档 | 内容 |
 |---|---|
-| [包结构](./doc/pkgstructure.md) | 23 个包及职责、LLM 四层分层 |
+| [包结构](./doc/pkgstructure.md) | 工作区包与独立 npm 库职责、LLM 四层分层 |
 | [架构设计](./doc/architecture.md) | 系统全貌 — VFS / LLM / Agent / Skill / Session / Flow / TTY |
 | [运行时架构](./doc/runtime-architecture.md) | `createApplicationRuntime` / `createKernelRuntime` 装配与端口 |
 | [集成链](./doc/integration-chains.md) | VFS / Chat / AppShell 端到端调用链 |
@@ -79,7 +79,7 @@ pnpm --filter @itookit/<pkg> typecheck
 LLMProvider (云厂商) → LLMConnection (tier→model) → AgentDefinition (system prompt)
 ```
 
-- 关键类型: `driver-llm/src/types/`（通信）、`llm-context/src/domain/`（消息）、`kernel-adapters/src/llm-management/contracts/`（配置）、`llm-session/src/contracts/`（会话）；从各包公开入口导入
-- Provider 实现: `driver-llm/src/providers/`
+- 关键类型: `https://github.com/mushuanli/driver-llm/blob/main/src/types/`（通信）、`llm-context/src/domain/`（消息）、`kernel-adapters/src/llm-management/contracts/`（配置）、`llm-session/src/contracts/`（会话）；从各包公开入口导入
+- Provider 实现: `https://github.com/mushuanli/driver-llm/blob/main/src/providers/`
 - 联网搜索: `resolveWebSearchStrategy` → `WebSearchMode`（详见 [联网搜索](./doc/web-search.md)）
 - 详见 [架构设计](./doc/architecture.md)

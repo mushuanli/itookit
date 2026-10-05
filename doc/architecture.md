@@ -153,7 +153,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 
 ## 5. VFS 子系统（@itookit/vfs-core）
 
-- **协议层**：`IFileSystem`/`IFileSystemDriver`/`IFSDriver`/`IVFSManager`/`IStorageBackend`/`FSNode`/`IDeviceDriver`（`vfs-core/src/protocol.ts`）。
+- **协议层**：`IFileSystem`/`IFileSystemDriver`/`IFSDriver`/`IVFSManager`/`IStorageBackend`/`FSNode`/`IDeviceDriver`（`https://github.com/mushuanli/vfs-core/blob/main/src/protocol.ts`）。
 - **引擎层**：`VFSEngine`/`VFSManager`/`FileSystemView`/`createVFS`（唯一初始化入口）。
 - **存储后端**：`vfsdriver-indexeddb`（浏览器）、`vfsdriver-local`（SQLite+本地 FS）。
 - **通用 IO**：`IIOStream` + `pipe`（文件↔LLM↔TTY 流互拷）。

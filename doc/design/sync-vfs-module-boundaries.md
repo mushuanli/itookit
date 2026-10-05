@@ -183,8 +183,8 @@ C4Component
 
 源码入口：
 
-- [vfs-sync 公共 API](../../packages/vfs-sync/src/index.ts)、[FileSync](../../packages/vfs-sync/src/file-sync.ts)、[OperationManager](../../packages/vfs-sync/src/operations.ts)。
-- [VFS 插件契约](../../packages/vfs-core/src/interfaces/plugin/plugin.ts)。
+- [vfs-sync 公共 API](https://github.com/mushuanli/vfs-sync/blob/main/src/index.ts)、[FileSync](https://github.com/mushuanli/vfs-sync/blob/main/src/file-sync.ts)、[OperationManager](https://github.com/mushuanli/vfs-sync/blob/main/src/operations.ts)。
+- [VFS 插件契约](https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/plugin/plugin.ts)。
 - [IndexedDB / local 同步适配](../../packages/sync-adapters/src/indexeddb/session.ts)、[控制存储](../../packages/sync-adapters/src/indexeddb/store.ts)、[HTTP 同步客户端](../../packages/sync-adapters/src/http/client.ts)。
 - [项目同步服务](../../packages/app-core/src/projects/sync/service.ts)、[Web 装配](../../apps/web-app/src/sync.ts)。
 - 更完整的客户端实施契约见 [项目同步设计](project-sync.md)。

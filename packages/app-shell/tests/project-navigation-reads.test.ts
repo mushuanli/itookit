@@ -50,6 +50,17 @@ it('resolves project folders from one organization snapshot per sync and refresh
         await navigation.refresh();
         expect(list).not.toHaveBeenCalled();
         expect(navigation.currentProject()?.path).toBe('/Demo');
+        const unrelated = await projects.create('Unrelated');
+        const navigationReads = vi.spyOn(projects.sessions, 'navigation');
+        navigationReads.mockClear();
+        navigation.showDraft(unrelated);
+        expect(navigation.currentProject()?.path).toBe('/Demo');
+        expect(selector.value).toBe(folderBrowserPath('/Demo'));
+        expect(navigationReads).not.toHaveBeenCalled();
+        expect(navigation.header.querySelector('.workbench-project-navigation__create')?.getAttribute('aria-current')).toBe('false');
+        navigation.showDraft(project);
+        expect(navigation.header.querySelector('.workbench-project-navigation__create')?.getAttribute('aria-current')).toBe('page');
+        expect(navigationReads).not.toHaveBeenCalled();
     } finally { await mounts.dispose(); await files.dispose(); await repository.dispose(); await manager.dispose(); }
 });
 

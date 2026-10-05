@@ -34,13 +34,13 @@
 
 | 当前代码 | 可复用基础及限制 |
 | --- | --- |
-| [vfs-sync](../../packages/vfs-sync/src/index.ts) | 已有文件比较／计划、冲突选择、命令序列、FileSync 及端口；包含有界文本三方合并；不含会话合并 |
+| [vfs-sync](https://github.com/mushuanli/vfs-sync/blob/main/src/index.ts) | 已有文件比较／计划、冲突选择、命令序列、FileSync 及端口；包含有界文本三方合并；不含会话合并 |
 | [ProjectSyncService](../../packages/app-core/src/projects/sync/service.ts) | 可注入项目用例、策略 revision、解绑收尾及运行时关闭；宿主需提供持久项目到 session 映射 |
 | [ProjectService](../../packages/app-core/src/projects/project-service.ts) | 稳定项目 ID、目录绑定和项目视图；openFiles 会组合挂载，不能直接把该视图全部递归复制 |
 | [ProjectRemoteMountService](../../packages/app-core/src/projects/remote-mounts.ts) | 连接、凭据引用、项目授权和可用状态；同步关系需要独立记录 |
 | [SessionFilesService](../../packages/app-core/src/vfs/session-files.ts) | 授权 revision、cwd、派生视图撤销和挂载守卫；该 revision 不代表目录内容版本 |
-| [HTTP capabilities](../../packages/vfsdriver-agent/src/capabilities.ts) | 客户端目前只解析 sync.push；需要独立读取 /v1/sync/capabilities，不能由一个布尔值推导同步保证 |
-| [HttpFSBackend](../../packages/vfsdriver-agent/src/backend.ts) | 条件替换、Range 读取、操作结果查询；删除和重命名目前没有相同的版本条件 |
+| [HTTP capabilities](https://github.com/mushuanli/vfsdriver-agent/blob/main/src/capabilities.ts) | 客户端目前只解析 sync.push；需要独立读取 /v1/sync/capabilities，不能由一个布尔值推导同步保证 |
+| [HttpFSBackend](https://github.com/mushuanli/vfsdriver-agent/blob/main/src/backend.ts) | 条件替换、Range 读取、操作结果查询；删除和重命名目前没有相同的版本条件 |
 | [fs-agent revision](../../tools/fs-agent/src/fs/revision.rs) | 服务生命周期内的文件身份凭证，不能作为内容摘要；命令后会使凭证失效 |
 | [fs-agent router](../../tools/fs-agent/src/http/mod.rs) 与 [同步传输](../../tools/fs-agent/src/sync/transport.rs) | 已有 /v1/sync 的项目、数据集、对象、发布、catalog、changes、回执、历史及恢复接口；同一实例可同时提供普通 export 与同步存储 |
 | [SessionBundle](../../packages/app-core/src/session/session-bundle.ts) | 格式版本、历史和附件交换；导入创建新身份，导出没有跨多个读取的快照边界 |
@@ -644,7 +644,7 @@ files 数据集必须排除受协议管理的 .mindos 子树，sessions 和 orga
 
 当前 [Session 存储布局](../../packages/llm-session/src/persistence/session-storage-layout.ts) 将会话放在 MindOS 的 /var/lib/sessions 下，Kernel 记录位于该会话的 kernel 子目录。项目草稿和收藏位于 /var/lib/projects 下，成员关系在共享 folders.seq 中，SessionFilesService 还直接引用会话 session.seq 路径。
 
-更关键的是 [LocalFSBackend](../../packages/vfsdriver-local/AGENTS.md) 将 SeqFile 记录和元数据放在 SQLite sidecar 中。目录里有 session.seq 并不代表完整记录就在该文件字节中；复制目录或单独复制某个 SQLite 文件都不是可移植会话协议。浏览器 IndexedDB 同样需要通过逻辑读取导出。
+更关键的是 [LocalFSBackend](https://github.com/mushuanli/vfsdriver-local/blob/main/AGENTS.md) 将 SeqFile 记录和元数据放在 SQLite sidecar 中。目录里有 session.seq 并不代表完整记录就在该文件字节中；复制目录或单独复制某个 SQLite 文件都不是可移植会话协议。浏览器 IndexedDB 同样需要通过逻辑读取导出。
 
 因此迁移必须使用领域级快照，并明确上下文和历史引用闭包。便携目录不能包含依赖宿主 SQLite、IndexedDB 或原 MindOS 数据根才能解释的隐藏引用。现有只读会话投影可复用展示思路，但多个读取仍需快照边界才能用于同步。
 
@@ -787,7 +787,7 @@ ACK 确认的是发现与恢复证据已落盘的 cursor；它不表示每个文
 
 通用 VFS 的 read/write 不能凭空提供宿主文件 compare-and-swap。没有安全应用能力的来源仅开放能保证的操作，不能以“先 stat 后写入”声称解决竞态。S1 应先选定受管 VFS 的完整链路，其他宿主在具备相同恢复证据后开放。
 
-S1 固定以 IndexedDB 受管 VFS 为首个完整后端。源码 [IndexedDBBackend](../../packages/vfsdriver-indexeddb/src/idb-backend.ts) 的通用 transaction 目前仅执行回调，不是跨操作 ACID；IRecordStore 的事务也只覆盖记录。需在该驱动新增宿主条件应用能力，在同一个原生 readwrite 事务内覆盖 STORE_NODES、STORE_TAGS、STORE_RECORDS，检查原路径／完整输入内容及元数据，写目标文件、应用回执和 baseline；删除关联组还需事务内检查子树及排除保护。任何不符都 abort，等待 transaction complete 后才返回已应用。通用同步核心不直接操作这些 store。
+S1 固定以 IndexedDB 受管 VFS 为首个完整后端。源码 [IndexedDBBackend](https://github.com/mushuanli/vfsdriver-indexeddb/blob/main/src/idb-backend.ts) 的通用 transaction 目前仅执行回调，不是跨操作 ACID；IRecordStore 的事务也只覆盖记录。需在该驱动新增宿主条件应用能力，在同一个原生 readwrite 事务内覆盖 STORE_NODES、STORE_TAGS、STORE_RECORDS，检查原路径／完整输入内容及元数据，写目标文件、应用回执和 baseline；删除关联组还需事务内检查子树及排除保护。任何不符都 abort，等待 transaction complete 后才返回已应用。通用同步核心不直接操作这些 store。
 
 哈希、网络、用户等待及其他非 IDB 异步操作都在事务外完成。事务内读取当前字节，与已捕获输入做完整相等比较，并复核输入属性及绑定 revision，不能只信缓存摘要或先前 stat。对象缓存、操作意图先完成安装与引用事务；应用事务失败保持这些记录可恢复。工作文件与控制记录不在同一数据库的来源不适用该保证，需独立 journal 方案，首期不开放同等级覆盖。
 

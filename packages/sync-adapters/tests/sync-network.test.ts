@@ -1,4 +1,4 @@
-import '../../vfsdriver-indexeddb/tests/setup';
+import 'fake-indexeddb/auto';
 import { it, expect } from 'vitest';
 import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
@@ -9,7 +9,7 @@ import { FileSync, type SyncState } from '@itookit/vfs-sync';
 import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
 import { LocalFSBackend } from '@itookit/vfsdriver-local';
 import { LocalSyncStore, createLocalSyncSession } from '../src/local';
-import { SerialCoordinator } from '../../vfs-sync/tests/helpers';
+import { SerialCoordinator } from '../../../tests/helpers/sync';
 import { HttpSyncClient } from '../src';
 import { IndexedDBFileLocal, IndexedDBSyncStore } from '../src';
 import { prepareProjectSync } from '@itookit/app-core';

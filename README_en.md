@@ -47,7 +47,7 @@ VFS is the foundation of MindOS, providing a unique filesystem abstraction:
 
 - **Deep AI Integration**: Agent file tools (`file_read` / `file_write` / `glob_search`) operate directly on VFS. Session history, skill definitions, and connection configs are all persisted as VFS files, letting Agents read their own configuration with the same tool interface.
 
-#### 2. MDx Editor — `packages/mdx`
+#### 2. MDx Editor — [@itookit/mdxeditor](https://github.com/mushuanli/mdxeditor)
 
 A next-generation Markdown editor built on **CodeMirror 6**, balancing writing experience with powerful extensibility:
 

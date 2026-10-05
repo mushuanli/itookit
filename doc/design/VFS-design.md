@@ -8,7 +8,7 @@
 
 | 层 | 当前实现 | 职责 |
 | --- | --- | --- |
-| 协议 | `vfs-core/src/interfaces`、`protocol.ts` | 文件、元数据、backend、事件和能力类型 |
+| 协议 | `https://github.com/mushuanli/vfs-core/blob/main/src/interfaces`、`protocol.ts` | 文件、元数据、backend、事件和能力类型 |
 | 宿主 | `impl/factory.ts`、`services/VFSManager.ts` | 根 backend、挂载、设备、插件和销毁 |
 | 受限视图 | `services/FileSystemView.ts` | 固定 revision 的目录组合、权限、返回值和事件过滤、撤销 |
 | 来源 | `services/FileSystemSource.ts` | 将宿主已授权的 backend 包装成来源，拥有其生命周期 |
@@ -18,11 +18,11 @@
 | 文件对象 | `impl/file-io` | IFile/IMDXFile 轻量路径句柄 |
 | 后端 | Memory、IndexedDB、LocalFS | path-based 文件及记录存储 |
 
-协议与实现的导出分别见 [protocol.ts](../../packages/vfs-core/src/protocol.ts) 和 [index.ts](../../packages/vfs-core/src/index.ts)。可信宿主可使用 manager/backend；这些管理对象不注入普通 Session 工具或编辑器。
+协议与实现的导出分别见 [protocol.ts](https://github.com/mushuanli/vfs-core/blob/main/src/protocol.ts) 和 [index.ts](https://github.com/mushuanli/vfs-core/blob/main/src/index.ts)。可信宿主可使用 manager/backend；这些管理对象不注入普通 Session 工具或编辑器。
 
 ## 2. 消费接口
 
-完整声明见 [file-system.ts](../../packages/vfs-core/src/interfaces/services/file-system.ts)。
+完整声明见 [file-system.ts](https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/services/file-system.ts)。
 
 ```ts
 interface IFileSystem extends FSEventEmitter {
@@ -49,7 +49,7 @@ interface FileSystemContextOwner {
 
 路径是视图内的绝对 POSIX 路径。禁止 `..` 段、反斜线、NUL 和隐式宿主路径转换；不能使用 basename 搜索替代精确路径读取。`viewId` 标识视图，`revision` 标识本次配置；文件句柄的身份字段是 `path`，不是文件 ID 或模块 ID。
 
-[IFSDriver](../../packages/vfs-core/src/interfaces/services/fs-driver.ts) 提供：
+[IFSDriver](https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/services/fs-driver.ts) 提供：
 
 - 读取：getNode、getChildren、readContent、resolvePath、exists、search，可选 walkTree/getStats。
 - `getChildren({ fields: 'entry' })` 经可选后端 listEntries 获取轻量条目，不强制读取扩展元数据；后端未实现时回退完整列表并裁剪。`readContent` 的 representation 为 auto（兼容记录投影优先）、bytes（物理内容）、records（仅记录投影）。普通配置读取显式选择 bytes；底层读取失败传播错误，不能伪装为空文件。见 [读取性能与架构审查](vfs-read-performance-review.md)。
@@ -105,7 +105,7 @@ await source.dispose();
 
 ## 4. 宿主与系统目录
 
-[IVFSManager](../../packages/vfs-core/src/interfaces/services/vfs-manager.ts) 提供 initialize/dispose、openFileSystem(rootPath)、mounts/devices/plugins，以及明确的设备与系统操作。没有模块注册表、getEngine 或全局便捷读写接口。
+[IVFSManager](https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/services/vfs-manager.ts) 提供 initialize/dispose、openFileSystem(rootPath)、mounts/devices/plugins，以及明确的设备与系统操作。没有模块注册表、getEngine 或全局便捷读写接口。
 
 `createVFS()` 的顺序：创建引擎 → 注册插件 → 创建 manager 并初始化根 → 注册 null/zero/random 和自定义设备 → 挂额外 backend → 从 `/etc` 创建 ConfigService → 写入缺省初始配置。失败时清理 manager；返回 `{ manager, config }`。
 
@@ -115,7 +115,7 @@ Session 默认只暴露 `/attachments`，显式授权后增加 `/workspace` 等�
 
 ## 5. Path-based 存储后端
 
-完整接口见 [backend.ts](../../packages/vfs-core/src/interfaces/storage/backend.ts)。后端以自己的绝对路径为主键，不再有 IInodeStore/IMetaStore/IContentStore 或 mountId:ino 公共身份。
+完整接口见 [backend.ts](https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/storage/backend.ts)。后端以自己的绝对路径为主键，不再有 IInodeStore/IMetaStore/IContentStore 或 mountId:ino 公共身份。
 
 | 类别 | 方法或属性 |
 | --- | --- |
@@ -163,7 +163,7 @@ await seq.transaction(async tx => {
 
 ## 7. 附件、标签、记录和引用
 
-[IFSMetaDriver](../../packages/vfs-core/src/interfaces/services/fs-meta-driver.ts) 聚合 assets/tags、可选 seq/refs/watcher。空附件/标签返回空值；能力不支持、越权、来源失效不能被包装成“没有数据”。
+[IFSMetaDriver](https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/services/fs-meta-driver.ts) 聚合 assets/tags、可选 seq/refs/watcher。空附件/标签返回空值；能力不支持、越权、来源失效不能被包装成“没有数据”。
 
 普通文档伴生目录为 `_report.md/`，首次 putAsset 按需创建；rename/move 默认跟随，delete 按 assetDirStrategy 处理。内部状态通过 metadata 标记，不能把所有下划线目录都当作任意可访问的附件。`IFile` 只有 read/write、readRaw/writeRaw、rename/copy/move/delete 以及 `asset()`/`listAssets()`/`hasAssetDir()`；putAsset/getAsset/getAssetDirPath/ensureAssetDir/listAssets/deleteAsset/removeAssetDir 属于 `IFSMetaDriver.assets`（`capabilities/asset-ops.ts`），不在文件句柄上。
 
@@ -175,7 +175,7 @@ Session 上传使用该 Session 的 `attachments/`，Round/history 存在业务�
 
 ## 8. 事件、插件与设备
 
-[FSEvent](../../packages/vfs-core/src/interfaces/core/events.ts) 携带 type/payload/timestamp，可附 fromTransaction、mountId、viewId、revision。载荷采用路径，不是旧 nodeId/parentId：
+[FSEvent](https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/core/events.ts) 携带 type/payload/timestamp，可附 fromTransaction、mountId、viewId、revision。载荷采用路径，不是旧 nodeId/parentId：
 
 | 事件 | 主要载荷 |
 | --- | --- |
@@ -195,7 +195,7 @@ ConfigService 使用注入的 `/etc` 来源，有 records 时用 `.seq`，否则
 
 ## 9. 验证与未覆盖边界
 
-当前测试位于 `packages/vfs-core/tests`：01–12 覆盖 CRUD、目录、assets/tags/refs/seq、链接、事务、搜索、事件、挂载和配置；18–22 覆盖 pipe、回归、组合视图、复制、归档与生命周期。IndexedDB 和 LocalFS 测试位于各自包，平台 Session 装配测试在 app-shell。
+当前测试位于 `https://github.com/mushuanli/vfs-core/blob/main/tests`：01–12 覆盖 CRUD、目录、assets/tags/refs/seq、链接、事务、搜索、事件、挂载和配置；18–22 覆盖 pipe、回归、组合视图、复制、归档与生命周期。IndexedDB 和 LocalFS 测试位于各自包，平台 Session 装配测试在 app-shell。
 
 重点验收不止“能读写”：包括路径逃逸、只读写入、旧句柄撤销、来源关闭、records 坐标、事务回滚、搜索和事件信息泄漏、挂载覆盖及应用退出顺序。最新执行结果记录在 [核验清单](../deprecated/implementation-audit.md)，历史结果见 [实现状态](vfs-implementation-status.md)。
 

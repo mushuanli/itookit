@@ -33,7 +33,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 | `@itookit/llm-ui` | Chat UI：聊天界面、流式历史视图、会话编排可视化。 |
 | `@itookit/llm-settings-ui` | LLM 设置 UI：Agent/Provider/Connection/MCP/Skill/Cost/SystemPrompt 编辑器 + 配置导入导出（`llm-import`）。 |
 | `@itookit/vfs-ui` | 独立文件/资源浏览 UI：目录导航、标签、内容大纲；仅依赖 vfs-core，通过公开接口注入数据源、动作、展示和持久化。 |
-| `@itookit/mdxeditor` | 独立 CodeMirror 6 编辑器（目录 `packages/mdx`），不依赖其他内部包；宿主通过公共附件、存储、导航和保存接口注入能力。 |
+| `@itookit/mdxeditor` | 独立 CodeMirror 6 编辑器（[独立仓库](https://github.com/mushuanli/mdxeditor)，通过 npm 安装），不依赖其他内部包；宿主通过公共附件、存储、导航和保存接口注入能力。 |
 | `@itookit/mdx-adapter` | MindOS 编辑器适配：VFS/namespace/Session 校验、文件格式、插件元数据、附件管理 UI、文件聊天引用及会话打印。 |
 | `@itookit/ui-common` | 共享 UI 组件、契约、浏览器工具。 |
 | `@itookit/app-settings` | 设置模块：SettingsEngine、SkillsEngine。 |
@@ -50,20 +50,10 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 | `tauri-app`（`apps/tauri-app`） | Tauri 桌面壳。 |
 | `@itookit/sync-server`（`apps/sync-server`） | Hono HTTP 同步服务（diff 同步 + Bearer auth）。 |
 
-### 独立 VFS 仓库与同步接入
+### 独立 npm 库与同步接入
 
-`packages/vfs-core` 是 [mushuanli/vfs-core](https://github.com/mushuanli/vfs-core) 的 Git 子模块，保留工作区包名 `@itookit/vfs-core`。首次克隆后执行 `git submodule update --init packages/vfs-core`。该仓库有独立 tsconfig、锁文件、测试和构建，不依赖 itookit 的其他包。
+vfs-core、vfs-ui、三个 vfsdriver、vfs-sync 和 driver-llm 已从工作区移出。itookit 固定依赖 npm 版本，不使用源码别名或开发子模块；独立仓库保存在 `../pair-x1/`，不参与应用构建。版本和发布流程见 [npm 库接入](design/npm-library-consumption.md)。
 
-VFS 驱动和 vfs-ui 的内部运行依赖仅为 vfs-core。`packages/sync-adapters` 是宿主同步接入，依赖 vfs-sync 与驱动公共端口；驱动不反向引用它。IndexedDB 适配提交文件、基线和应用证据的原生事务；HTTP 适配复用凭据通道。同步范围由宿主显式传入。
+VFS 驱动和 vfs-ui 的内部运行依赖仅为 vfs-core；本地驱动另依赖 better-sqlite3。vfs-sync、driver-llm 没有运行时包依赖。`packages/sync-adapters` 负责宿主同步接入，调用 vfs-sync 与驱动公共端口；同步范围和项目绑定由应用决定。
 
-VFS `IPlugin` 可以作为可选的变更提示入口，但其文件操作中间件不涵盖其他窗口、原生事务或离线变化，不能替代扫描、恢复日志与条件提交；core 不内置同步业务。
-
-`packages/vfs-ui` 是 [mushuanli/vfs-ui](https://github.com/mushuanli/vfs-ui) 的 Git 子模块。独立仓库通过开发子模块 `vendor/vfs-core` 固定所需核心 API；itookit 中继续使用顶层 workspace 的 core。首次克隆后执行 `git submodule update --init packages/vfs-core packages/vfs-ui`。UI 发布产物不包含开发子模块，发布 npm 前须确认核心版本已包含所需 API。
-
-`packages/vfsdriver-indexeddb` 是 [mushuanli/vfsdriver-indexeddb](https://github.com/mushuanli/vfsdriver-indexeddb) 的 Git 子模块，独立安装、测试、构建和打包。运行依赖仅有 vfs-core，开发子模块 `vendor/vfs-core` 固定核心版本。首次克隆可执行 `git submodule update --init --recursive packages/vfsdriver-indexeddb`。
-
-`packages/vfsdriver-local` 是 [mushuanli/vfsdriver-local](https://github.com/mushuanli/vfsdriver-local) 的 Git 子模块。独立仓库只依赖 vfs-core 与 better-sqlite3，开发 core 通过子模块固定；`/node` 导出 NodeFsOps 与 BetterSqliteSidecarDb。CLI、内核和编辑器集成测试位于 `apps/cli/tests`，不增加驱动反向依赖。
-
-`packages/vfsdriver-agent` 是 [mushuanli/vfsdriver-agent](https://github.com/mushuanli/vfsdriver-agent) 的 Git 子模块，继承原 HTTP 驱动历史。独立运行依赖仅有 vfs-core，开发 core 通过 `vendor/vfs-core` 固定；真实 fs-agent 测试用 `FS_AGENT_MANIFEST` 指定服务器源码，默认独立测试不要求 Rust。首次克隆执行 `git submodule update --init --recursive packages/vfsdriver-agent`。
-
-`packages/vfs-sync` 是 [mushuanli/vfs-sync](https://github.com/mushuanli/vfs-sync) 的 Git 子模块，零运行时包依赖，包含独立配置、锁文件、CI 与本地协议 fixture；首次克隆执行 `git submodule update --init packages/vfs-sync`。同步适配仍在宿主层，vfs-sync 不依赖 vfs-core。
+VFS `IPlugin` 可以提供变更提示，但不能替代跨窗口扫描、恢复日志与条件提交。core 不内置同步业务。

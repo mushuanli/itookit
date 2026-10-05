@@ -163,7 +163,7 @@ stateDiagram-v2
 
 ## 8. 实际接口与调用方式
 
-以下对应已实现接口，不再列出未实现的伪类型。完整定义见 [文件接口](../../packages/vfs-core/src/interfaces/services/file-system.ts)、[视图](../../packages/vfs-core/src/impl/services/FileSystemView.ts)、[Session 仓库](../../packages/llm-session/src/persistence/types.ts)、[挂载服务](../../packages/app-core/src/vfs/session-files.ts)、[编辑器](../../packages/ui-common/src/interfaces/IEditor.ts)。
+以下对应已实现接口，不再列出未实现的伪类型。完整定义见 [文件接口](https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/services/file-system.ts)、[视图](https://github.com/mushuanli/vfs-core/blob/main/src/impl/services/FileSystemView.ts)、[Session 仓库](../../packages/llm-session/src/persistence/types.ts)、[挂载服务](../../packages/app-core/src/vfs/session-files.ts)、[编辑器](../../packages/ui-common/src/interfaces/IEditor.ts)。
 
 ```ts
 interface FileSystemContext {

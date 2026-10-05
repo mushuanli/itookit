@@ -3,11 +3,11 @@
 ## 新增 Provider
 
 1. `packages/kernel-adapters/src/llm-management/constants/providers.ts` — 在 `LLM_PROVIDERS`（`Record<string, LLMProvider>`，key = provider.id）中追加 provider 定义
-2. `packages/driver-llm/src/providers/registry.ts` — 注册 provider 名→构造函数映射
-3. 如需新 Provider 类（非 OpenAI 兼容）：`packages/driver-llm/src/providers/` 新建类 → `extends BaseProvider`
-4. `packages/driver-llm/src/index.ts` — 导出
+2. `https://github.com/mushuanli/driver-llm/blob/main/src/providers/registry.ts` — 注册 provider 名→构造函数映射
+3. 如需新 Provider 类（非 OpenAI 兼容）：`https://github.com/mushuanli/driver-llm/blob/main/src/providers/` 新建类 → `extends BaseProvider`
+4. `https://github.com/mushuanli/driver-llm/blob/main/src/index.ts` — 导出
 
-Provider 设置页通过 `IConnectionService.listProviderModels(provider)` 获取模型目录；`driver-llm/src/providers/model-catalog.ts` 按接入类型处理 OpenAI 兼容、Anthropic、Gemini 的地址、认证、返回结构和分页。请求使用尚未保存的表单地址、Key 与 `modelsPath` 覆盖（相对路径或完整 URL），失败不返回部分目录。刷新只按 ID 追加新模型，已有模型、顺序和未保存编辑保留，刷新成功后自动保存新增模型。新增模型默认启用 `supportsVision`、`supportsThinking`、`supportsTools`，这三个能力不提供开关；模型分类、Thinking 模式、首选协议和其他能力在折叠详情中配置。浏览器访问目录仍受 CORS 限制。
+Provider 设置页通过 `IConnectionService.listProviderModels(provider)` 获取模型目录；`https://github.com/mushuanli/driver-llm/blob/main/src/providers/model-catalog.ts` 按接入类型处理 OpenAI 兼容、Anthropic、Gemini 的地址、认证、返回结构和分页。请求使用尚未保存的表单地址、Key 与 `modelsPath` 覆盖（相对路径或完整 URL），失败不返回部分目录。刷新只按 ID 追加新模型，已有模型、顺序和未保存编辑保留，刷新成功后自动保存新增模型。新增模型默认启用 `supportsVision`、`supportsThinking`、`supportsTools`，这三个能力不提供开关；模型分类、Thinking 模式、首选协议和其他能力在折叠详情中配置。浏览器访问目录仍受 CORS 限制。
 
 Provider 高级设置以 `supportedProtocols` 声明可用协议，以 `defaultProtocol` 选择默认协议；每个协议的端点可独立覆盖（`chatPath` / `responsesPath` / `anthropicPath` / `geminiPath`），留空采用内置路径。Connection 只列出该 Provider 已配置的协议。模型的 `preferredProtocol` 用于连接未指定协议时：连接显式协议 → 当前请求模型的首选协议 → Provider 默认协议 → 旧实现回退；同一 Driver 切换模型时也重新选取协议。旧配置从 implementation 和非空兼容路径推断支持集合；原 Session 的 Anthropic 路径默认选择保持兼容。显式配置协议后，内置 Provider 的启动同步不覆盖用户的地址和路径。目录刷新成功不代表协议验证成功，高级设置可逐个协议发起真实模型请求，验证结果仅对当前编辑有效。新增字段及模型首选协议支持 `.llm` 导入导出，导出继续剥离 API Key。
 
@@ -28,7 +28,7 @@ Provider / Connection 使用 `configuration-form.ts` 的自动保存表单，新
 
 ## 新增 API 协议（如 openai-responses）
 
-1. `driver-llm/src/types/connection.ts` 的 `ApiProtocol` 加枚举值
+1. `https://github.com/mushuanli/driver-llm/blob/main/src/types/connection.ts` 的 `ApiProtocol` 加枚举值
 2. `driver-llm` `resolveProtocol()` 加 URL/provider 推断；`createProvider()` 加协议→Provider 类分发
 3. Provider 类实现该协议端点路径（如 `responsesPath`）
 

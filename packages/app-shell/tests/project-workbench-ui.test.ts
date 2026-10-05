@@ -44,6 +44,9 @@ it('creates project Sessions from the selected project and edits its files in th
         await vi.waitFor(() => expect(projectPanel.querySelector(`[data-resource-id="${projectPath}/@files"]`)).not.toBeNull());
         expect(selector.value).toBe('/');
         expect(sidebar.querySelector(`[data-item-id="${folderBrowserPath((await projects.personal()).path)}"]`)).not.toBeNull();
+        await workbench.startSessionDraft(projectPath);
+        expect(selector.value).toBe('/');
+        expect(sidebar.querySelector(`[data-item-id="${folderBrowserPath((await projects.personal()).path)}"]`)).not.toBeNull();
         selector.value = projectPath; selector.dispatchEvent(new Event('change', { bubbles: true }));
         await vi.waitFor(() => expect(sidebar.querySelector<HTMLButtonElement>('.workbench-project-navigation button[title="文件"]:not([hidden])')?.title).toBe('文件'));
         await workbench.openResource(projectPath);
@@ -62,6 +65,12 @@ it('creates project Sessions from the selected project and edits its files in th
         expect(chat.mock.calls.at(-1)![1].sessionDraft).toBeDefined();
         expect(navigation.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe('新会话');
         await chat.mock.calls.at(-1)![1].sessionDraft.save('persisted composer');
+        const personal = await projects.personal();
+        await workbench.startSessionDraft(folderBrowserPath(personal.path));
+        expect(selector.value).toBe(projectPath);
+        const personalSession = await workbench.createResource();
+        expect((await repository.getManifest(personalSession)).folder).toBe(await projects.sessionFolder(personal));
+        expect(selector.value).toBe(projectPath);
         await workbench.openResource(projectPath);
         const openedDrafts = chat.mock.calls.length;
         await workbench.restoreResource(`draft:${other.project.id}`);

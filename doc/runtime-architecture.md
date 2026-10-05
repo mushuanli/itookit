@@ -602,7 +602,7 @@ Session 回归补迁了 pending-user 测试中遗漏的 ContextAssembler 导入�
 - [Session 实例装配](../packages/llm-session/src/index.ts)、[会话运行协调](../packages/llm-session/src/session/conversation-run-coordinator.ts)。
 - [统一提交](../packages/llm-flow/src/run-submission.ts)、[Flow 执行器](../packages/llm-flow/src/flow/executor.ts)。
 - [Program/Effect 契约](../packages/durable-kernel/src/domain/types.ts)、[Context v2 bridge](../packages/llm-tasks/src/durable/context-program.ts)、[LLM Effect 构造与重试](../packages/llm-tasks/src/durable/program-helpers.ts)。
-- [Context 端口](../packages/llm-context/src/domain/durable.ts)、[通信驱动](../packages/driver-llm/src/core/driver.ts)、[Provider 注册表](../packages/driver-llm/src/providers/registry.ts)。
+- [Context 端口](../packages/llm-context/src/domain/durable.ts)、[通信驱动](https://github.com/mushuanli/driver-llm/blob/main/src/core/driver.ts)、[Provider 注册表](https://github.com/mushuanli/driver-llm/blob/main/src/providers/registry.ts)。
 - [UI 实例端口](../packages/llm-ui/src/domain/ports/SessionViewPort.ts)、[任务挂接](../packages/llm-ui/src/shell/RunAttachmentController.ts)。
 
 后续 GraphMutationRuntime 提取再次通过 Flow 346 项回归，覆盖整批身份绑定失败、patch 幂等冲突、容量限制、循环派发、join 与恢复路径。内部结构见 [Flow API](llm-flow-api.md#执行器内部责任边界)。

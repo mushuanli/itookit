@@ -1,6 +1,15 @@
 packages:
   - packages/*
   - apps/*
+  - '!packages/mdx'
+  - '!packages/mdxeditor'
+  - '!packages/vfs-core'
+  - '!packages/vfs-ui'
+  - '!packages/vfsdriver-indexeddb'
+  - '!packages/vfsdriver-local'
+  - '!packages/vfsdriver-agent'
+  - '!packages/vfs-sync'
+  - '!packages/driver-llm'
 
 ignoredBuiltDependencies:
   - better-sqlite3

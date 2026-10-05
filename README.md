@@ -47,7 +47,7 @@ VFS 是 MindOS 的底层基础，提供了独特的文件系统抽象：
 
 - **与 AI 深度结合**：Agent 的文件读写工具（`file_read` / `file_write` / `glob_search`）直接操作 VFS；会话历史、技能定义、连接配置全部以 VFS 文件方式持久化，Agent 可以用相同的工具接口读取自己的配置文件。
 
-#### 2. MDx 编辑器 — `packages/mdx`
+#### 2. MDx 编辑器 — [@itookit/mdxeditor](https://github.com/mushuanli/mdxeditor)
 
 基于 **CodeMirror 6** 构建的下一代 Markdown 编辑器，兼顾书写体验与强大的扩展能力：
 

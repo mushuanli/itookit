@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import path from 'path';
+import { builtinModules } from 'node:module';
 import { workspaceAliases, workspaceExcludes } from '../../scripts/workspace-sources.mjs';
 
 export default defineConfig({
@@ -43,15 +44,12 @@ export default defineConfig({
         target:    'es2021',
         sourcemap: !!process.env.TAURI_ENV_DEBUG,
         rollupOptions: {
-            // Mark ALL node:* built-ins as external.
+            // Keep both prefixed and unprefixed Node built-ins external.
             // NodeFsOps and BetterSqliteSidecarDb are only loaded via dynamic import
             // in defaultCreateFs/defaultCreateDb. Since the Tauri app ALWAYS provides
             // createFs and createDb, those dynamic chunks are never fetched at runtime.
             external: (id: string) =>
-                id.startsWith('node:') ||
-                id === 'better-sqlite3' ||
-                id === 'child_process' ||
-                id === 'readline',
+                id.startsWith('node:') || builtinModules.includes(id) || id === 'better-sqlite3',
         },
     },
 

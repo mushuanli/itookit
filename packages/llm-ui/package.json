@@ -96,7 +96,7 @@
   "dependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/llm-session": "workspace:*",
-    "@itookit/vfs-core": "workspace:*",
+    "@itookit/vfs-core": "5.3.1",
     "js-yaml": "^4.1.1",
     "marked": "^16.4.2",
     "@itookit/ui-common": "workspace:*",
@@ -104,12 +104,12 @@
     "@itookit/durable-kernel": "workspace:*"
   },
   "peerDependencies": {
-    "@itookit/mdxeditor": "workspace:*",
+    "@itookit/mdxeditor": "0.5.1",
     "@itookit/mdx-adapter": "workspace:*",
     "@itookit/llm-settings-ui": "workspace:*"
   },
   "devDependencies": {
-    "@itookit/mdxeditor": "workspace:*",
+    "@itookit/mdxeditor": "0.5.1",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.19.25",
     "@vitest/coverage-v8": "^1.6.1",
@@ -120,7 +120,7 @@
     "vitest": "^1.6.1",
     "@itookit/mdx-adapter": "workspace:*",
     "@itookit/llm-settings-ui": "workspace:*",
-    "@itookit/driver-llm": "workspace:*",
+    "@itookit/driver-llm": "0.2.0",
     "@itookit/tools": "workspace:*",
     "@itookit/kernel-adapters": "workspace:*",
     "@itookit/llm-tasks": "workspace:*",
