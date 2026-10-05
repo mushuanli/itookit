@@ -38,3 +38,7 @@
 	path = packages/vfs-sync
 	url = git@github.com:mushuanli/vfs-sync.git
 	branch = main
+[submodule "packages/driver-llm"]
+	path = packages/driver-llm
+	url = git@github.com:mushuanli/driver-llm.git
+	branch = main
