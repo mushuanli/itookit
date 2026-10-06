@@ -220,10 +220,9 @@ export class SessionWorkbench implements WorkspaceController {
         this.sidebarLayout.navigation.append(tree);
         if (this.projects) this.installProjectNavigation();
         this.sidebarUI = createVFSUI({ sessionListContainer: tree, title: this.projects ? t('project.workspace') : '会话', scopeId: SESSION_BROWSER_SCOPE,
-            persistence: this.uiPersistence,
+            persistence: this.uiPersistence, onError: error => this.report(error),
             listItems: items => this.projectNavigation?.navigationItems(items, this.sidebarUI?.getSnapshot().query) ?? items,
             titleHeader: this.projectNavigation?.header, toolbarContainer: this.projectNavigation?.toolbarContainer,
-            directoryAction: this.projectNavigation?.options.navigationAction,
             toolbarOptions: this.projectNavigation?.options.navigationToolbarOptions,
             rowCreation: { visible: node => !isFlowPath(node.id) && ['project-files', 'files'].includes(resolveBrowserTarget(node.id).kind),
                 run: (node, type) => this.createDirectoryEntry(node.id, type) },
@@ -274,7 +273,7 @@ export class SessionWorkbench implements WorkspaceController {
                     if (target.kind === 'favorite' || target.kind === 'favorites') return [];
                     if (target.kind === 'project-files' && target.path === WORKSPACE_PATH) return [];
                     if (this.projects && item.metadata?.custom?.projectId)
-                        return [...defaults.filter(entry => !('id' in entry) || !['create-in-folder-session', 'create-in-folder-folder', 'import'].includes(entry.id)),
+                        return [...defaults.filter(entry => !('id' in entry) || !['create-in-folder-session', 'create-in-folder-folder'].includes(entry.id)),
                             { type: 'separator' }, ...this.syncMenu.items(String(item.metadata.custom.projectId))];
                     if (target.kind === 'folder' && folderPathFromBrowserPath(item.id)?.endsWith('/@sessions'))
                         return defaults.filter(entry => !('id' in entry) || !['delete', 'rename'].includes(entry.id));
@@ -1309,7 +1308,7 @@ export class SessionWorkbench implements WorkspaceController {
     async destroy(): Promise<void> {
         ++this.openIntent;
         this.cancelViewLoad();
-        this.closed = true; ++this.fileNavigationRevision; this.projectNavigation?.cancelPending();
+        this.closed = true; ++this.fileNavigationRevision; this.projectNavigation?.destroy();
         this.sidebarUI?.cancelPendingSelection?.(); this.dialogs.abort(); this.subscriptions.dispose();
         if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = undefined; }
         await Promise.all([this.tail, this.refreshTail]); await this.fileNavigation; await Promise.all(this.readCleanup);

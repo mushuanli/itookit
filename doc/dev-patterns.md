@@ -111,3 +111,9 @@ Provider 保存为启用且包含聊天模型时，如尚无对应 Connection，
 ChatInput 的 Agent、Connection、模型层级及其他会话配置修改立即提交保存，正文草稿单独防抖。`StateManager.saveInputConfiguration` 在调用时复制配置并固定 Session/branch，通过串行队列写入 Session settings 和分支草稿；菜单与斜杠配置命令共用该路径。编辑器 `flushPendingSave` 等待并重试当前配置，成功后才释放。设置写入通知 Session 投影缓存失效，切回会话读取已提交数据。
 
 Responses 请求统一发送 `input` item 数组，包括单条纯文本消息，以兼容只接受列表的代理；图片内容使用 `input_image`，`image_url` 为 URL 字符串，`detail` 为独立字段。
+
+### Tauri 开发模块校验
+
+`node --experimental-vm-modules scripts/check-tauri-dev-modules.mjs` 使用隔离 Vite 缓存和原生 ESM 链接检查桌面入口的静态开发模块图，不执行界面代码。缺失 default/named export 会直接失败，避免仅凭生产构建成功遗漏开发模式错误。对应回归位于 `packages/app-shell/tests/tauri-dev-modules.test.ts`。
+
+`vfsdriver-local` 的 Node SQLite 回退在 WebView 中不可运行；Tauri 通过 `createDb` 注入原生 `TauriSqlSidecarDb`。Vite 将 `better-sqlite3` 映射到显式的不可用适配器，防止开发服务器直接向浏览器发送 CommonJS 原生模块。Node 文件系统内置模块仍由生产构建外置，宿主通过 `createFs` 注入原生端口。

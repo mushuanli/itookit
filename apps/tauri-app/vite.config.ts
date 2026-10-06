@@ -25,6 +25,8 @@ export default defineConfig({
 
     resolve: {
         alias: [
+            // The local driver's Node fallback is unreachable after native port injection.
+            { find: /^better-sqlite3$/, replacement: path.resolve(__dirname, 'src/db/node-sqlite-unavailable.ts') },
             { find: '@tauri-apps/api/core', replacement: path.resolve(__dirname, 'src/log/traced-core.ts') },
             // Workspace packages resolve to source: one copy in the dev graph, HMR-friendly.
             // The list (and the CSS subpath entries) is shared with the web app so the two dev
@@ -45,11 +47,10 @@ export default defineConfig({
         sourcemap: !!process.env.TAURI_ENV_DEBUG,
         rollupOptions: {
             // Keep both prefixed and unprefixed Node built-ins external.
-            // NodeFsOps and BetterSqliteSidecarDb are only loaded via dynamic import
-            // in defaultCreateFs/defaultCreateDb. Since the Tauri app ALWAYS provides
-            // createFs and createDb, those dynamic chunks are never fetched at runtime.
+            // Tauri always injects createFs/createDb. Node filesystem modules stay
+            // unreachable, and the SQLite fallback resolves to the explicit webview guard.
             external: (id: string) =>
-                id.startsWith('node:') || builtinModules.includes(id) || id === 'better-sqlite3',
+                id.startsWith('node:') || builtinModules.includes(id),
         },
     },
 

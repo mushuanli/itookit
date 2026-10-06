@@ -27,9 +27,8 @@ it('resolves project folders from one organization snapshot per sync and refresh
         const project = await projects.create('Demo');
         const commands = actions(); commands.createProject.mockResolvedValue(undefined);
         const navigation = new ProjectNavigation(projects, () => undefined, commands);
-        const create = navigation.header.querySelector<HTMLButtonElement>('[data-action="create-project"]')!;
-        expect(create.hidden).toBe(false); expect(create.getAttribute('aria-label')).toBe(create.title);
-        create.click(); expect(commands.createProject).toHaveBeenCalledWith('/');
+        expect(navigation.header.querySelector('[data-action="create-project"]')).toBeNull();
+        expect(navigation.toolbarContainer.hidden).toBe(false);
 
         const list = vi.spyOn(repository, 'listSummaries'), folders = vi.spyOn(repository, 'listFolders');
         list.mockClear(); folders.mockClear();
@@ -37,10 +36,13 @@ it('resolves project folders from one organization snapshot per sync and refresh
         expect(list).toHaveBeenCalledTimes(1);
         expect(folders).toHaveBeenCalledTimes(1);
         expect(navigation.currentProject()?.path).toBe('/Demo');
+        expect(navigation.toolbarContainer.hidden).toBe(true);
+        expect(navigation.header.querySelectorAll('button')).toHaveLength(3);
         const selector = navigation.header.querySelector('select')!;
         expect(selector.querySelector('option[value="/"]')?.textContent).toBe('所有项目');
         selector.value = '@new-project'; selector.dispatchEvent(new Event('change'));
-        expect(commands.createProject).toHaveBeenCalledWith('/'); expect(selector.value).toBe(folderBrowserPath('/Demo'));
+        await vi.waitFor(() => expect(commands.createProject).toHaveBeenCalledWith('/'));
+        await vi.waitFor(() => expect(selector.value).toBe(folderBrowserPath('/Demo')));
         await navigation.refresh();
         expect(list).toHaveBeenCalledTimes(2);
         expect(folders).toHaveBeenCalledTimes(2);

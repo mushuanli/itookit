@@ -300,6 +300,7 @@
 .workbench-project-navigation button { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 7px; border-radius: 5px; }
 .workbench-project-navigation button[hidden] { display: none; }
 .workbench-project-navigation__transfer { display: flex; flex-shrink: 0; }
+.workbench-project-navigation__transfer[hidden] { display: none; }
 .workbench-project-navigation .vfs-node-list__new-controls { margin: 0; gap: 4px; }
 .workbench-project-navigation .vfs-node-list__new-btn svg { width: 18px; height: 18px; }
 .workbench-project-navigation button:hover:not(:disabled) { background: var(--vfs-active-bg, #eef2ff); }
@@ -365,3 +366,10 @@
 .project-sync-dialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; }
 .project-sync-dialog ul { padding-inline-start: 20px; overflow-wrap: anywhere; }
 .project-sync-dialog .project-dialog__actions { flex-wrap: wrap; }
+
+/* Keep secondary section controls discoverable by pointer, keyboard and touch. */
+@media (hover: hover) {
+    .workbench-sidebar__header > button:last-child { opacity: 0; }
+    .workbench-sidebar__header:hover > button:last-child,
+    .workbench-sidebar__header:focus-within > button:last-child { opacity: 1; }
+}
