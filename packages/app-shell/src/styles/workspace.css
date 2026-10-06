@@ -282,9 +282,9 @@
 .workbench-sidebar__header button:hover, .workbench-directory button:hover:not(:disabled), .workbench-tabs button:hover:not(:disabled) { background: var(--vfs-active-bg, #eef2ff); }
 .workbench-sidebar__header button:focus-visible, .workbench-directory button:focus-visible, .workbench-tabs button:focus-visible { outline: 2px solid var(--primary-color, #6366f1); outline-offset: -2px; }
 .workbench-sidebar__header button[aria-expanded="false"] .workbench-icon { transform: rotate(-90deg); }
-.workbench-project-navigation { flex-wrap: nowrap; padding: 8px; gap: 4px; --vfs-toolbar-icon-size: 18px; --vfs-scope-font-weight: 600; --vfs-scope-background: var(--mm-bg-color, #fff); }
+.workbench-project-navigation { flex: 1; width: 100%; min-width: 0; flex-wrap: nowrap; padding: 8px; gap: 6px; --vfs-toolbar-icon-size: 18px; --vfs-scope-font-weight: 600; --vfs-scope-background: var(--mm-bg-color, #fff); }
 .workbench-project-navigation > select { flex: 1; width: 0; }
-.workbench-project-navigation > button { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 7px; border-radius: 5px; }
+.workbench-project-navigation > button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 32px; height: 34px; padding: 7px; border-radius: 7px; }
 .workbench-project-navigation > button[hidden] { display: none; }
 .workbench-project-navigation__transfer { display: flex; flex-shrink: 0; }
 .workbench-project-navigation__transfer[hidden] { display: none; }
