@@ -1,4 +1,5 @@
 import { t } from '@itookit/common';
+import { VFS_DOM_EVENTS } from '@itookit/vfs-ui';
 
 /** Keep list and editor as separate mobile screens within one workspace. */
 export function setupMobileWorkspaceView(layout: HTMLElement, sidebar: HTMLElement, editor: HTMLElement): () => void {
@@ -14,14 +15,11 @@ export function setupMobileWorkspaceView(layout: HTMLElement, sidebar: HTMLEleme
     const observer = new MutationObserver(sync);
     observer.observe(editor, { childList: true });
     const showList = () => {
-        if (sidebar.classList.contains('project-workbench--family')) sidebar.querySelector<HTMLButtonElement>('.vfs-columns__back')?.click();
         layout.dataset.mobileView = 'list';
     };
-    const showDetail = (event: Event) => {
-        if ((event.target as Element).closest('.vfs-node-item__content') || (hasEditor() && (event.target as Element).closest('.vfs-directory-item__header[aria-pressed]'))) layout.dataset.mobileView = 'detail';
-    };
+    const showDetail = () => { layout.dataset.mobileView = 'detail'; };
     back.addEventListener('click', showList);
-    sidebar.addEventListener('click', showDetail);
+    sidebar.addEventListener(VFS_DOM_EVENTS.resourceActivated, showDetail);
     sync();
-    return () => { observer.disconnect(); back.removeEventListener('click', showList); sidebar.removeEventListener('click', showDetail); };
+    return () => { observer.disconnect(); back.removeEventListener('click', showList); sidebar.removeEventListener(VFS_DOM_EVENTS.resourceActivated, showDetail); };
 }

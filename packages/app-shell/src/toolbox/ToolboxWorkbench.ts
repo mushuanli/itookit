@@ -82,12 +82,13 @@ export class ToolboxWorkbench implements WorkspaceController {
         await this.loadDirectories();
         this.buildFilters();
         this.ui = createVFSUI({ sessionListContainer: sidebar, title: t('toolbox.title'), scopeId: TOOLBOX_SCOPE, persistence: this.options.uiPersistence, autoSelectFirst: false,
+            appearance: { showTimestamp: false, menuVisibility: 'always' },
             searchPlaceholder: t('toolbox.search'), listHeader: this.filters, listItems: items => this.project(items),
             alwaysLoadedDirectories: this.loadedDirectories,
             defaultUiSettings: { showSummary: true, showTags: true, showBadges: false, sortBy: 'title' },
             fileCreation: { resolveParent: path => path ?? (['agents', 'flows'].includes(this.prefs.filter) ? '/' + this.prefs.filter : null) },
             sort: { by: 'title', direction: 'asc', directoriesFirst: true },
-            compareItems: compareModelItems, cardDirectory: node => !!(node.metadata.custom.modelDrawer || node.metadata.custom.resourceDrawer),
+            compareItems: compareModelItems,
             contextMenu: { items: (item, defaults) => this.menu(item, defaults), bulkItems: (items, defaults) => this.bulkMenu(items, defaults) },
         }, this.view);
         this.connectSources();

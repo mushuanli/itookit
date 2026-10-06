@@ -4,6 +4,8 @@
 
 挂载的授权、UI、slash 与平台边界见 [Session 挂载与访问边界](vfs-session-mount-access.md)，已同步实现。
 
+vfs-ui 0.5.4 统一维护组件内部样式和交互。宿主通过 `appearance`、节点 `presentation.layout/titleLayout`、`toolbarOptions.variant` 和公开 CSS 变量选择展示；抽屉分组、业务动作及工作台布局仍由宿主提供。移动端通过 `VFS_DOM_EVENTS.resourceActivated` 切换正文，不查询内部 DOM 或模拟点击；抽屉展开变化通过 `directoryExpansionChanged` 通知。架构检查禁止 app-shell 使用 `.vfs-*` 内部选择器。
+
 ## 项目工作台（2026-09-26）
 
 Web 与 Tauri 的 Chat／项目导航统一为“工作台”，由 `ProjectService`、`SessionWorkbench` 共用以下投影：

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it } from 'vitest';
 import { setupMobileWorkspaceView } from '../src/navigation/mobile-workspace-view';
+import { VFS_DOM_EVENTS } from '@itookit/vfs-ui';
 
 afterEach(() => { document.body.innerHTML = ''; });
 
@@ -19,8 +20,7 @@ it('switches a narrow workspace between the file list and the active editor', as
         expect(layout.dataset.mobileView).toBe('detail');
         layout.querySelector<HTMLButtonElement>('.mm-mobile-back')!.click();
         expect(layout.dataset.mobileView).toBe('list');
-        sidebar.innerHTML = '<button class="vfs-node-item__content">Open file</button>';
-        sidebar.querySelector('button')!.click();
+        sidebar.dispatchEvent(new CustomEvent(VFS_DOM_EVENTS.resourceActivated));
         expect(layout.dataset.mobileView).toBe('detail');
     } finally { dispose(); }
 });

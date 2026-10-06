@@ -104,6 +104,8 @@ export function sourceErrors(source, file, text, packages) {
     const errors = [];
     const report = (node, message) => errors.push(`${file}:${ast.getLineAndCharacterOfPosition(node.getStart()).line + 1}: ${message}`);
     const visit = node => {
+        if (source.name === '@itookit/app-shell' && ts.isStringLiteralLike(node) && /(?:\.|^)vfs-[\w-]+/.test(node.text))
+            report(node, 'app-shell must use public VFS options/events instead of internal DOM classes');
         if (source.name === '@itookit/llm-ui' && ts.isStringLiteralLike(node) && node.text === 'app_create_params')
             report(node, 'UI must receive initial input through instance options, not ambient host storage');
         const specifier = moduleSpecifier(node);
@@ -123,13 +125,19 @@ export function sourceErrors(source, file, text, packages) {
     return errors;
 }
 
+export function vfsStyleErrors(source, file, text) {
+    if (source.name !== '@itookit/app-shell') return [];
+    return text.split('\n').flatMap((line, index) => /\.vfs-[\w-]+/.test(line)
+        ? [`${file}:${index + 1}: app-shell must style its own layout or public VFS CSS variables, not internal component selectors`] : []);
+}
+
 async function filesIn(dir) {
     const entries = await readdir(dir, { withFileTypes: true }).catch(error => {
         if (error.code === 'ENOENT') return [];
         throw error;
     });
     const files = await Promise.all(entries.map(entry => entry.isDirectory() ? filesIn(resolve(dir, entry.name)) : resolve(dir, entry.name)));
-    return files.flat().filter(file => /\.[cm]?[jt]sx?$/.test(file));
+    return files.flat().filter(file => /\.[cm]?[jt]sx?$/.test(file) || file.endsWith('.css'));
 }
 
 async function readPackages(root, group) {
@@ -160,7 +168,8 @@ export async function checkBoundaries(root) {
         }
         for (const file of pkg.external ? [] : await filesIn(resolve(pkg.dir, 'src'))) {
             if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(file)) continue;
-            errors.push(...sourceErrors(pkg, file, await readFile(file, 'utf8'), packages));
+            const text = await readFile(file, 'utf8');
+            errors.push(...(file.endsWith('.css') ? vfsStyleErrors(pkg, file, text) : sourceErrors(pkg, file, text, packages)));
         }
     }
     return errors;

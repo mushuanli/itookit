@@ -1,11 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dependencyError, manifestDependencyError, sourceErrors } from '../check-boundaries.mjs';
+import { dependencyError, manifestDependencyError, sourceErrors, vfsStyleErrors } from '../check-boundaries.mjs';
 
 const pkg = (name, host = false) => ({ name: '@itookit/' + name, dir: '/repo/' + (host ? 'apps/' : 'packages/') + name, host, exports: { '.': './src/index.ts', './style.css': './src/style.css' } });
 const core = pkg('app-core'), shell = pkg('app-shell'), vfs = pkg('vfs-ui'), host = pkg('web', true);
 const packages = [core, shell, vfs, host, pkg('vfs-core'), pkg('vfs-sync')];
 const inspect = (source, text, file = source.dir + '/src/index.ts') => sourceErrors(source, file, text, packages);
+
+test('app-shell consumes public VFS events and presentation tokens without internal DOM or CSS selectors', () => {
+    assert.match(inspect(shell, "sidebar.querySelector('.vfs-columns__back').click()")[0], /public VFS/);
+    assert.match(inspect(shell, "row.classList.contains('vfs-node-item__content')")[0], /public VFS/);
+    assert.equal(inspect(shell, 'sidebar.addEventListener(VFS_DOM_EVENTS.resourceActivated, showDetail)').length, 0);
+    assert.match(vfsStyleErrors(shell, 'workspace.css', '.toolbox .vfs-node-item__timestamp { display: none; }')[0], /public VFS/);
+    assert.equal(vfsStyleErrors(shell, 'workspace.css', '.toolbox { --vfs-item-icon-size: 20px; }').length, 0);
+    assert.equal(vfsStyleErrors(vfs, 'style.css', '.vfs-node-item__timestamp { display: none; }').length, 0);
+});
 
 test('public execution and conversation capabilities cannot depend on legacy shared contracts', () => {
     for (const source of ['@itookit/tools', '@itookit/device-tty', '@itookit/llm-tasks', '@itookit/llm-flow', '@itookit/llm-session']) {

@@ -5,7 +5,7 @@ itookit 通过 npm 注册表安装以下库，源码不再作为工作区包或 
 | npm 包 | 固定版本 | 源码仓库 |
 |---|---|---|
 | @itookit/vfs-core | 5.3.1 | [vfs-core](https://github.com/mushuanli/vfs-core) |
-| @itookit/vfs-ui | 0.5.3 | [vfs-ui](https://github.com/mushuanli/vfs-ui) |
+| @itookit/vfs-ui | 0.5.4 | [vfs-ui](https://github.com/mushuanli/vfs-ui) |
 | @itookit/vfsdriver-indexeddb | 5.3.1 | [vfsdriver-indexeddb](https://github.com/mushuanli/vfsdriver-indexeddb) |
 | @itookit/vfsdriver-local | 5.3.0 | [vfsdriver-local](https://github.com/mushuanli/vfsdriver-local) |
 | @itookit/vfsdriver-agent | 5.3.0 | [vfsdriver-agent](https://github.com/mushuanli/vfsdriver-agent) |

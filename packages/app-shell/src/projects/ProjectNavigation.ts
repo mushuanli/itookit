@@ -47,7 +47,7 @@ export class ProjectNavigation {
         this.buildHeader();
         this.updateHeader([], 0);
         this.options = {
-            navigationToolbarOptions: { definitions: [
+            navigationToolbarOptions: { variant: 'plain', definitions: [
                 this.transferAction('import', context => this.actions.importItems(context)),
                 this.transferAction('export', context => this.actions.exportItems(context)),
             ] },

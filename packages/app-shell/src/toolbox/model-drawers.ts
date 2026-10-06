@@ -25,6 +25,7 @@ export function modelDrawers(items: VFSNodeUI[], inventory: ToolboxInventory): V
         if (file) children.unshift({ ...file, icon: `<span role="img" aria-label="${t('toolbox.providerSettings')}" title="${t('toolbox.providerSettings')}">${TOOLBOX_ICONS.settings}</span>`, metadata: { ...file.metadata, title: t('toolbox.providerSettings'), tags: [],
             custom: { ...file.metadata.custom, modelSettings: true } }, content: { ...file.content!, searchableText: provider!.name + ' ' + file.content?.searchableText } });
         return { ...seed, id: modelDrawerId(id), type: 'directory', kind: 'group', icon: providerIcon(id, provider?.icon), content: undefined, children,
+            presentation: { ...seed.presentation, layout: 'drawer', titleLayout: 'stacked' },
             metadata: { ...seed.metadata, path: modelDrawerId(id), title: provider?.name ?? id, parentPath: null, tags: [],
                 custom: { _readOnly: true, modelDrawer: true, navigationMenu: true, modelRank: rank,
                     navigationDescription: t('toolbox.providerSummary', { count: children.length - (file ? 1 : 0), status }) } } };
