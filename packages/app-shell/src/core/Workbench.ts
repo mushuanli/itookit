@@ -49,7 +49,6 @@ export class Workbench {
                 showFileExtensions: config.showFileExtensions ?? true,
                 activateDirectories: true, autoSelectFirst: false, listHeader: root,
                 listItems: config.uiOptions?.listItems,
-                toolbarOptions: { ...config.uiOptions?.toolbarOptions, hiddenActions: ['create-file', 'create-directory', ...(config.uiOptions?.toolbarOptions?.hiddenActions ?? [])] },
                 rowCreation: { visible: () => true, run: (node, type) => this.createInDirectory(node.id, type) },
             },
             this.engine
