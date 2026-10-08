@@ -26,6 +26,8 @@ import { InteractionPanel } from './InteractionPanel';
 import { delegate } from '../../utils/domEvents';
 
 export interface ChatInputOptions {
+    attachments?: boolean;
+    executorLocked?: boolean;
     maxAgentExchanges?: number;
     onSend: (text: string, files: File[], executorId: string, overrides?: ChatOverrides) => Promise<void>;
     onStop: () => void;
@@ -142,6 +144,7 @@ export class ChatInput implements IChatInputPresenter {
 
     private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
     private loading = false;
+    private availability = {canSend: true, canInterrupt: true};
     private files: File[] = [];
     private settingsExpanded = false;
     private currentAgentId: string = 'default';
@@ -227,6 +230,8 @@ export class ChatInput implements IChatInputPresenter {
         }, options.maxAgentExchanges);
         this.initExecutors();
         this.syncUIFromConfig();
+        if (options.attachments === false) this.attachBtn.hidden = true;
+        this.applyAvailability();
         this.loadConnections();
 
         // TokenMeterPlugin — always registered, shows token stats after each response
@@ -312,6 +317,17 @@ export class ChatInput implements IChatInputPresenter {
         if (this.moreBtn) this.moreBtn.disabled = loading;
 
         if (loading) this.toggleSettings(false);
+        this.applyAvailability();
+    }
+
+    setAvailability(value: {canSend: boolean; canInterrupt: boolean}): void {
+        this.availability = value; this.applyAvailability();
+    }
+
+    private applyAvailability(): void {
+        this.sendBtn.disabled = !this.availability.canSend || this.remoteSending;
+        this.stopBtn.disabled = !this.availability.canInterrupt;
+        this.agentPickerBtn.disabled = this.loading || !!this.options.executorLocked;
     }
 
     setConfig(config: Partial<IChatInputConfig>): void {
@@ -545,7 +561,7 @@ export class ChatInput implements IChatInputPresenter {
             }
         });
 
-        this.textarea.addEventListener('paste', (e) => this.attachmentMgr.handlePaste(e));
+        if (this.options.attachments !== false) this.textarea.addEventListener('paste', (e) => this.attachmentMgr.handlePaste(e));
 
         this.sendBtn.addEventListener('click', () => this.triggerSend());
         this.stopBtn.addEventListener('click', () => this.options.onStop());
@@ -584,7 +600,7 @@ export class ChatInput implements IChatInputPresenter {
         });
 
         this.bindSettingsEvents();
-        this.attachmentMgr.bindDragEvents();
+        if (this.options.attachments !== false) this.attachmentMgr.bindDragEvents();
         this.bindOutsideClickHandler();
 
         // 初始化插件系统（放在所有事件绑定之后）
@@ -702,9 +718,12 @@ export class ChatInput implements IChatInputPresenter {
     }
 
     private async triggerSend(): Promise<void> {
+        if (!this.availability.canSend) return;
         const text = this.textarea.value.trim();
         if (!text && this.files.length === 0) return;
         if (this.loading && !/^\/(flow|cancel|approve|resume)(?:\s|$)/.test(text)) return;
+
+        if (this.config.agentId.startsWith('remote:')) { await this.triggerRemoteSend(text); return; }
 
         // ✨ before 钩子
         for (const plugin of this.plugins) {
@@ -713,7 +732,7 @@ export class ChatInput implements IChatInputPresenter {
 
         const currentExecutor = this.config.agentId;
         const currentFiles = [...this.files];
-        const overrides = this.buildOverrides();
+        const overrides = currentExecutor.startsWith('remote:') ? undefined : this.buildOverrides();
 
         this.textarea.value = '';
         this.textarea.style.height = 'auto';
@@ -734,6 +753,21 @@ export class ChatInput implements IChatInputPresenter {
     }
 
     openConnectionPicker(): void { this.connectionTier.openConnPicker(); }
+
+    private remoteSending = false;
+    private async triggerRemoteSend(text: string): Promise<void> {
+        if (this.remoteSending) return;
+        const submitted = this.textarea.value;
+        const submittedFiles = [...this.files];
+        this.remoteSending = true; this.sendBtn.disabled = true;
+        try {
+            await this.options.onSend(text, submittedFiles, this.config.agentId);
+            if (this.textarea.value === submitted) { this.textarea.value = ''; this.config.text = ''; }
+            this.files = this.files.filter(file => !submittedFiles.includes(file));
+            this.attachmentMgr.renderAttachments(); this.adjustTextareaHeight();
+        } catch { /* The host reports errors; keep the original text and attachments. */ }
+        finally { this.remoteSending = false; this.applyAvailability(); }
+    }
 
     private buildOverrides(): ChatOverrides {
         const overrides: ChatOverrides = { executionMode: this.config.settings.executionMode ?? 'chat' };
@@ -808,7 +842,16 @@ export class ChatInput implements IChatInputPresenter {
     // UI 同步
     // ================================================================
 
+    private syncRemoteControls(): void {
+        const remote = this.config.agentId.startsWith('remote:');
+        this.container.classList.toggle('llm-input--remote', remote);
+        for (const selector of ['.llm-input__btn--settings', '.llm-input__conn-quick-wrapper', '.llm-input__tier-quick-wrapper', '.llm-input__execution-mode', '.llm-input__execution-hint', '.llm-input__btn--websearch', '.llm-input__active-settings']) {
+            for (const element of this.container.querySelectorAll<HTMLElement>(selector)) element.hidden = remote;
+        }
+        if (remote) this.toggleSettings(false);
+    }
     private syncExecutionMode(): void {
+        this.syncRemoteControls();
         this.executionMode?.update({ mode: this.config.settings.executionMode, flow: Boolean(this.config.settings.flowId),
             loading: this.loading, locked: this.config.settings.executionModeLocked });
     }
@@ -1166,6 +1209,7 @@ export class ChatInput implements IChatInputPresenter {
         this.config.agentId = id;
         this.currentAgentId = id;
         this.updateAgentTrigger();
+        this.syncRemoteControls();
         this.options.onExecutorChange?.(id);
         this.notifyConfigChange();
     }
@@ -1186,7 +1230,7 @@ export class ChatInput implements IChatInputPresenter {
             this.agentMetaEl.textContent = '';
             this.agentMetaEl.style.display = 'none';
         }
-        this.updatePromptPickerVisibility();
+        this.updatePromptPickerVisibility(); this.syncRemoteControls();
     }
 
     // ── Prompt Picker methods ─────────────────────────────────────────────────

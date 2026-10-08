@@ -40,7 +40,7 @@ export class SyncDialog {
         this.onClose();
     };
     private setDisabled(disabled: boolean, allowClose = false): void {
-        for (const input of this.dialog.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button, select')) {
+        for (const input of this.dialog.querySelectorAll<HTMLButtonElement | HTMLSelectElement | HTMLInputElement>('button, select, input')) {
             input.disabled = (disabled && !(allowClose && input.dataset.closeControl === 'true')) || input.dataset.unavailable === 'true';
         }
     }

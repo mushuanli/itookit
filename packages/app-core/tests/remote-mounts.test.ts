@@ -2,6 +2,8 @@ import { it, expect, vi } from 'vitest';
 import { MemoryBackend, createFileSystemSource, createFileSystemView, createVFS, FSError, type FileSystemSourceOwner } from '@itookit/vfs-core';
 import { createSessionBrowser, folderBrowserPath } from '../src/session/session-browser';
 import { createApplicationRuntime } from '../src/runtime/create-application-runtime';
+import { MCPRemoteConnections } from '../src/projects/mcp-remote-connections';
+import { mockPiAgentDiscovery } from './helpers/mcp-discovery';
 
 it('removes the remote identity if navigation creation fails before a grant is published', async () => {
     const runtime = await createApplicationRuntime({ backend: new MemoryBackend(), ownerKind: 'web', remoteSourceProvider: {
@@ -233,10 +235,19 @@ it('shares named connections across distinct remote roots and reuses the same pr
         await expect(remote.removeConnection(connection)).rejects.toMatchObject({ code: 'EBUSY' });
         await expect(runtime.projects.createRemote('Escape', null, connection, '/docs/../private')).rejects.toMatchObject({ code: 'EINVAL' });
         const root = await runtime.vfs.openFileSystem('/');
-        const saved = await root.meta.seq!.getEntry(`/etc/fs/remote/${connection}.seq`, 'config');
+        const saved = JSON.stringify((await runtime.agentService.getMCPServers()).find(server => server.id === connection));
+        expect(await root.driver.exists(`/etc/fs/remote/${connection}.seq`)).toBe(false);
+        expect((await runtime.projects.get(a.project.id)).displayName).toBe('Renamed:A');
+        const configured = (await runtime.agentService.getMCPServers()).find(server => server.id === connection)!;
+        await expect(runtime.agentService.deleteMCPServer(connection)).rejects.toMatchObject({code:'EBUSY'});
+        await expect(runtime.agentService.saveMCPServer({...configured,endpoint:'http://other.test/mcp'})).rejects.toMatchObject({code:'EBUSY'});
+        await runtime.agentService.saveMCPServer({...configured,name:'MCP renamed'});
+        expect((await runtime.projects.get(a.project.id)).displayName).toBe('MCP renamed:A');
+        expect((await runtime.projects.get(a.project.id)).path).toBe(a.path);
+        expect(remote.findRemoteProject(connection,'/docs/a/')).toBe(a.project.id);
         expect(saved).not.toContain('password-for-files'); expect(saved).toContain('Renamed');
         const { ProjectRemoteMountService } = await import('../src/projects/remote-mounts');
-        const reloaded = new ProjectRemoteMountService(root, { ...provider, async dispose() {} }, async () => {}, async () => {});
+        const reloaded = new ProjectRemoteMountService(root, { ...provider, async dispose() {} }, async () => {}, async () => {}, new (await import('../src/projects/mcp-remote-connections')).MCPRemoteConnections(runtime.agentService,provider));
         await reloaded.init(); expect(reloaded.findRemoteProject(connection, '/docs/a')).toBe(a.project.id); await reloaded.dispose();
         const browser = await createSessionBrowser({ repository: runtime.sessionRepository, files: runtime.sessionFiles, kernel: runtime.kernel.kernel, projects: runtime.projects });
         try {
@@ -325,7 +336,7 @@ it('skips damaged catalog records instead of blocking startup', async () => {
             await tx.compareAndSet(path, 'config', { expected: raw, value: JSON.stringify(parsed) });
         });
         const { ProjectRemoteMountService } = await import('../src/projects/remote-mounts');
-        const reloaded = new ProjectRemoteMountService(root, memoryProvider(), async () => {}, async () => {});
+        const reloaded = new ProjectRemoteMountService(root, memoryProvider(), async () => {}, async () => {}, new (await import('../src/projects/mcp-remote-connections')).MCPRemoteConnections(runtime.agentService,memoryProvider()));
         await reloaded.init();
         expect(reloaded.loadWarnings.some(warning => warning.startsWith('INVALID_MOUNT'))).toBe(true);
         expect(reloaded.list(project.project.id)).toHaveLength(1);
@@ -355,4 +366,83 @@ it('releases the replaced source even when view invalidation fails', async () =>
         expect(disposed).toHaveLength(1);
         await service.dispose();
     } finally { await runtime.dispose(); }
+});
+
+it('allows equal project names across servers while retaining one project for each server path',async () => {
+    const runtime = await createApplicationRuntime({backend:new MemoryBackend(),ownerKind:'web',remoteSourceProvider:memoryProvider()});
+    try {
+        const remote = runtime.projects.remoteMounts!;
+        const office = await remote.saveConnection({name:'Office',endpoint:'https://office.test',username:'alice'},'secret');
+        const laptop = await remote.saveConnection({name:'Laptop',endpoint:'https://laptop.test',username:'alice'},'secret');
+        const first = await runtime.projects.createRemote('Notes',null,office,'/docs/a');
+        const second = await runtime.projects.createRemote('Notes',null,laptop,'/docs/a');
+        expect(first.project.id).not.toBe(second.project.id); expect(first.path).not.toBe(second.path);
+        const projects = (await runtime.projects.list()).filter(project => project.name === 'Notes');
+        expect(projects.map(project => project.displayName).sort()).toEqual(['Laptop:Notes','Office:Notes']);
+        const navigation = await runtime.projects.navigationFolders();
+        expect(navigation.find(folder => folder.project?.id === second.project.id)?.name).toBe('Notes');
+        const browser = await createSessionBrowser({ repository:runtime.sessionRepository,files:runtime.sessionFiles,kernel:runtime.kernel.kernel,projects:runtime.projects });
+        try {
+            const node = await browser.fs.driver.getNode(folderBrowserPath(second.path));
+            expect(node?.metadata).toMatchObject({title:'Laptop:Notes',renameTitle:'Notes'});
+        } finally { await browser.dispose(); }
+        const repeated = await Promise.all([runtime.projects.createRemote('Other name',null,office,'/docs/a/'),
+            runtime.projects.createRemote('Another name',null,office,'/docs//a')]);
+        expect(repeated.every(project => project.project.id === first.project.id)).toBe(true);
+        expect((await runtime.projects.list()).filter(project => project.name === 'Notes')).toHaveLength(2);
+    } finally { await runtime.dispose(); }
+});
+
+it('binds a server-managed writable subdirectory while keeping workbench Session data local',async () => {
+    const remoteBackend=new MemoryBackend(); await remoteBackend.init(); await remoteBackend.mkdir('/group');
+    const record={id:'server-project',name:'Notes',alias:'docs',path:'group/new',access:'rw' as const,revision:1,mounts:[]};
+    const register=vi.fn(async (input: {createDirectory?: boolean}) => {
+        if (input.createDirectory) await remoteBackend.mkdir('/group/new'); return record;
+    });
+    const harnessClose=vi.fn(async () => {}), harness=vi.fn(() => ({close:harnessClose}));
+    const client={register,read:async()=>record,close:vi.fn(async()=>{}),harness} as unknown as import('@itookit/piagent-driver').ProjectClient;
+    const runtime=await createApplicationRuntime({backend:new MemoryBackend(),ownerKind:'web',remoteSourceProvider:{
+        setCredential() {},async dispose() {},projects:()=>client,
+        resolveCredential:()=>'secret',discover:vi.fn(async()=>{throw new Error('Use generic MCP discovery');}),
+        async open() {return createFileSystemSource({backend:remoteBackend,viewId:'server-files',access:'rw'});},
+    }});
+    const fetch = mockPiAgentDiscovery({version:1,fileProtocol:'fs-agent-http-v1',httpEndpoint:'https://files.test',serverId:'node',harness:true,projects:true,projectProtocol:'fs-agent-project-v1'});
+    try {
+        const remote=runtime.projects.remoteMounts!;
+        const connection=await remote.saveConnection({name:'Server',endpoint:'https://files.test',username:'user'},'secret');
+        const project=await runtime.projects.createRemote('Notes',null,connection,'/docs/group/new','rw',{createDirectory:true});
+        expect(register).toHaveBeenCalledWith(expect.objectContaining({name:'Notes',path:'group/new',createDirectory:true,access:'rw'}),expect.anything());
+        expect(remote.list(project.project.id)[0]).toMatchObject({serverProjectId:'server-project',serverProjectRevision:1,access:'rw'});
+        const id=await runtime.sessionRepository.createSession('Writer',await runtime.projects.sessionFolder(project));
+        await runtime.sessionRepository.writeDocument(id,'record.json','{"local":true}');
+        const files=await runtime.sessionFiles.acquireFiles(id);
+        try {await files.context.fs.driver.createFile({parentPath:'/workspace',name:'note.txt',content:'remote write'});} finally {await files.release();}
+        expect(new TextDecoder().decode(await remoteBackend.read('/group/new/note.txt'))).toBe('remote write');
+        expect(await runtime.sessionRepository.readDocument(id,'record.json')).toBe('{"local":true}');
+        const control=await remote.projectHarness(project.project.id);
+        expect(harness).toHaveBeenCalledWith(record,{readOnly:false});await control.close();expect(harnessClose).toHaveBeenCalled();
+    }finally{await runtime.dispose();fetch.mockRestore();}
+});
+
+it('restores missing capability metadata only when verified discovery matches the existing directory grants',async()=>{
+    const backend=new MemoryBackend();await backend.init();
+    const runtime=await createApplicationRuntime({backend:new MemoryBackend(),ownerKind:'web',remoteSourceProvider:{setCredential() {},dispose:async()=>{},
+        open:async()=>createFileSystemSource({backend,viewId:'recover-binding',access:'ro'})}});
+    try {
+        const remote=runtime.projects.remoteMounts!;
+        const id=await remote.saveConnection({name:'Server',endpoint:'https://files.test',username:'alice'},'secret');
+        await runtime.projects.createRemote('Bound',null,id,'/docs','ro');
+        const verified=(await runtime.agentService.getMCPServers()).find(server=>server.id===id)!;
+        const incomplete={...verified,extensions:undefined};
+        await expect(remote.beforeMCPChange(verified,incomplete)).resolves.toBeUndefined();
+        let saved= incomplete;
+        const registry=new MCPRemoteConnections({getMCPServers:async()=>[saved],deleteMCPServer:vi.fn(),
+            testMCPServer:async()=>({tools:[],resources:[],prompts:[],extensions:verified.extensions}),
+            saveMCPServer:async server=>{await remote.beforeMCPChange(server,saved);saved=server as typeof incomplete;}},
+            {setCredential:vi.fn(),dispose:vi.fn(),open:vi.fn()});
+        await registry.refresh();expect(registry.list()).toEqual([]);
+        await registry.ensure(id);expect(registry.list()[0]).toMatchObject({id,endpoint:'https://files.test'});
+        await expect(remote.beforeMCPChange({...verified,endpoint:'https://other.test/mcp'},incomplete)).rejects.toMatchObject({code:'EBUSY'});
+        await expect(remote.beforeMCPChange({...verified,auth:{...verified.auth!,credentialRef:'different'}},incomplete)).rejects.toMatchObject({code:'EBUSY'});
+    } finally {await runtime.dispose();}
 });

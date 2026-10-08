@@ -18,8 +18,13 @@ import { CollapseController } from './history/CollapseController';
 import { EditController } from './history/EditController';
 import { EventDispatcher } from './history/EventDispatcher';
 import { TtyController } from './tty/TtyController';
+import type { MDxPlugin } from '@itookit/mdxeditor';
+import type { MDxControllerOptions } from './mdx/MDxController';
 
 export interface HistoryViewOptions {
+    readOnly?: boolean;
+    markdownPlugins?: MDxPlugin[];
+    codeBlockControls?: MDxControllerOptions['codeBlockControls'];
     onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
     onNodeAction?: NodeActionCallback;
     onCommitEdit?: (id: string, content: string) => void;
@@ -72,6 +77,9 @@ export class HistoryView implements IHistoryPresenter {
 
             fs: options.fs,
             assets: options.assets,
+            readOnly: options.readOnly,
+            markdownPlugins: options.markdownPlugins,
+            codeBlockControls: options.codeBlockControls,
             collapsedState: (id, fallback) => this.collapse?.getStates()[id] ?? fallback,
         };
 
@@ -183,6 +191,11 @@ export class HistoryView implements IHistoryPresenter {
 
     renderWelcome(): void {
         this.renderer.renderWelcome();
+    }
+
+    /** Reconcile flat native history snapshots without recreating existing editors. */
+    async renderSnapshot(sessions: SessionGroup[]): Promise<void> {
+        await this.renderer.reconcileSessions(sessions);
     }
 
     renderError(error: Error): void {

@@ -31,7 +31,7 @@ it.each([true, false])('selects an existing sync directory or creates a new one 
     const select = document.querySelector<HTMLSelectElement>(`select[aria-label="${t('project.sync.cloudProject')}"]`)!;
     expect([...select.options].map(o => o.value)).toEqual(['', 'existing']);
     select.value = create ? '' : 'existing'; button('project.sync.bindConfirm').click(); await closed;
-    expect(host.bind).toHaveBeenCalledWith('server', create ? 'new-project' : 'existing', create);
+    expect(host.bind).toHaveBeenCalledWith('server', create ? 'new-project' : 'existing', create, 'both');
     expect(document.querySelector('dialog')).toBeNull();
 });
 it('invalidates the directory selection when changing servers and preserves an error without binding', async () => {

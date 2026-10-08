@@ -7,7 +7,6 @@ packages:
   - '!packages/vfs-ui'
   - '!packages/vfsdriver-indexeddb'
   - '!packages/vfsdriver-local'
-  - '!packages/vfsdriver-agent'
   - '!packages/vfs-sync'
   - '!packages/driver-llm'
 

@@ -7,6 +7,9 @@
 [submodule "tookit/cc-proxy"]
 	path = tookit/cc-proxy
 	url = git@github.com:mushuanli/cc-proxy.git
-[submodule "tools/fs-agent"]
-	path = tools/fs-agent
-	url = git@github.com:mushuanli/fs-agent.git
+[submodule "tools/pi-agent"]
+	path = tools/pi-agent
+	url = git@github.com:mushuanli/pi-agent.git
+[submodule "packages/piagent-driver"]
+	path = packages/piagent-driver
+	url = https://github.com/mushuanli/piagent-driver.git

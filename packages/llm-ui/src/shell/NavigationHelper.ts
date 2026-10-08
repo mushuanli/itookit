@@ -15,6 +15,7 @@ import type { DOMCache } from '../components/common/DOMCache';
 import type { TimerManager } from '../components/common/TimerManager';
 import { FloatingNavPanel } from '../components/FloatingNavPanel';
 import { Toast } from '@itookit/ui-common';
+import { visibleSessionId } from '../components/history/visible-session';
 
 export interface NavigationDeps {
     domCache: DOMCache;
@@ -40,25 +41,7 @@ export class NavigationHelper {
 
     findCurrentVisibleSession(): string | null {
         const historyEl = this.deps.domCache.byId('llm-ui-history');
-        if (!historyEl) return null;
-
-        const rect = historyEl.getBoundingClientRect();
-        const viewLine = rect.top + rect.height * 0.4;
-        const sessions = historyEl.querySelectorAll('.llm-ui-session');
-
-        let closest: Element | null = null;
-        let minDist = Infinity;
-
-        for (const session of sessions) {
-            const r = session.getBoundingClientRect();
-            if (r.top <= viewLine && r.bottom >= viewLine) {
-                return (session as HTMLElement).dataset.sessionId || null;
-            }
-            const dist = Math.abs(r.top + r.height / 2 - viewLine);
-            if (dist < minDist) { minDist = dist; closest = session; }
-        }
-
-        return (closest as HTMLElement)?.dataset.sessionId || null;
+        return historyEl ? visibleSessionId(historyEl) ?? null : null;
     }
 
     updateActiveSessionHighlight(): void {

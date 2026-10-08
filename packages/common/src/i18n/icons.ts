@@ -64,8 +64,9 @@ export interface StatusMeta {
     color: string;
 }
 
-export const STATUS_META: Record<'connected' | 'error' | 'idle', StatusMeta> = {
+export const STATUS_META: Record<'connected' | 'connecting' | 'error' | 'idle', StatusMeta> = {
     connected: { dot: '●', color: '#10b981' }, // emerald-500
+    connecting: { dot: '●', color: '#f59e0b' }, // amber-500
     error:     { dot: '●', color: '#ef4444' }, // red-500
     idle:      { dot: '○', color: '#9ca3af' }, // gray-400
 } as const;
@@ -135,8 +136,11 @@ export const FEEDBACK_ICONS = {
 // ── Entity shortcuts ──────────────────────────────────────────────────────────
 
 export const ENTITY_ICONS = {
+    sync:         '⇄',
     chat:         '💬',
     project:      '▣',
+    remoteSession: '🌐',
+    remoteAgent: '📡',
     remoteProject: '🌐',
     agent:   '🤖',
     skill:   '⚡',

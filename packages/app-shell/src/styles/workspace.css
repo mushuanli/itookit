@@ -287,6 +287,20 @@
 .workbench-project-navigation > button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 32px; height: 34px; padding: 7px; border-radius: 7px; }
 .workbench-project-navigation > button[hidden] { display: none; }
 .workbench-project-navigation__transfer { display: flex; flex-shrink: 0; }
+.project-sync-icon { position: relative; display: inline-flex; align-items: center; gap: 2px; }
+.project-sync-icon__badge { font-size: .8em; color: var(--primary-color, #6366f1); }
+.project-sync-icon__warning { font-size: .7em; }
+.project-sync-status { position: relative; display: inline-flex; flex: 0 0 auto; }
+.project-sync-status[hidden] { display: none; }
+.project-sync-status__button { border: 0; background: transparent; padding: 6px; font: inherit; cursor: pointer; color: var(--primary-color, #6366f1); }
+.project-sync-status__button--pending { color: var(--warning-color, #a16207); }
+.project-sync-status__button--error { color: var(--error-color, #dc2626); }
+.project-sync-status__button--configured { color: var(--primary-color, #6366f1); }
+.project-sync-status__button:focus-visible { outline: 2px solid var(--primary-color, #6366f1); outline-offset: 2px; }
+.project-sync-status__tooltip { position: absolute; top: 100%; right: 0; z-index: 50; width: max-content; max-width: min(340px, 80vw); padding: 10px 12px; border: 1px solid var(--mm-border-color, #d1d5db); border-radius: 8px; background: var(--mm-bg-color, #fff); color: var(--mm-text-color, #111827); box-shadow: 0 4px 16px #0002; font-size: 12px; line-height: 1.6; }
+.project-sync-status__tooltip[hidden] { display: none; }
+.project-sync-status__tooltip > span { display: block; }
+.project-sync-status__tooltip > ul { margin: 4px 0 0; padding-left: 18px; }
 .workbench-project-navigation__transfer[hidden] { display: none; }
 .workbench-project-navigation > button:hover:not(:disabled) { background: var(--vfs-active-bg, #eef2ff); }
 .workbench-tabs__label { flex: 1; padding-inline: 12px !important; }
@@ -344,9 +358,22 @@
 .workbench-tabs__menu-panel { position: fixed; right: 8px; z-index: 1000; min-width: 200px; padding: 6px; border: 1px solid var(--mm-border-color, #e5e7eb); border-radius: 8px; background: var(--mm-bg-color, #fff); box-shadow: 0 8px 24px #0002; }
 .workbench-tabs__menu-panel button { display: flex; width: 100%; }
 
-.project-sync-dialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; }
+.project-sync-dialog { width: min(1040px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; }
 .project-sync-dialog ul { padding-inline-start: 20px; overflow-wrap: anywhere; }
 .project-sync-dialog .project-dialog__actions { flex-wrap: wrap; }
+.project-sync__field { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+.project-sync__changes { width: 100%; border-collapse: collapse; margin: 12px 0 20px; table-layout: fixed; }
+.project-sync__changes th, .project-sync__changes td { text-align: left; padding: 8px; border-bottom: 1px solid var(--mm-border-color, #e2e8f0); overflow-wrap: anywhere; }
+.project-sync__conflict { padding: 16px; margin: 16px 0; border: 1px solid var(--mm-border-color, #e2e8f0); border-radius: 8px; overflow-wrap: anywhere; }
+.project-sync__comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 12px 0; }
+.project-sync__comparison section { min-width: 0; }
+.project-sync__text { max-height: 320px; overflow: auto; white-space: pre; padding: 8px; font-size: 12px; background: var(--st-bg-secondary, #f8fafc); }
+.project-sync__line { display: block; }
+.project-sync__line--changed { background: var(--st-warning-bg, #fef3c7); color: var(--st-text-primary, #1f2937); }
+.project-sync__directories { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.project-sync__resolutions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.project-sync__resolutions p { flex-basis: 100%; }
+@media (max-width: 600px) { .project-sync__comparison { grid-template-columns: 1fr; } }
 
 /* Keep secondary section controls discoverable by pointer, keyboard and touch. */
 @media (hover: hover) {

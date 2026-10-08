@@ -7,9 +7,15 @@ export interface ProjectSyncSession {
     recover(): Promise<void>;
     resolve?(planId: string, decisions: Record<string, 'local' | 'remote'>): Promise<StoredFilePlan>;
     mergeText?(planId: string, paths: string[]): Promise<StoredFilePlan>;
+    compare?(planId: string, path: string): Promise<ProjectSyncComparison>;
     reconcileExpired?(): Promise<StoredFilePlan>;
     cancel(): Promise<void>;
 }
+export interface ProjectSyncContent {
+    kind: 'missing' | 'file' | 'directory'; hash?: string | null; size?: number;
+    content?: { text?: string; reason?: 'binary' | 'too-large' | 'unavailable' };
+}
+export interface ProjectSyncComparison { path: string; baseline: ProjectSyncContent; local: ProjectSyncContent; remote: ProjectSyncContent }
 export interface ProjectSyncProvider {
     open(localProjectId: string): Promise<ProjectSyncSession>;
     dispose?(): Promise<void>;
@@ -21,6 +27,12 @@ export class ProjectSyncService {
     constructor(private readonly provider: ProjectSyncProvider, private readonly coordinator: Coordinator) {}
     preview(projectId: string): Promise<StoredFilePlan> { return this.run(async () => (await this.active(projectId)).preview()); }
     execute(projectId: string, planId: string): Promise<FilePlan> { return this.run(async () => (await this.active(projectId)).execute(planId)); }
+    compare(projectId: string, planId: string, path: string): Promise<ProjectSyncComparison> {
+        return this.run(async () => {
+            const session = await this.active(projectId); assertSync(session.compare, 'SYNC_COMPARISON_UNAVAILABLE');
+            return session.compare(planId, path);
+        });
+    }
     resolve(projectId: string, planId: string, decisions: Record<string, 'local' | 'remote'>): Promise<StoredFilePlan> {
         return this.run(async () => {
             const session = await this.active(projectId); assertSync(session.resolve, 'SYNC_RESOLUTION_UNAVAILABLE');
@@ -69,6 +81,7 @@ export class ProjectSyncService {
         await this.coordinator.exclusive(state.binding.bindingId, async guard => {
             await scopedStore(session.store, guard).update(s => {
                 assertSync(bindingToken(s.binding) === expectedToken, 'BINDING_CHANGED');
+                assertSync(!s.pending && !s.activePlanId, 'SYNC_APPLY_PENDING');
                 assertSync(['both', 'upload', 'download'].includes(change.direction), 'INVALID_SYNC_DIRECTION');
                 return { ...s, binding: { ...s.binding, ...change, policyRevision: nextDecimal(s.binding.policyRevision) } };
             });

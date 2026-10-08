@@ -6,7 +6,7 @@ import { parseMcpArgs } from '../../src/llm-management/device/mcp-manager';
 let server: Server | undefined, client: MCPServerConnection | undefined;
 afterEach(async () => { await client?.disconnect(); server?.closeAllConnections(); await new Promise<void>(resolve => server ? server.close(() => resolve()) : resolve()); });
 
-it('Streamable HTTP requires the latest protocol, lists all pages and preserves structured tool results', async () => {
+it('negotiates modern Streamable HTTP, lists all pages and preserves structured tool results', async () => {
     const seen: Array<{ method: string; headers: Record<string, unknown>; params: Record<string, any> }> = [];
     server = createServer((request, response) => {
         if (request.method !== 'POST') { response.writeHead(request.method === 'DELETE' ? 204 : 405); response.end(); return; }
@@ -14,7 +14,7 @@ it('Streamable HTTP requires the latest protocol, lists all pages and preserves 
         request.on('end', () => {
             const message = JSON.parse(body); seen.push({ method: message.method, headers: request.headers, params: message.params });
             if (message.id === undefined) { response.writeHead(202); response.end(); return; }
-            const result = message.method === 'server/discover' ? { supportedVersions: ['2026-07-28'], capabilities: { tools: {} }, _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'test', version: '2' } } }
+            const result = message.method === 'server/discover' ? { supportedVersions: ['2026-07-28'], capabilities: { tools: {} }, _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'test', version: '2' }, 'example/adapter': {version:1} } }
                 : message.method === 'tools/list' ? { tools: [{ name: message.params.cursor ? 'second' : 'first', inputSchema: { type: 'object' } }], ...(message.params.cursor ? {} : { nextCursor: 'next' }) }
                 : { content: [{ type: 'text', text: 'answer' }], structuredContent: { score: 9 } };
             response.writeHead(200, { 'content-type': 'application/json' });
@@ -32,7 +32,7 @@ it('Streamable HTTP requires the latest protocol, lists all pages and preserves 
         expect(item.params._meta['io.modelcontextprotocol/protocolVersion']).toBe('2026-07-28');
         expect(item.headers['mcp-session-id']).toBeUndefined();
     }
-    expect((await client.discover()).protocolVersion).toBe('2026-07-28');
+    expect(await client.discover()).toMatchObject({protocolVersion:'2026-07-28',metadata:{'example/adapter':{version:1}}});
     const abort = new AbortController(); abort.abort();
     await expect(client.callTool('first', {}, { signal: abort.signal })).rejects.toThrow();
 });
@@ -60,7 +60,7 @@ async function listen(): Promise<string> {
     return `http://127.0.0.1:${address.port}/mcp`;
 }
 
-it.each(['method-not-found', '2025-11-25', '401', '503'])('rejects %s without initializing or falling back', async failure => {
+it.each(['401', '403', '503'])('rejects %s without initializing or falling back', async failure => {
     const methods: string[] = [];
     server = createServer((request, response) => {
         let body = ''; request.on('data', data => { body += data; });
@@ -77,6 +77,30 @@ it.each(['method-not-found', '2025-11-25', '401', '503'])('rejects %s without in
     await expect(client.connect()).rejects.toThrow();
     expect(client.isConnected()).toBe(false);
     expect(methods).toEqual(['server/discover']);
+});
+
+it.each(['method-not-found','2025-11-25'])('negotiates a legacy server after %s and discovers its tools',async failure => {
+    const methods: string[] = [];
+    server = createServer((request,response) => {
+        if (request.method !== 'POST') {response.writeHead(405);response.end();return;}
+        let body = '';request.on('data',data => {body += data;});
+        request.on('end',() => {
+            const message = JSON.parse(body);methods.push(message.method);
+            if (message.id === undefined) {response.writeHead(202);response.end();return;}
+            let reply: object;
+            if (message.method === 'server/discover') reply = failure === 'method-not-found'
+                ? {error:{code:-32601,message:'Method not found'}}
+                : {result:{resultType:'complete',ttlMs:0,cacheScope:'private',supportedVersions:['2025-11-25'],capabilities:{tools:{}}}};
+            else if (message.method === 'initialize') reply = {result:{protocolVersion:'2025-11-25',capabilities:{tools:{}},serverInfo:{name:'legacy',version:'1'}}};
+            else reply = {result:{tools:[{name:'legacy_tool',inputSchema:{type:'object'}}]}};
+            response.writeHead(200,{'content-type':'application/json'});
+            response.end(JSON.stringify({jsonrpc:'2.0',id:message.id,...reply}));
+        });
+    });
+    client = new MCPServerConnection({name:'legacy',transport:'http',url:await listen(),timeout:1000});
+    await client.connect();
+    expect(await client.discover()).toMatchObject({protocolVersion:'2025-11-25',tools:[{name:'legacy_tool'}]});
+    expect(methods).toEqual(['server/discover','initialize','notifications/initialized','tools/list']);
 });
 
 it('rejects legacy transports before opening a connection', async () => {

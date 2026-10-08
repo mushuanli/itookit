@@ -44,7 +44,7 @@ export class StatusIndicatorView implements IStatusPresenter {
         }
     }
 
-    update(status: string): void {
+    update(status: string, text?: string): void {
         if (!this.statusDot || !this.statusText) {
             this.cacheElements();
             if (!this.statusDot || !this.statusText) return;
@@ -54,7 +54,7 @@ export class StatusIndicatorView implements IStatusPresenter {
         const info = STATUS_MAP[status] || DEFAULT_STATUS;
 
         this.statusDot.classList.add(info.cls);
-        this.statusText.textContent = status === 'aborted' ? t('session.execution.cancelled') : info.text;
+        this.statusText.textContent = text ?? (status === 'aborted' ? t('session.execution.cancelled') : info.text);
         this.onLoadingChange(info.loading);
     }
 

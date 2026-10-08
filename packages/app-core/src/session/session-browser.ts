@@ -1,3 +1,4 @@
+import { RemoteSessionProjection } from './remote-session-projection';
 import { FOLDER_SEGMENT_PREFIX, isFolderSegment, isFileTarget, filesBrowserPrefix, parentBrowserPath, browserName,
     resolveBrowserTarget, browserTargetFolder, folderBrowserPath, folderPathFromBrowserPath, type FileTarget, type BrowserTarget } from './browser-routes';
 export { resolveBrowserTarget, browserTargetFolder, folderBrowserPath, folderPathFromBrowserPath } from './browser-routes';
@@ -63,6 +64,7 @@ export interface SessionBrowserDependencies {
     filterDisplayedFiles?(fs: IFileSystem, nodes: FSNode[]): Promise<FSNode[]>;
 }
 class BrowserBackend implements IStorageBackend {
+    private get remoteSessions() { return new RemoteSessionProjection(this.deps.projects); }
     readonly name = 'session-browser';
     private readonly lifecycle: SessionLifecycleService;
     private snapshot?: Promise<[SessionFolder[], import('@itookit/llm-session').SessionSummary[]]>;
@@ -171,7 +173,7 @@ class BrowserBackend implements IStorageBackend {
         });
     }
     private folderNode(folder: SessionFolder): FSNode {
-        const title = folder.name === '@sessions' ? t('project.sessions') : folder.name;
+        const title = folder.name === '@sessions' ? t('project.sessions') : (folder as SessionFolder & { displayName?: string }).displayName ?? folder.name;
         const node = this.node(folderBrowserPath(folder.path), title, true, folder.updatedAt);
         const remote = this.deps.projects?.remoteMounts;
         const mounts = folder.project && remote ? remote.list(folder.project.id) : [];
@@ -181,7 +183,7 @@ class BrowserBackend implements IStorageBackend {
         // mount dialog, so the workbench shows why a project is degraded.
         const degraded = !!folder.project && !!remote && remote.degraded(folder.project.id);
         return { ...node, ...(folder.project ? { icon: remoteRoot ? ENTITY_ICONS.remoteProject : ENTITY_ICONS.project } : {}),
-            metadata: { ...node.metadata, ...(folder.project ? { projectId: folder.project.id, directory: folder.project.directory, remoteProject: remoteRoot,
+            metadata: { ...node.metadata, renameTitle: folder.name, ...(folder.project ? { projectId: folder.project.id, directory: folder.project.directory, remoteProject: remoteRoot,
                 remoteOffline: offline, _disabled: false, _readOnly: offline,
                 navigationDescription: mounts.length ? t(offline ? 'remote.projectOffline' : degraded ? 'remote.degraded' : 'remote.projectRemote') : '' } : {}) } };
     }
@@ -206,6 +208,7 @@ class BrowserBackend implements IStorageBackend {
             const folder = folders.find(item => item.path === folderPath);
             return folder ? this.folderNode(folder) : null;
         }
+        if (target.kind === 'remote') return this.remoteSessions.stat(path, target);
         if (target.kind === 'favorites') return this.favoritesEntry(path);
         if (target.kind === 'favorite') return (await this.favoriteNodes(parentBrowserPath(path), target.folder)).find(node => node.path === path) ?? null;
         if (target.kind === 'project-files') {
@@ -256,9 +259,11 @@ class BrowserBackend implements IStorageBackend {
                 ...folders.filter(folder => folder.parentPath === folderPath).map(folder => this.folderNode(folder)),
                 ...(this.deps.projects && folders.find(folder => folder.path === folderPath)?.project
                     ? [await this.fileEntry(path + '/@files', folderPath), this.favoritesEntry(path + '/@favorites')] : []),
+                ...(folderPath ? await this.remoteSessions.root(folderPath, folders.find(folder => folder.path === folderPath) ?? null) : []),
                 ...this.sessionNodes(sessions, folderPath),
             ];
         }
+        if (target.kind === 'remote') return this.remoteSessions.list(path, target);
         if (target.kind === 'favorites') return this.favoriteNodes(path, target.folder);
         if (target.kind === 'favorite') return [];
         if (target.kind === 'project-files') return this.listFiles(path, target);
@@ -351,6 +356,7 @@ class BrowserBackend implements IStorageBackend {
         if (isFileTarget(target)) await this.assertAvailable(path);
         if (target.kind === 'favorite' || target.kind === 'favorites') throw new FSError('EISDIR', 'Open favorites through navigation');
         if (target.kind === 'folder') throw new FSError('EISDIR', 'Open this folder using its browser target');
+        if (target.kind === 'remote') throw new FSError('EROFS', 'Remote sessions use the conversation port');
         if (target.kind === 'session') return this.sessionBundle(target.sessionId);
         if (isFileTarget(target)) return this.withFiles(target, async fs => new Uint8Array(await fs.driver.readContent(target.path, { encoding: 'binary' })));
         await this.deps.repository.getManifest(target.sessionId);
@@ -426,10 +432,12 @@ class BrowserBackend implements IStorageBackend {
             // Busy check before the destructive delete: once the Sessions are gone the lease and
             // active-Task guard can no longer see them.
             for (const project of projects) await this.deps.projects?.remoteMounts?.assertUnmountable(project.project.id);
+            // Revoke persisted grants before removing navigation and project identities.
+            // If grant storage fails, the project must remain visible for retry.
+            for (const project of projects) await this.deps.projects?.remoteMounts?.forgetProject(project.project.id);
             await this.lifecycle.deleteFolder(folderPath, true);
             for (const project of projects) {
                 await this.deps.projects?.removeProjectSource(project);
-                await this.deps.projects?.remoteMounts?.forgetProject(project.project.id);
             }
             return;
         }

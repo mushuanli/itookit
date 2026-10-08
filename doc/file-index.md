@@ -93,8 +93,8 @@
 | 通用 IO（IIOStream + pipe） | `https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/`、`impl/file-io/` |
 | 事件总线（EventBus/FSEventBus） | `https://github.com/mushuanli/vfs-core/blob/main/src/eventbus/`、`impl/event/` |
 | IndexedDB 后端 | `https://github.com/mushuanli/vfsdriver-indexeddb/blob/main/src/` |
-| HTTP 外挂驱动 | `https://github.com/mushuanli/vfsdriver-agent/blob/main/src/` |
-| 远程连接与项目 | `app-core/src/projects/remote-mounts.ts`、`app-core/src/projects/remote-mount-store.ts`、`app-core/src/projects/remote-connections.ts`、`app-shell/src/files/RemoteFilesSettingsEditor.ts`、`app-shell/src/files/remote-project-fields.ts` |
+| HTTP 外挂驱动 | `https://github.com/mushuanli/piagent-driver/blob/main/src/files/` |
+| 远程连接与项目 | `app-core/src/projects/remote-mounts.ts`、`app-core/src/projects/remote-mount-store.ts`、`app-core/src/projects/remote-connections.ts`、`app-core/src/projects/mcp-remote-connections.ts`、`app-shell/src/toolbox/pi-agent-controls.ts`、`app-shell/src/files/remote-project-fields.ts` |
 | LocalFS 后端 | `https://github.com/mushuanli/vfsdriver-local/blob/main/src/localfs-backend.ts` |
 
 ## CLI（@itookit/cli）
@@ -160,3 +160,6 @@
 | 生产源码依赖边界检查（`pnpm architecture:check`） | `scripts/check-boundaries.mjs` |
 | 工作区模块能力、路由恢复与统一释放 | `packages/app-shell/src/workspaces/module.ts` |
 | 项目 UI 模块装配 | `packages/app-shell/src/projects/index.ts` |
+
+
+- pi-agent 目录项目、目录身份与策略版本：`tools/pi-agent/src/projects/`；客户端：`packages/piagent-driver/src/projects.ts`、`packages/piagent-driver/src/project-process.ts`；设计：[项目模型](design/pi-agent-project-model.md)。

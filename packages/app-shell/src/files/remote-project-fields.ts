@@ -15,6 +15,10 @@ export function remoteProjectFields(projects: ProjectService, parent: HTMLElemen
     const hint = document.createElement('p'); hint.textContent = t(connection.options.length ? 'remote.projectPathHint' : 'remote.connectionEmpty'); fields.append(hint);
     const accessLabel = document.createElement('label'); accessLabel.textContent = t('remote.writable');
     const writable = document.createElement('input'); writable.type = 'checkbox'; accessLabel.append(writable); fields.append(accessLabel);
+    const createLabel=document.createElement('label'); createLabel.textContent=t('remote.createDirectory');
+    const createDirectory=document.createElement('input'); createDirectory.type='checkbox'; createLabel.append(createDirectory); fields.append(createLabel);
+    const updateCreation=() => {createDirectory.disabled=!projects.remoteMounts?.connections().find(item=>item.id===connection.value)?.projects; if(createDirectory.disabled) createDirectory.checked=false;};
+    connection.addEventListener('change',updateCreation,{signal}); if(connection.value) updateCreation();
     const browser = remoteDirectoryPicker(projects, fields, connection, path, signal);
     const availability = remoteConnectionOptions(projects, fields, connection, signal, browser.reset, browser.clear);
     type.onchange = () => {
@@ -22,7 +26,7 @@ export function remoteProjectFields(projects: ProjectService, parent: HTMLElemen
         path.required = remote; connection.required = remote;
         if (remote) availability.check(); else availability.cancel();
     };
-    return { isRemote: () => type.value === 'remote', connection, path, writable };
+    return { isRemote: () => type.value === 'remote', connection, path, writable, createDirectory };
 }
 function selectField(parent: HTMLElement, key: Parameters<typeof t>[0], options: string[][]) {
     const label = document.createElement('label'); label.textContent = t(key);

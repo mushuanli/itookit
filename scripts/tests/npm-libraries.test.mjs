@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { releaseManifest, versions } from '../npm-libraries.mjs';
+import { releaseManifest, versions, libraries } from '../npm-libraries.mjs';
 import { pinLibraries } from '../migrate-npm-libraries.mjs';
 import { workspaceAliases } from '../workspace-sources.mjs';
 
@@ -22,6 +22,6 @@ test('migration pins every dependency section without touching application works
 });
 test('Vite source aliases do not bypass registry library exports', () => {
     for(const alias of workspaceAliases('/repo/apps/web-app')) {
-        for(const name of versions.keys()) assert.equal(alias.find instanceof RegExp ? alias.find.test(name) : alias.find===name || alias.find===name+'/style.css',false);
+        for(const {name} of libraries.filter(library => !library.workspace)) assert.equal(alias.find instanceof RegExp ? alias.find.test(name) : alias.find===name || alias.find===name+'/style.css',false);
     }
 });

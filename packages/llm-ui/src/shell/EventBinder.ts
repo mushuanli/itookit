@@ -32,7 +32,7 @@ export class EventBinder {
 
     constructor(
         private container: HTMLElement,
-        private callbacks: EventBinderCallbacks
+        private callbacks: Partial<EventBinderCallbacks>
     ) { }
 
     private bindToolbarMenu(): void {
@@ -62,14 +62,14 @@ export class EventBinder {
         const sidebarBtn = this.container.querySelector('#llm-btn-sidebar');
         if (sidebarBtn) {
             this.events.add(sidebarBtn, 'click', () => {
-                this.callbacks.onToggleSidebar();
+                this.callbacks.onToggleSidebar?.();
             });
         }
 
         const titleInput = this.container.querySelector('#llm-title-input') as HTMLInputElement;
         if (titleInput) {
             this.events.add(titleInput, 'blur', () => {
-                this.callbacks.onTitleChange(titleInput.value);
+                this.callbacks.onTitleChange?.(titleInput.value);
             });
             this.events.add(titleInput, 'keydown', ((e: KeyboardEvent) => {
                 if (e.key === 'Enter') titleInput.blur();
@@ -79,20 +79,20 @@ export class EventBinder {
         const assetsBtn = this.container.querySelector('#llm-btn-assets');
         if (assetsBtn) {
             this.events.add(assetsBtn, 'click', () => {
-                this.callbacks.onOpenAssetManager();
+                this.callbacks.onOpenAssetManager?.();
             });
         }
 
         const historyBtn = this.container.querySelector('#llm-btn-history-visibility');
         if (historyBtn) {
             this.events.add(historyBtn, 'click', () => {
-                this.callbacks.onToggleHistory();
+                this.callbacks.onToggleHistory?.();
             });
         }
     }
 
     bindNavigationEvents(): void {
-        const bindings: Record<string, () => void> = {
+        const bindings: Record<string, (() => void) | undefined> = {
             '#llm-btn-navigator': this.callbacks.onToggleNavigator,
             '#llm-btn-prev-unfolded': this.callbacks.onPrevUnfolded,
             '#llm-btn-next-unfolded': this.callbacks.onNextUnfolded,
@@ -104,7 +104,7 @@ export class EventBinder {
 
         for (const [selector, handler] of Object.entries(bindings)) {
             const el = this.container.querySelector(selector);
-            if (el) {
+            if (el && handler) {
                 this.events.add(el, 'click', handler);
             }
         }

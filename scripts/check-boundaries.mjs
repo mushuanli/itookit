@@ -8,12 +8,15 @@ import { libraries } from './npm-libraries.mjs';
 
 const application = new Set(['@itookit/app-core', '@itookit/app-shell', '@itookit/app-settings']);
 const coreDependencies = new Set(['common', 'llm-context', 'vfs-core', 'durable-kernel', 'kernel-adapters',
-    'llm-flow', 'llm-session', 'llm-tasks', 'tools', 'driver-llm', 'vfs-sync'].map(name => '@itookit/' + name));
+    'llm-flow', 'llm-session', 'llm-tasks', 'tools', 'driver-llm', 'vfs-sync', 'piagent-driver'].map(name => '@itookit/' + name));
 const browserGlobals = new Set(['window', 'document', 'localStorage', 'sessionStorage', 'navigator',
     'Window', 'Document', 'Element', 'Node', 'MutationObserver', 'ResizeObserver']);
 
 export function dependencyError(source, target) {
     if (source === target) return;
+    if (source === '@itookit/piagent-driver' && target.startsWith('@itookit/') &&
+        !['@itookit/vfs-core', '@itookit/vfs-sync'].includes(target))
+        return 'piagent-driver must receive application policy through public ports';
     if ((source === '@itookit/vfs-core' || source.startsWith('@itookit/vfsdriver-')) && target.startsWith('@itookit/') && target !== '@itookit/vfs-core')
         return 'VFS core and drivers must remain independent; drivers may only depend on vfs-core';
     if (source === '@itookit/vfs-sync') return 'vfs-sync must receive all I/O through owned ports';

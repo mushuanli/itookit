@@ -170,11 +170,13 @@ test('adapter diagnostics and UI creation state are instance scoped', () => {
 });
 
 test('VFS drivers have no sync runtime or type dependencies', () => {
-    for (const name of ['vfsdriver-indexeddb', 'vfsdriver-agent', 'vfsdriver-local']) {
+    for (const name of ['vfsdriver-indexeddb', 'vfsdriver-local']) {
         const driver = pkg(name);
         assert.match(manifestDependencyError(driver.name, '@itookit/vfs-sync'), /only depend on vfs-core/);
         assert.match(inspect(driver, "import type { StateStore } from '@itookit/vfs-sync'")[0], /only depend on vfs-core/);
         assert.equal(inspect(driver, "import type { IStorageBackend } from '@itookit/vfs-core'").length, 0);
     }
     assert.match(dependencyError('@itookit/vfs-core', '@itookit/vfs-sync'), /remain independent/);
+    assert.equal(dependencyError('@itookit/piagent-driver','@itookit/vfs-sync'),undefined);
+    assert.match(dependencyError('@itookit/piagent-driver','@itookit/vfsdriver-agent'),/public ports/);
 });

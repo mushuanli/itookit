@@ -1,4 +1,4 @@
-import { HttpFSBackend } from '@itookit/vfsdriver-agent';
+import { HttpFSBackend } from '@itookit/piagent-driver';
 import { writeFile } from 'node:fs/promises';
 import type { CommandOptions } from './commands';
 

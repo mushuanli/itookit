@@ -19,7 +19,7 @@ export async function projectTransferTargets(projects: ProjectService, fs: IFile
         logTargetAvailability(projects, project, path, ids, node);
         if (node) {
             const target = targetNode(node);
-            targets.push({ ...target, children: files ? undefined : [], metadata: { ...target.metadata, title: project.name } });
+            targets.push({ ...target, children: files ? undefined : [], metadata: { ...target.metadata, title: project.displayName ?? project.name } });
         }
     }
     return targets;
@@ -29,7 +29,7 @@ function logTargetAvailability(projects: ProjectService, project: ProjectFolder,
     if (node && node.metadata._disabled !== true && node.metadata._readOnly !== true) return;
     const remote = projects.remoteMounts;
     console.info('[Project transfer]', { stage: 'target-availability', sources: ids, projectId: project.project.id,
-        projectName: project.name, directory: project.project.directory, path, exists: !!node,
+        projectName: project.displayName ?? project.name, directory: project.project.directory, path, exists: !!node,
         disabled: node?.metadata._disabled === true, readOnly: node?.metadata._readOnly === true,
         reason: node?.metadata.navigationDescription,
         mounts: remote?.list(project.project.id).map(mount => ({ at: mount.at, endpoint: mount.endpoint,

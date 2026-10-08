@@ -40,7 +40,6 @@
         "@itookit/vfs-ui": "0.5.5",
         "@itookit/vfsdriver-indexeddb": "5.3.1",
         "@itookit/vfsdriver-local": "5.3.0",
-        "@itookit/vfsdriver-agent": "5.3.0",
         "@itookit/driver-llm": "0.2.0",
         "@itookit/mdxeditor": "0.5.1"
     },

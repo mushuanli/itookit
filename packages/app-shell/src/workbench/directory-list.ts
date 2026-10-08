@@ -7,10 +7,11 @@ import { FSError } from '@itookit/vfs-core';
 
 export interface DirectoryEntry {
     id: string; name: string; type: string; created?: string | number; modified?: string | number;
-    size?: number; icon?: string; disabled?: boolean; description?: string;
+    size?: number; icon?: string; disabled?: boolean; description?: string; priority?: number;
 }
 export interface DirectoryListOptions {
     title: string; path: string; entries: DirectoryEntry[];
+    initialSort?: {key: 'name' | 'size' | 'modified' | 'type'; ascending: boolean};
     open(id: string): void; parent?: () => void; refresh?: () => Promise<DirectoryEntry[]>;
     actions?: { label: string; run(): void; disabled?: boolean; icon?: string }[];
     contextMenu?: (event: MouseEvent, id: string) => void;
@@ -57,7 +58,7 @@ export function createDirectoryList(options: DirectoryListOptions): HTMLElement 
     const search = document.createElement('input'); search.type = 'search'; search.placeholder = t('workbench.filter'); search.setAttribute('aria-label', t('workbench.filter')); toolbar.append(search);
     const table = document.createElement('table'); table.className = 'workbench-directory__table';
     const head = table.createTHead().insertRow(), body = table.createTBody();
-    let sort: keyof DirectoryEntry = 'name', ascending = true;
+    let sort: keyof DirectoryEntry = options.initialSort?.key ?? 'name', ascending = options.initialSort?.ascending ?? true;
     const selection = options.select ? new DirectorySelection(options.select, () => render(), options.bulkActions ?? [], refresh, fail) : undefined;
     addHeaders(head, selection, key => { ascending = sort === key ? !ascending : true; sort = key; render(); });
     const render = () => {
@@ -109,6 +110,9 @@ function renderEntries(body: HTMLTableSectionElement, options: DirectoryListOpti
     if (!entries.length) { const cell = body.insertRow().insertCell(); cell.colSpan = 4; cell.textContent = t('workbench.empty'); }
 }
 function compareEntries(a: DirectoryEntry, b: DirectoryEntry, sort: keyof DirectoryEntry, ascending: boolean): number {
+    if (a.priority !== undefined || b.priority !== undefined) {
+        const order = (a.priority ?? 0) - (b.priority ?? 0); if (order) return order;
+    }
     const directoryOrder = Number(b.type === 'directory') - Number(a.type === 'directory');
     if (directoryOrder) return directoryOrder;
     let comparison: number;

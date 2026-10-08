@@ -28,7 +28,8 @@
     "@itookit/llm-context": "workspace:*",
     "@itookit/llm-tasks": "workspace:*",
     "@itookit/tools": "workspace:*",
-    "@itookit/vfs-sync": "0.1.0"
+    "@itookit/vfs-sync": "0.1.0",
+    "@itookit/piagent-driver": "workspace:*"
   },
   "devDependencies": {
     "@itookit/vfsdriver-indexeddb": "5.3.1",

@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import path from 'path';
 import { builtinModules } from 'node:module';
-import { workspaceAliases, workspaceExcludes } from '../../scripts/workspace-sources.mjs';
+import { workspaceAliases, workspaceExcludes, REGISTRY_PREBUNDLES } from '../../scripts/workspace-sources.mjs';
 
 export default defineConfig({
     base: './',
@@ -55,6 +55,7 @@ export default defineConfig({
     },
 
     optimizeDeps: {
+        include: REGISTRY_PREBUNDLES,
         exclude: ['better-sqlite3', ...workspaceExcludes()],
     },
 });

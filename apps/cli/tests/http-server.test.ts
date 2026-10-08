@@ -114,14 +114,17 @@ it.each([false, true])('initializes HTTP-created Sessions with cwd or the explic
     const { createHttpMindOSRuntime } = await import('../src/http-server');
     const root = await mkdtemp(path.join(tmpdir(), 'mindos-http-workspace-'));
     const directory = path.join(root, 'project'); await mkdir(directory);
-    const runtime = await createHttpMindOSRuntime({ profile: path.join(root, 'profile'), ...(override ? { setHome: directory } : {}) });
+    const workingDirectory = path.join(root, 'cwd'); await mkdir(workingDirectory);
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(workingDirectory);
+    let runtime: Awaited<ReturnType<typeof createHttpMindOSRuntime>> | undefined;
     try {
+        runtime = await createHttpMindOSRuntime({ profile: path.join(root, 'profile'), ...(override ? { setHome: directory } : {}) });
         const id = await runtime.sessionRepository.createSession('HTTP Session');
         const record = (await runtime.sessionFiles.inspect(id))!;
         expect(record.cwd).toBe('/workspace');
         expect(record.mounts).toHaveLength(1);
-        expect(runtime.directoryMounts.describe(record.mounts[0])).toBe(override ? directory : process.cwd());
-    } finally { await runtime.dispose(); await rm(root, { recursive: true, force: true }); }
+        expect(runtime.directoryMounts.describe(record.mounts[0])).toBe(override ? directory : workingDirectory);
+    } finally { await runtime?.dispose(); cwd.mockRestore(); await rm(root, { recursive: true, force: true }); }
 });
 
 it('adapts HTTP byte arrays and prefetched files to the binary desktop read contract', async () => {

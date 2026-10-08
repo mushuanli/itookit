@@ -2,7 +2,7 @@ import { saveToolGrant, type ToolGrantTarget } from './tool-grants';
 import { ToolboxDrawers, drawerKind, ungroupedId, type Drawer, type DrawerKind } from './toolbox-drawers';
 import { randomUUID, t } from '@itookit/common';
 import { type SystemPromptDefinition } from '@itookit/llm-tasks/contracts';
-import { type MCPServer } from '@itookit/tools/mcp-contracts';
+import { mcpConfiguration, type MCPServer } from '@itookit/tools/mcp-contracts';
 import { type LLMProvider, type LLMConnection } from '@itookit/driver-llm/contracts';
 import { type AgentDefinition, type LLMSkill } from '@itookit/kernel-adapters/contracts';
 import { type ICommandBus } from '@itookit/llm-session/contracts';
@@ -115,7 +115,7 @@ export class ToolboxResources {
                 if (!queue.includes(dependency)) queue.push(dependency);
             }
             const group = this.drawers.forPath(path);
-            entries.push({ kind, data, drawer: group && group.id === ungroupedId(group.kind) ? '' : group?.name });
+            entries.push({ kind, data: kind === 'mcp' ? mcpConfiguration(data as MCPServer) : data, drawer: group && group.id === ungroupedId(group.kind) ? '' : group?.name });
         }
         return JSON.stringify({ format: 'itookit.toolbox', version: 1, entries, drawers }, null, 2);
     }

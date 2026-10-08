@@ -6,7 +6,7 @@
 
 | 接口 | 核心方法 | 定义 | 实现 | 消费 |
 |---|---|---|---|---|
-| `FileStorageBackend` / `OperationOptions` | `files` + 可选 `mutations`，signal/timeoutMs，opaque revision | `https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/storage/file-storage.ts`、`https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/core/operation.ts` | `vfsdriver-agent` | `FileStorageAdapter` → VFS |
+| `FileStorageBackend` / `OperationOptions` | `files` + 可选 `mutations`，signal/timeoutMs，opaque revision | `https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/storage/file-storage.ts`、`https://github.com/mushuanli/vfs-core/blob/main/src/interfaces/core/operation.ts` | `piagent-driver` | `FileStorageAdapter` → VFS |
 | `IStorageBackend` | `stat/list/read/write/mkdir/delete/rename` | `https://github.com/mushuanli/vfs-core/blob/main/interfaces/storage/` | `vfsdriver-indexeddb`、`vfsdriver-local` | `vfs-core (VFSEngine)` |
 | `IVFSManager` | `openFileSystem()/mounts/devices/plugins` | `https://github.com/mushuanli/vfs-core/blob/main/interfaces/services/vfs-manager.ts` | `vfs-core (VFSManager)` | `app-core`、`app-shell`、`kernel-adapters` |
 | `IFileSystem` | `openFile()/driver/meta/capabilities/capabilitiesAt()/discoveryRoot?()` | `https://github.com/mushuanli/vfs-core/blob/main/interfaces/services/file-system.ts` | `vfs-core (FileSystemView)` | `vfs-ui`、`llm-ui`、`llm-session`、`app-core` |
@@ -156,3 +156,26 @@ HTTP 外挂的条件写入、取消与项目授权见 [HTTP VFS 设计](design/v
 `vfs-ui` 仅依赖 `vfs-core`。`BrowserSource` / `BrowserAction` 接收自定义资源与动作；`VFSPresentationOptions` 按实例注入翻译、SVG 和启动跟踪；`TagEditorFactory` / `ContextMenuConfig` / `UIPersistencePort` 接收宿主组件、菜单和存储。消费方从 vfs-ui 导入这些类型，或提供结构兼容实现，无需依赖 common/ui-common。MindOS 展示适配位于 `app-shell/src/browser/vfs-presentation.ts`。
 
 通信契约的权威实现已迁到 `https://github.com/mushuanli/driver-llm/blob/main/src/types/`，原 llm-common 和 common 的 LLM 兼容转发已删除。通信消息 DTO 由 `https://github.com/mushuanli/driver-llm/blob/main/src/types/message.ts` 定义；上下文领域消息仍归 `llm-context/src/domain/message.ts`。两包互不依赖，宿主将上下文结果映射为通信请求；目前兼容字段可直接按结构赋值。模型设备与配置实现已迁到 `kernel-adapters/src/llm-management/`，通过 `@itookit/kernel-adapters/llm` 公开。
+
+## 外部 harness 端口
+
+`PiAgentDriver` 由宿主装配并注入远程来源服务，统一凭据，暴露文件/进程 provider、sync 与 harness。`HarnessClient`、`HarnessProfile`、`HarnessSession`、`HarnessEvents`、`HarnessReceipt` 位于 piagent-driver `/harness` 公共入口，app-core 只使用类型并转发给 app-shell。
+
+创建仅使用服务端声明的 workspaceId；继续先核对 native cwd 授权并拒绝抢占活跃会话；发送、响应和中断必须属于本服务接管的会话。只读历史不触发 resume。修改必须使用当前 epoch/requestId，未知结果查询 operation 收据，禁止自动重放。事件有独立 epoch、递增 seq 与 cursor；gap 要求刷新历史，不能宣称完整输出。客户端关闭不代表原生 turn 停止。
+
+`MCPServer.auth` 保存 basic/bearer 类型、username 和 credentialRef，密钥由 `MCPConnectionOptions.resolveCredential` 在每次请求解析。`beforeSave/beforeDelete/configurationChanged` 由应用注入授权与投影刷新；机制不依赖 app-core。`MCPConnectionOptions.extensions` 注册 `MCPConfigurationExtension`，其 `matches` 本地筛选标准发现结果，`discover` 通过 `MCPConfigurationExtensionContext` 消费 `MCPDiscovery.metadata` 或复用当前连接的 `callTool`。验证结果放入 `MCPDiscovery.extensions`，管理器负责测试/保存复用与连接身份变更后的重新验证。
+
+pi-agent 可直接使用标准 `MCPServer.apiKey`（Bearer，无 username）。app-core 注册的扩展优先验证 `server/discover._meta['itookit/pi-agent']`；旧服务通过已声明的能力工具验证，不为普通 MCP 发专用探测。结果保存于 `MCPServer.extensions['itookit/pi-agent']`，绑定须匹配当前 MCP endpoint 及已知 fileProtocol。`MCPRemoteConnections` 从已验证配置恢复驱动凭据，API Key 不复制到项目挂载记录。旧 basic/bearer credentialRef 仍支持。配置展示名自由修改，不用名称判断能力；设置 UI 控件只呈现已识别扩展。
+
+`ProjectFolder.displayName` 是当前服务器名与项目名的组合；持久身份 name 与可选 navigationName 区分人类名称和稳定路由。`MCPRemoteConnections` 是 MCP 目录的只读投影及旧连接迁移适配，不在挂载目录保存第二份连接配置。
+
+
+`PiAgentDriver.projects` 暴露 ProjectClient/RemoteProject/ProjectMount/RegisterProject；服务端目录项目与 sync 数据项目是不同身份。项目文件请求使用项目 ID、revision 与只读衰减 headers，project_exec/harness 从服务端同一份授权获取 mounts。ProjectLauncher 是进程/harness 共用启动端口，当前 bubblewrap，VMM 尚未实现。详见 [项目模型](design/pi-agent-project-model.md)。
+
+### 远程项目会话展示端口
+
+`ui-common` 的 `ConversationControls` 由宿主注入，提供 read/poll/send/respond/interrupt/reconcile/close，返回规范化历史、待交互卡片及操作可用状态。`piagent-driver` 的 `HarnessConversation` 按结构实现；app-core 的 `ProjectRemoteMountService.projectConversation` 注入项目授权和持久回执 journal；llm-ui 只消费该端口。`RemoteAgentControls` 提供项目范围内目标列表及发送路由，远程选择不进入本地 SessionCommand.Send。原生会话引用、输入草稿和待确认回执位于 `/etc/fs/harness-conversations.seq`，不复制原生历史。 `ConversationSnapshot` 可携带 `canFork` / `hasEarlier`，对应可选 `fork` / `branches` / `loadEarlier`；分支切换仍由宿主导航处理。`HarnessHistory.nextCursor` 与 `HarnessHistoryOptions.cursor` 描述只读历史分页；`HarnessClient.inspect` 读取元信息，`fork` 是带 epoch/requestId 的原生修改。
+
+`ModelConfigurationCommands.inspectMCPDeletion` 返回配置和项目挂载引用的删除预览；`deleteMCPServers` 校验预览并要求有引用时显式 force。`MCPDeletionPort` 由 ProjectRemoteMountService 实现，预览由 ProjectService 提供远程项目与本地会话信息；经 SessionLifecycleService 清理以目标 MCP 为根来源的本地远程项目及其本地会话，再批量移除引用并释放视图。普通本地项目只解除附加挂载，服务器内容和原生会话保留。普通 MCP 删除仍禁止有引用的配置。
+
+`MCPRemoteConnections.diagnostic(connectionId)` 返回不含凭据和端点的 `MCPConnectionDiagnostic`（名称、验证原因、catalog revision、当前配置身份）。`ProjectRemoteMountService.resolveConnection` 在异步访问前恢复当前引用，缺失连接抛出 `RemoteConnectionUnavailableError`，保留 ENOENT 错误码并附带诊断及引用项目 ID。宿主本地化展示；`reportRemoteFailure` 记录 `pi-agent` 模块日志和时间在前的控制台错误，按异常实例去重，只输出身份、阶段、结构化错误码。详见 [项目模型](design/pi-agent-project-model.md)。

@@ -33,3 +33,7 @@ export { Workbench } from './core/Workbench';
 export { installMobileNavigation } from './navigation/mobile-navigation';
 export { showProjectSyncSetup } from './projects/sync/setup';
 export type { ProjectSyncSetupPorts } from './projects/sync/setup';
+
+export { showDirectorySync } from './projects/sync/directory';
+export type { DirectorySyncPorts } from './projects/sync/directory';
+export { showSyncPreview } from './projects/sync/preview';

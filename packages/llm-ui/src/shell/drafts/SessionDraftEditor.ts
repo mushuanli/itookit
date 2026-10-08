@@ -33,7 +33,7 @@ export class SessionDraftEditor extends IEditor {
     async render(): Promise<void> {
         const saved = await this.codec.decode(this.initialData);
         this.config = saved.config;
-        const agents = await buildExecutorOptions(this.service);
+        const agents = await buildExecutorOptions(this.service, this.options.remoteAgents);
         this.options.signal?.throwIfAborted(); if (this.closed) return;
         this.initLayout();
         const input = this.container.querySelector<HTMLElement>('#llm-ui-input')!;
@@ -86,6 +86,14 @@ export class SessionDraftEditor extends IEditor {
         this.sending = true; this.input!.setLoading(true);
         try {
             await this.saves.flush();
+            if (message.agentId?.startsWith('remote:')) {
+                if (message.files.length) throw new Error(t('harness.remoteAttachments'));
+                if (!this.options.remoteAgents) throw new Error(t('toolbox.unavailable'));
+                await this.options.remoteAgents.send(message.agentId, message.text);
+                await this.options.sessionDraft?.clear?.();
+                if (!this.closed) this.input?.restoreDraft('', [], message.agentId);
+                return;
+            }
             const target = await this.options.sessionDraft!.materialize();
             const editor = target.editor;
             if (!editor.commands.sendMessage) throw new Error('Chat editor cannot send messages');
@@ -97,6 +105,7 @@ export class SessionDraftEditor extends IEditor {
         } catch (error) {
             if (!this.closed) this.input?.restoreDraft(message.text, message.files, message.agentId ?? 'default');
             Toast.error(error instanceof Error ? error.message : String(error));
+            if (message.agentId?.startsWith('remote:')) throw error;
         } finally { this.sending = false; if (!this.closed) this.input?.setLoading(false); }
     }
     private async discard(): Promise<void> {

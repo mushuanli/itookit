@@ -10,7 +10,7 @@ import type { ProjectExecutionProvider } from './contracts';
  * a transport into app-core. Authorization policy lives in `requireRemoteProcessGrant`;
  * this module only orders inspect → acquire → process → release.
  */
-export function createRemoteExecutionProvider(files: Pick<SessionFilesService, 'inspect' | 'acquire'>, provider: Pick<RemoteFileSourceProvider, 'process' | 'capabilities'>): ProjectExecutionProvider | undefined {
+export function createRemoteExecutionProvider(files: Pick<SessionFilesService, 'inspect' | 'acquire'>, provider: Pick<RemoteFileSourceProvider, 'process' | 'projectProcess' | 'projects' | 'capabilities'>): ProjectExecutionProvider | undefined {
     if (!provider.process || !provider.capabilities) return;
     const acquireProcess = provider.process.bind(provider), capabilities = provider.capabilities.bind(provider);
     return { async acquire({ sessionId, connection, mounts, binding }) {
@@ -22,8 +22,16 @@ export function createRemoteExecutionProvider(files: Pick<SessionFilesService, '
         try {
             if (JSON.stringify(await files.inspect(sessionId)) !== JSON.stringify(record))
                 throw new FSError('ECONFLICT', 'Session directory authorization changed');
-            const process = await acquireProcess(connection, { serverId: binding.serverId, epoch, cwd: context.cwd,
-                mounts: processMounts(mounts, record.mounts[0].access) });
+            const root=mounts.find(mount => mount.at==='/');
+            let remoteProject: import('@itookit/piagent-driver').RemoteProject | undefined;
+            if (root?.serverProjectId && (!provider.projects || !provider.projectProcess)) throw new FSError('ECAPABILITY','Project-scoped remote execution unavailable');
+            if (root?.serverProjectId && provider.projects) {
+                const client=provider.projects(connection);
+                try {remoteProject=await client.read(root.serverProjectId);}finally{await client.close();}
+            }
+            const spec={ serverId: binding.serverId, epoch, cwd: context.cwd,
+                mounts: processMounts(mounts, record.mounts[0].access) };
+            const process=remoteProject && provider.projectProcess ? await provider.projectProcess(connection,remoteProject,spec) : await acquireProcess(connection,spec);
             return { ...context, nativeShell: process.nativeShell, release: async () => { await process.release(); await context.release(); } };
         } catch (error) { await context.release(); throw error; }
     } };

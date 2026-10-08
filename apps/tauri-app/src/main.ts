@@ -1,5 +1,5 @@
 import { createMindosFlowLibrary } from '@itookit/app-core';
-import { createHttpSourceProvider } from '@itookit/vfsdriver-agent';
+import { createPiAgentDriver } from '@itookit/piagent-driver';
 import { createTauriMCPTransport } from './shell/tauri-mcp-transport';
 import { recordDiagnostic, observeTools } from './log/desktop-diagnostics';
 import { errorDetails, t } from '@itookit/common';
@@ -313,7 +313,7 @@ async function bootstrap(): Promise<void> {
     const flowWorkspaces = new TauriFlowWorkspaces(rootDir);
     const llmLogger = new TauriLLMLogger(rootDir);
     const runtime = await createApplicationRuntime({
-        remoteSourceProvider: createHttpSourceProvider(),
+        remoteSourceProvider: createPiAgentDriver(),
         backend: rootBackend,
         additionalMounts: [...workspaceMounts],
         ownerKind: 'tauri',

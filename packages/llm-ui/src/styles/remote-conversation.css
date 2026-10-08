@@ -1,0 +1,19 @@
+.remote-conversation__interactions pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; }
+.remote-conversation__interactions { max-height: 35%; overflow: auto; }
+.remote-conversation__status { margin: 0; padding: 0 .75rem; font-size: .8rem; }
+.remote-conversation__status:empty { display: none; }
+.remote-conversation__history-progress { display: flex; align-items: center; gap: .5rem; padding: 0 .75rem; font-size: .8rem; }
+.remote-conversation__history-progress[hidden] { display: none; }
+
+.llm-input--remote .llm-input__btn--settings,
+.llm-input--remote .llm-input__conn-quick-wrapper,
+.llm-input--remote .llm-input__tier-quick-wrapper,
+.llm-input--remote .llm-input__execution-mode,
+.llm-input--remote .llm-input__execution-hint,
+.llm-input--remote .llm-input__btn--websearch,
+.llm-input--remote .llm-input__active-settings { display: none !important; }
+
+.remote-conversation__branches { position: relative; display: inline-flex; }
+.remote-conversation__branches[hidden] { display: none; }
+.remote-conversation__branch-create { display: flex; gap: .5rem; padding: .5rem; border-top: 1px solid var(--llm-border-color); }
+.remote-conversation__branch-create input { min-width: 8rem; max-width: 100%; }

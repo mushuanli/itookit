@@ -1,3 +1,4 @@
+import { RemoteConversationEditor } from './shell/RemoteConversationEditor';
 import { SessionDraftEditor } from './shell/drafts/SessionDraftEditor';
 import { normalizeEditorOptions } from '@itookit/ui-common';
 // @file: llm-ui/index.ts
@@ -64,6 +65,10 @@ export const createLLMFactory = (
 
     return async (container: HTMLElement, options: EditorOptions) => {
         const chatOptions = normalizeEditorOptions(options as EditorOptions<import('@itookit/llm-flow/contracts').SessionSubmission>);
+        if (options.conversation) {
+            const editor = new RemoteConversationEditor(container, options.conversation, options);
+            try { await editor.init(container); return editor; } catch (error) { await editor.destroy(); throw error; }
+        }
         if (options.sessionDraft) {
             const draft = new SessionDraftEditor(container, agentService, chatOptions, deps.ocr);
             await draft.init(container); return draft;

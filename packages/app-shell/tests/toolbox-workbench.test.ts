@@ -16,6 +16,8 @@ import { ToolboxResources } from '@itookit/app-core';
 import { ToolboxWorkbench } from '../src/toolbox/ToolboxWorkbench';
 import { ToolDetailsEditor } from '../src/toolbox/ToolDetailsEditor';
 import { legacyToolboxRoute, TOOLBOX_KINDS } from '../src/toolbox/routes';
+import { MCPServerConnection } from '../../kernel-adapters/src/llm-management/skills/mcp-client';
+import { t } from '@itookit/common';
 
 let runtime: ApplicationRuntime;
 const cleanup: Array<() => unknown> = [];
@@ -576,4 +578,25 @@ it('deletes selected model drawers through provider impact confirmation includin
     await vi.waitFor(() => expect(f.sidebar.querySelector('[data-item-id="/model-groups/openai"]')).toBeNull());
     expect(runtime.agentService.getFullProvider('anthropic')).toBeUndefined();
     expect(await runtime.agentService.getFullConnection('drawer-connection')).toBeNull();
+});
+
+it('updates MCP icon observations after explicit tests without probing during toolbox refresh', async () => {
+    const f = await setup();
+    await f.workbench.openResource('/mcp/docs');
+    const badge = () => f.sidebar.querySelector<HTMLElement>('.mcp-status-icon')!;
+    expect(badge().title).toContain(t('mcp.state.idle'));
+    const connect = vi.spyOn(MCPServerConnection.prototype, 'connect').mockRejectedValueOnce(new Error('HTTP 401 private-key'));
+    const server = (await runtime.agentService.getMCPServers()).find(item => item.id === 'docs')!;
+    await expect(runtime.agentService.testMCPServer(server)).rejects.toThrow('401');
+    await vi.waitFor(() => expect(badge().title).toContain(t('mcp.failure.authentication')));
+    expect(badge().title).not.toContain('private-key');
+    expect(connect).toHaveBeenCalledOnce();
+    vi.spyOn(MCPServerConnection.prototype, 'discover').mockResolvedValue({tools: [], resources: [], prompts: []});
+    vi.spyOn(MCPServerConnection.prototype, 'isConnected').mockReturnValue(true);
+    vi.spyOn(MCPServerConnection.prototype, 'disconnect').mockResolvedValue();
+    connect.mockResolvedValue(); await runtime.agentService.testMCPServer(server);
+    await vi.waitFor(() => expect(badge().title).toContain(t('mcp.state.connected')));
+    expect(connect).toHaveBeenCalledTimes(2);
+    const exported = JSON.parse(await f.workbench.exportSelection(['/mcp/docs'])).entries[0].data;
+    expect(exported.status).toBeUndefined(); expect(exported.connectionState).toBeUndefined();
 });

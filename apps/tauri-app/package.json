@@ -36,7 +36,7 @@
     "marked": "^16.4.2",
     "yaml": "^2.8.2",
     "@itookit/llm-flow": "workspace:*",
-    "@itookit/vfsdriver-agent": "5.3.0"
+    "@itookit/piagent-driver": "workspace:*"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",

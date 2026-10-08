@@ -5,12 +5,12 @@ import { BranchItem } from '../../domain/types';
 
 export const BranchIndicatorTemplates = {
 
-    renderIndicator(currentName: string, branchCount: number): string {
+    renderIndicator(currentName: string, branchCount: number, canOpen = branchCount > 1): string {
         const countBadge = branchCount > 1
             ? `<span class="llm-branch-indicator-count">${branchCount}</span>`
             : '';
 
-        const chevron = branchCount > 1
+        const chevron = canOpen
             ? `<svg class="llm-branch-indicator-chevron" viewBox="0 0 24 24"
                      width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
                     <polyline points="6 9 12 15 18 9"></polyline>
@@ -35,21 +35,21 @@ export const BranchIndicatorTemplates = {
         `;
     },
 
-    renderDropdownItems(branches: BranchItem[]): string {
+    renderDropdownItems(branches: BranchItem[], options: {deletable?: boolean; key?: (branch: BranchItem) => string} = {}): string {
         if (branches.length === 0) {
             return `<div class="llm-branch-dropdown__empty">No branches</div>`;
         }
 
         return branches.map(b => `
             <div class="llm-branch-dropdown__item ${b.isCurrent ? 'is-current' : ''}"
-                 data-branch-name="${escapeHTML(b.name)}"
+                 data-branch-name="${escapeHTML(options.key?.(b) ?? b.name)}"
                  title="${escapeHTML(b.name)}">
                 <span class="llm-branch-dropdown__icon">${b.isCurrent ? '●' : '○'}</span>
                 <span class="llm-branch-dropdown__name">${escapeHTML(b.name)}</span>
                 ${b.isCurrent ? '<span class="llm-branch-dropdown__badge">current</span>' : ''}
-                <button type="button" class="llm-branch-dropdown__delete"
+                ${options.deletable === false ? '' : `<button type="button" class="llm-branch-dropdown__delete"
                     title="${escapeHTML(t(b.isCurrent ? 'branch.deleteCurrentHint' : 'branch.delete'))}"
-                    aria-label="${escapeHTML(t('branch.delete') + ': ' + b.name)}" ${b.isCurrent ? 'disabled' : ''}>${ACTION_ICONS.delete}</button>
+                    aria-label="${escapeHTML(t('branch.delete') + ': ' + b.name)}" ${b.isCurrent ? 'disabled' : ''}>${ACTION_ICONS.delete}</button>`}
             </div>
         `).join('');
     },
@@ -59,4 +59,3 @@ export const BranchIndicatorTemplates = {
 };
 
 import { IconTemplates } from './IconTemplates';
-

@@ -24,7 +24,8 @@
     "@itookit/kernel-adapters": "workspace:*",
     "@itookit/tools": "workspace:*",
     "@itookit/llm-flow": "workspace:*",
-    "@itookit/vfs-sync": "0.1.0"
+    "@itookit/vfs-sync": "0.1.0",
+    "@itookit/piagent-driver": "workspace:*"
   },
   "peerDependencies": {
     "@itookit/app-settings": "workspace:*",

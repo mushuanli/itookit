@@ -3,6 +3,7 @@ import { workspacePath } from '../vfs/workspace-namespace';
 
 export type BrowserTarget =
     | { kind: 'folder'; path: string }
+    | { kind: 'remote'; folder: string; profileId?: string; nativeSessionId?: string; draft?: boolean; cursor?: string }
     | { kind: 'project-files'; folder: string; path: string }
     | { kind: 'favorites'; folder: string }
     | { kind: 'favorite'; folder: string; favoriteId: string }
@@ -64,6 +65,7 @@ export function resolveBrowserTarget(path: string): BrowserTarget {
     while (index < segments.length && isFolderSegment(segments[index])) index++;
     const folderPrefix = '/' + segments.slice(0, index).join('/');
     if (index === segments.length) return { kind: 'folder', path: folderPrefix };
+    if (segments[index] === '@harness' && index > 0) return remoteTarget(segments.slice(index + 1), folderPathFromBrowserPath(folderPrefix)!);
     if (segments[index] === '@favorites' && index > 0) {
         const favoriteId = segments[index + 1];
         if (segments.length > index + 2 || favoriteId && !/^[a-zA-Z0-9_-]{1,128}$/.test(favoriteId))
@@ -99,4 +101,35 @@ export function browserTargetFolder(target: BrowserTarget, path: string, session
     if ('folder' in target) return target.folder;
     if (target.kind !== 'folder') return sessionFolder !== undefined ? sessionFolder ?? '/' : folderPathFromBrowserPath(path) ?? '/';
     return folderPathFromBrowserPath(path) ?? '/';
+}
+
+export function remoteSessionPath(folder: string, profileId?: string, nativeSessionId?: string): string {
+    return folderBrowserPath(folder) + '/@harness' + (profileId ? '/' + encodeURIComponent(profileId) : '')
+        + (nativeSessionId ? '/' + encodeURIComponent(nativeSessionId) : '');
+}
+function remoteIdentity(value: string, cursor = false): string {
+    let id: string;
+    try { id = decodeURIComponent(value); } catch { throw new FSError('EINVAL', 'Invalid remote identity'); }
+    if (!id || id.length > 2048 || /[\x00-\x1f]/.test(id) || !cursor && /[\\/]/.test(id) || id === '.' || id === '..') throw new FSError('EINVAL', 'Invalid remote identity');
+    return id;
+}
+function remotePages(parts: string[]): {index: number; cursor?: string} {
+    let index = 1, cursor: string | undefined;
+    while (parts[index]?.startsWith('@page:') || parts[index] === '@page') {
+        // A page is one directory entry; retain decoding of previously saved two-segment routes.
+        if (parts[index] === '@page') {
+            cursor = remoteIdentity(parts[index + 1] ?? '',true); index += 2;
+        } else {
+            cursor = remoteIdentity(parts[index].slice(6),true); index++;
+        }
+    }
+    return {index,cursor};
+}
+function remoteTarget(parts: string[], folder: string): Extract<BrowserTarget, {kind: 'remote'}> {
+    const profileId = parts[0] ? remoteIdentity(parts[0]) : undefined;
+    const {index,cursor} = remotePages(parts);
+    const leaf = parts[index];
+    if (parts.length > index + 1 || leaf?.startsWith('@') && leaf !== '@new') throw new FSError('EINVAL', 'Invalid remote route');
+    return {kind: 'remote', folder, profileId, nativeSessionId: leaf && leaf !== '@new' ? remoteIdentity(leaf) : undefined,
+        draft: leaf === '@new' || undefined, cursor};
 }

@@ -368,3 +368,19 @@ textarea {
 .remote-settings__status { display: inline-block; font-size: 12px; padding: 3px 8px; border-radius: 12px; background: var(--st-bg-secondary); color: var(--st-text-secondary); }
 .remote-settings__status[data-state="online"] { color: var(--st-success, #15803d); }
 .remote-settings__status[data-state="offline"] { color: var(--st-danger, #b91c1c); }
+.harness-control { width: min(1100px, 94vw); max-height: 92vh; overflow: auto; color: var(--st-text-primary); background: var(--st-bg-primary); border: 1px solid var(--st-border-color); border-radius: 12px; padding: 20px; }
+.harness-control::backdrop { background: rgb(0 0 0 / 40%); }
+.harness-control__toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.harness-control__body { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(0, 3fr); gap: 16px; margin: 16px 0; min-height: 240px; }
+.harness-control__sessions { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow: auto; }
+.harness-control__sessions button { text-align: left; overflow-wrap: anywhere; }
+.harness-control__detail { min-width: 0; }
+.harness-control__output { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; }
+.harness-control__interaction { border: 1px solid var(--st-border-color); border-radius: 8px; padding: 12px; margin: 8px 0; }
+.harness-control__interaction pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; }
+.harness-control__interaction label { display: block; margin: 8px 0; }
+.harness-control__form { display: flex; gap: 8px; align-items: flex-end; }
+.harness-control__form textarea { flex: 1; min-height: 72px; resize: vertical; }
+@media (max-width: 600px) { .harness-control__body { grid-template-columns: 1fr; } .harness-control__sessions { max-height: 140px; } .harness-control__form { flex-wrap: wrap; } }
+.mcp-status-icon { display: inline-block; position: relative; padding-right: .2rem; }
+.mcp-status-icon__badge { position: absolute; right: -.2rem; bottom: -.15rem; font-size: .7rem; line-height: 1; background: var(--bg-primary, white); border-radius: 50%; }

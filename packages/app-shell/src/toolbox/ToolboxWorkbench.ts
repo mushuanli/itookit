@@ -9,10 +9,11 @@ import { drawerField } from './drawer-field';
 import { drawerKind, ungroupedId, type Drawer } from '@itookit/app-core';
 import { resourceDrawers } from './resource-drawers';
 import { resourceIcon } from './resource-icons';
+import { mcpStatusIcon } from './mcp-status';
 import { modelDrawers, compareModelItems, modelDrawerId, modelDrawerProvider } from './model-drawers';
 import { type VFSUIShell, type VFSNodeUI, type VFSToolbarContext, type UIPersistencePort } from '@itookit/vfs-ui';
 import { createFileSystemView, type FileSystemView } from '@itookit/vfs-core';
-import { t, type NavigationRequest } from '@itookit/common';
+import { ENTITY_ICONS, t, type NavigationRequest } from '@itookit/common';
 import { editorResourceId, type EditorFactory, type MenuItem, type ContextMenuConfig } from '@itookit/ui-common';
 import type { WorkspaceController } from '@itookit/app-core';
 import { showNameDialog } from '../files/project-dialog';
@@ -25,6 +26,7 @@ interface Options {
     ocr?: import('../configuration/ocr-controls').OcrConfigurationControls;
     sidebar: HTMLElement; editor: HTMLElement; resources: ToolboxResources; inventory: ToolboxInventory;
     configuration: ModelConfigurationCommands;
+    projects?: Pick<import('@itookit/app-core').ProjectService,'list'>;
     factories: Record<ToolboxKind, EditorFactory>; flowMenu: ContextMenuConfig<VFSNodeUI>;
     navigate(request: NavigationRequest): Promise<void>; selected(path: string | null): void;
     /** Host-owned snapshot storage; omitted means the toolbox restores nothing. */
@@ -96,7 +98,7 @@ export class ToolboxWorkbench implements WorkspaceController {
     }
     private connectSources(): void {
         const { resources, editor } = this.options;
-        this.deletion = new ConfigurationDeletionDialog(this.options.configuration, () => this.refresh(), this.options.ocr?.deletionImpact);
+        this.deletion = new ConfigurationDeletionDialog(this.options.configuration, () => this.refresh(), this.options.ocr?.deletionImpact, this.options.projects);
         this.selectionDeletion = new ToolboxDeletion({ resources, inventory: this.options.inventory, view: this.view, deletion: this.deletion,
             completed: async () => { if (!this.closed) { this.ui.setSelection([]); await this.refresh(); } } });
         this.cleanups.push(connectEditorLifecycle(this.ui, this.view, editor, undefined, { emptyMessage: t('toolbox.empty'), files: { fs: this.view, cwd: '/' }, resolveEditor: node => this.factory(toolboxKind(node.id)!),
@@ -161,7 +163,7 @@ export class ToolboxWorkbench implements WorkspaceController {
             const summary = description?.description ?? String(node.metadata.custom.description ?? '');
             const source = String(node.metadata.custom.source ?? '');
             this.titles.set(node.id, description?.name ?? node.metadata.title);
-            return { ...node, icon: node.type === 'file' ? resourceIcon(kind) : node.icon, children: node.children && decorate(node.children),
+            return { ...node, icon: this.itemIcon(node, kind), children: node.children && decorate(node.children),
                 metadata: { ...node.metadata, title: description?.name ?? node.metadata.title,
                     tags: node.metadata.tags, custom: { ...node.metadata.custom, toolboxKind: kind, navigationMenu: true } },
                 content: node.type === 'file' ? { ...node.content!, summary: [['connections', 'tools'].includes(kind) ? '' : source, summary.split('\n')[0].slice(0, 160)].filter(Boolean).join(' · '), searchableText: [source, summary, id].join(' ') } : node.content };
@@ -169,6 +171,11 @@ export class ToolboxWorkbench implements WorkspaceController {
         const decorated = decorate(roots.flatMap(node => node.children ?? []).flatMap(node =>
             node.id === '/agents/default' ? node.children ?? [] : [node]));
         return this.groupResources(decorated);
+    }
+    private itemIcon(node: VFSNodeUI, kind: ToolboxKind): string | undefined {
+        if (node.metadata.custom.remoteHarnessAgent) return ENTITY_ICONS.remoteAgent;
+        if (node.type !== 'file') return node.icon;
+        return kind === 'mcp' ? mcpStatusIcon(node.metadata.custom) : resourceIcon(kind);
     }
     private groupResources(items: VFSNodeUI[]): VFSNodeUI[] {
         const models = items.filter(item => ['providers', 'connections'].includes(toolboxKind(item.id)!));

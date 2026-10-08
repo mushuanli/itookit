@@ -1,4 +1,4 @@
-import { createHttpSourceProvider } from '@itookit/vfsdriver-agent';
+import { createPiAgentDriver } from '@itookit/piagent-driver';
 import { recordRuntimeDiagnostic, runtimeDiagnosticPath, traceRuntimeStage } from './diagnostics';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile, appendFile } from 'node:fs/promises';
@@ -100,7 +100,7 @@ export async function createHttpMindOSRuntime(options: CommandOptions): Promise<
     });
     try {
         return await traceRuntimeStage('http.runtime', () => createApplicationRuntime({
-            remoteSourceProvider: createHttpSourceProvider(ref => process.env[`MINDOS_REMOTE_${ref.replace(/-/g, '_')}`] ?? ''),
+            remoteSourceProvider: createPiAgentDriver(ref => process.env[`MINDOS_REMOTE_${ref.replace(/-/g, '_')}`] ?? ''),
             backend,
             directorySourceProvider: new CliDirectorySourceProvider(rootDir),
             defaultSessionDirectory: `host:${path.resolve(options.setHome ?? process.cwd())}`,

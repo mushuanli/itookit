@@ -109,6 +109,17 @@ it('keeps a failed status query unknown rather than presenting it as a missing b
     await expect(menu.refresh('p')).rejects.toThrow('I/O');
     expect(menu.items('p').some(item => item.type !== 'separator' && item.id === 'project-sync-setup')).toBe(false);
 });
+it('exposes an invalid sync MCP as a project issue while retaining status and offline unbind', async () => {
+    const bound = state(); bound.binding.connectionId = 'deleted';
+    const service = {status: vi.fn(async () => bound)} as unknown as ProjectSyncService;
+    const controller = new AbortController(), changed = vi.fn();
+    const menu = new ProjectSyncMenu({service, connection: () => ({reason: 'mcp-not-found'})}, controller.signal, vi.fn(), vi.fn(), changed);
+    await menu.refresh('p'); await menu.refresh('p'); expect(changed).toHaveBeenCalledOnce();
+    expect(menu.indicator('p')?.issues).toContain(t('project.sync.issue.connectionMissing'));
+    expect(action(menu, 'now').disabled).toBe(true); expect(action(menu, 'unbind').disabled).toBe(false);
+    await menu.openStatus('p'); expect(document.querySelector('dialog')?.textContent).toContain(t('project.sync.issue.connectionMissing'));
+    controller.abort();
+});
 it('opens current-project actions from the sidebar title button and selector context menu', async () => {
     const project = { name: 'Project', path: '/project', project: { id: 'p' } };
     const projects = { sessions: { navigation: async () => ({ sessions: [], folders: [], pending: [], roots: new Map() }) },
@@ -142,4 +153,23 @@ it('discards an older async status result and exposes expired-receipt reconcilia
     vi.mocked(service.status).mockResolvedValue(pending); await menu.refresh('p'); complete(state()); await first;
     expect(action(menu, 'now').disabled).toBe(true); expect(action(menu, 'reconcile').disabled).toBe(false);
     expect(menu.items('p').some(item => item.type !== 'separator' && item.id === 'project-sync-recover')).toBe(false);
+});
+it('compares captured text safely and exposes the two replacement destinations',async()=>{
+    const initial=prepared();initial.plan.conflicts[0].local={kind:'file',path:'<script>file</script>',hash:'a'.repeat(64),size:'5'};
+    initial.plan.conflicts[0].remote={kind:'file',path:'<script>file</script>',hash:'b'.repeat(64),size:'6'};
+    const service={compare:vi.fn(async()=>({path:'<script>file</script>',baseline:{kind:'missing'},local:{kind:'file',content:{text:'local\n'}},remote:{kind:'file',content:{text:'<img src=x onerror=alert(1)>\n'}}})),execute:vi.fn()} as unknown as ProjectSyncService;
+    const controller=new AbortController();showSyncPreview(service,'p',initial,controller.signal,vi.fn());
+    button(t('project.sync.compareContent')).click();await vi.waitFor(()=>expect(document.querySelectorAll('pre').length).toBe(2));
+    expect(service.compare).toHaveBeenCalledWith('p','original','<script>file</script>');expect(document.querySelector('img')).toBeNull();expect(document.querySelector('.project-sync__line--changed')).not.toBeNull();
+    expect(service.execute).not.toHaveBeenCalled();controller.abort();
+});
+it('changes direction in the preview, invalidates its token and requires a fresh review',async()=>{
+    const initial=prepared(),fresh=prepared();fresh.id='fresh';fresh.bindingToken='new-token';fresh.plan.conflicts=[];
+    const service={configure:vi.fn(async()=>{}),preview:vi.fn(async()=>fresh),execute:vi.fn(async()=>({conflicts:[],warnings:[]}))} as unknown as ProjectSyncService;
+    const controller=new AbortController();showSyncPreview(service,'p',initial,controller.signal,vi.fn(async()=>{}));
+    const select=document.querySelector<HTMLSelectElement>(`select[aria-label="${t('project.sync.direction')}"]`)!;
+    select.value='download';select.dispatchEvent(new Event('change'));expect(button(t('project.sync.execute')).disabled).toBe(true);
+    await vi.waitFor(()=>expect(service.configure).toHaveBeenCalledWith('p','token',{direction:'download'}));
+    await vi.waitFor(()=>expect(button(t('project.sync.execute')).disabled).toBe(false));expect(service.execute).not.toHaveBeenCalled();
+    button(t('project.sync.execute')).click();await vi.waitFor(()=>expect(service.execute).toHaveBeenCalledWith('p','fresh'));controller.abort();
 });

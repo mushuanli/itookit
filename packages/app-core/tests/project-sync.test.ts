@@ -31,3 +31,8 @@ describe('project sync lifecycle', () => {
         const { service } = setup(); await expect(service.preview('wrong')).rejects.toThrow('BINDING_INACTIVE');
     });
 });
+it('blocks direction changes while publication or application is pending',async()=>{
+    const {store,service}=setup();store.state.activePlanId='in-progress';
+    await expect(service.configure('local',bindingToken(store.state.binding),{direction:'upload'})).rejects.toThrow('SYNC_APPLY_PENDING');
+    expect(store.state.binding.direction).toBe('both');
+});

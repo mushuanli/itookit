@@ -1,11 +1,14 @@
 // @file llm-ui/views/mdx/MDxController.ts
 import { createMDxEditor } from '@itookit/mdx-adapter';
-import type { MDxEditor } from '@itookit/mdxeditor';
+import type { MDxEditor, MDxPlugin } from '@itookit/mdxeditor';
 import type { CollapseExpandResult } from '@itookit/ui-common';
 import type { IFileSystem } from '@itookit/vfs-core';
 import type { IStreamableEditor } from '../../domain/ports/IStreamableEditor';
 
 export interface MDxControllerOptions {
+    codeBlockControls?: {defaultCollapsed?: boolean; minLinesThreshold?: number; collapsedHeight?: number};
+    plugins?: MDxPlugin[];
+    editable?: boolean;
     readOnly?: boolean;
     onChange?: (text: string) => void;
     streaming?: boolean;
@@ -80,6 +83,7 @@ export class MDxController implements IStreamableEditor {
             const editor = await createMDxEditor(this.container, {
                 initialContent,
                 initialMode: this.isReadOnly ? 'render' : 'edit',
+                ...(this.options.editable === false ? {readOnly:true} : {}),
                 assets: this.options.assets,
                 files: this.options.fs ? { fs: this.options.fs, cwd: '/' } : undefined,
                 plugins: [
@@ -91,12 +95,14 @@ export class MDxController implements IStreamableEditor {
                     'task-list',
                     'media',
                     'svg',
-                    'ui:toolbar'
+                    'ui:toolbar',
+                    ...(this.options.plugins ?? [])
                 ],
                 defaultPluginOptions: {
                     'codeblock-controls': {
                         defaultCollapsed: !this.isStreamingInit,
-                        streamingMode: this.isStreamingInit
+                        streamingMode: this.isStreamingInit,
+                        ...this.options.codeBlockControls,
                     }
                 }
             }) as MDxEditor;

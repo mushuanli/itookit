@@ -9,6 +9,7 @@ export {
     editorFilePath,
     editorResourceId,
     type EditorHostContext,
+    type ConfigurationFormControls,
     type EditorFileReference,
     type EditorEvent,
     type EditorEventMap,
@@ -45,3 +46,5 @@ export type { SessionDraftControls } from './interfaces/SessionDraftControls';
 
 export { SettingsAutoSave, SettingsValidationError, requestSettingsSave } from './components/SettingsAutoSave';
 export type { SettingsSave } from './components/SettingsAutoSave';
+
+export type { ConversationControls, ConversationSnapshot, ConversationMessage, ConversationRequest, RemoteAgentControls } from './interfaces/ConversationControls';

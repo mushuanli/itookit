@@ -45,6 +45,7 @@ export class FloatingNavPanel implements INavigationPresenter {
         private container: HTMLElement,
         bus: IEditorEventBus,
         private workspaceActions?: FloatingNavWorkspaceActions,
+        private readOnly = false,
     ) {
         this.bus = bus;
     }
@@ -130,6 +131,7 @@ export class FloatingNavPanel implements INavigationPresenter {
      *   - batch-delete, batch-copy, fold-all, unfold-all
      */
     private async handleToolbarAction(action?: string): Promise<void> {
+        if (this.readOnly && ['batch-delete', 'toggle-context', 'context-include', 'context-exclude'].includes(action ?? '')) return;
         switch (action) {
             // --- 本地操作：立即更新 UI ---
             case 'toggle-select-all':
@@ -381,6 +383,7 @@ export class FloatingNavPanel implements INavigationPresenter {
     }
 
     private handleItemAction(action: string, sessionId: string, index: number, actionButton?: HTMLElement): void {
+        if (this.readOnly) return;
         switch (action) {
             case 'toggle-round-context': {
                 const item = this.filteredItems[index];
@@ -457,6 +460,7 @@ export class FloatingNavPanel implements INavigationPresenter {
             contextItems.some(item => item.contextMode !== 'exclude'),
         );
 
+        this.restrictReadActions();
         this.container.appendChild(this.panel);
         this.bindPanelEvents();
         this.updateHighlight();
@@ -479,6 +483,11 @@ export class FloatingNavPanel implements INavigationPresenter {
                 item, idx, isActive, isSelected, timeStr, title
             );
         }).join('');
+    }
+
+    private restrictReadActions(): void {
+        if (!this.readOnly) return;
+        this.panel?.querySelectorAll('.llm-nav-panel__workspace-switches, .llm-nav-panel__branch-bar, .llm-nav-panel__footer, .llm-nav-item__branch-actions, .llm-nav-item__child-branches, [data-action="toggle-round-context"], [data-action="context-include"], [data-action="context-exclude"], [data-action="batch-delete"]').forEach(element => element.remove());
     }
 
     // ================================================================
@@ -831,6 +840,7 @@ export class FloatingNavPanel implements INavigationPresenter {
     }
 
     private handleArrowKey(e: KeyboardEvent): void {
+        if (this.readOnly) return;
         if (this.currentIndex < 0) return;
         e.preventDefault();
 

@@ -130,6 +130,7 @@ export interface AppOptions {
     sync?: import('@itookit/app-core').ApplicationRuntimeOptions['sync'];
     /** Host UI for selecting a server/project and persisting a fresh binding. */
     projectSyncSetup?(projectId: string, signal: AbortSignal): Promise<void>;
+    projectSyncDirectory?(projectId: string, signal: AbortSignal): Promise<void>;
     directorySourceProvider?: import('@itookit/app-core').DirectorySourceProvider;
     /** Host registration/configuration of durable Session file grants. */
     configureSessionFiles?(files: import('@itookit/app-core').SessionFilesService): Promise<void> | void;

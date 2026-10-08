@@ -103,7 +103,8 @@ it('recovers a SIGKILL between native replacement and SQLite baseline commit', a
     const captured = await f.local.capture(), actions = [await action(f.store, 'a', 'after')], token = bindingToken(f.state.binding);
     await f.store.persistPlan('crash-input', { token, handle: captured.handle, actions });
     const { spawn } = await import('node:child_process'), { once } = await import('node:events');
-    const child = spawn(process.execPath, ['--import', 'tsx', 'tests/fixtures/local-sync-crash.ts', JSON.stringify(f.options)], { stdio: ['ignore', 'ignore', 'pipe'] });
+    // Ignore the tsx loader deprecation while retaining actual fixture errors on stderr.
+    const child = spawn(process.execPath, ['--disable-warning=DEP0205', '--import', 'tsx', 'tests/fixtures/local-sync-crash.ts', JSON.stringify(f.options)], { stdio: ['ignore', 'ignore', 'pipe'] });
     let error = ''; child.stderr.on('data', bytes => { error += bytes; });
     const [code, signal] = await once(child, 'exit'); expect({ code, signal, error }).toEqual({ code: null, signal: 'SIGKILL', error: '' });
     expect((await f.store.read()).baseline).toEqual([]); expect(await readFile(join(f.directory, 'work/a'), 'utf8')).toBe('after');

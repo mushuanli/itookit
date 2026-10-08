@@ -37,7 +37,7 @@ it('resolves project folders from one organization snapshot per sync and refresh
         expect(folders).toHaveBeenCalledTimes(1);
         expect(navigation.currentProject()?.path).toBe('/Demo');
         expect(navigation.toolbarContainer.hidden).toBe(true);
-        expect(navigation.header.querySelectorAll('button')).toHaveLength(3);
+        expect([...navigation.header.querySelectorAll('button')].filter(button => !button.closest('.project-sync-status'))).toHaveLength(3);
         const selector = navigation.header.querySelector('select')!;
         expect(selector.querySelector('option[value="/"]')?.textContent).toBe('所有项目');
         selector.value = '@new-project'; selector.dispatchEvent(new Event('change'));

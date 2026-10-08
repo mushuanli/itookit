@@ -1,3 +1,6 @@
+import { MCPRemoteConnections } from '../projects/mcp-remote-connections';
+import { createPiAgentMCPExtension } from '../projects/pi-agent-mcp-extension';
+import { SessionLifecycleService } from '../session/session-lifecycle';
 import { ProjectSyncService, type ProjectSyncProvider } from '../projects/sync/service';
 import type { Coordinator } from '@itookit/vfs-sync';
 import { seedDefaultFlows } from '../presets/default-flows';
@@ -110,6 +113,15 @@ export interface ApplicationRuntimeOptions {
 export async function createApplicationRuntime(options: ApplicationRuntimeOptions): Promise<ApplicationRuntime> {
     const cleanupFns: Array<() => void | Promise<void>> = [];
     const sourceCleanupFns: Array<() => void | Promise<void>> = [];
+    let remoteConnections: ProjectRemoteMountService | undefined;
+    const injectedMCP = options.mcp;
+    options = { ...options,mcp:{ ...injectedMCP,
+        extensions:[...(injectedMCP?.extensions ?? []),...(options.remoteSourceProvider ? [createPiAgentMCPExtension()] : [])],
+        resolveCredential:injectedMCP?.resolveCredential ?? options.remoteSourceProvider?.resolveCredential?.bind(options.remoteSourceProvider),
+        beforeSave:async (server,previous) => { await injectedMCP?.beforeSave?.(server,previous); await remoteConnections?.beforeMCPChange(server,previous); },
+        beforeDelete:async id => { await injectedMCP?.beforeDelete?.(id); remoteConnections?.beforeMCPDelete(id); },
+        configurationChanged:async () => { await injectedMCP?.configurationChanged?.(); await remoteConnections?.refreshMCPConnections(); },
+    } };
     const logStep = (label: string) => { console.log(`[Boot] ${label}`); options.onProgress?.(label); };
     try {
         // ── 1-2. VFS + LLM device driver ───────────────────────────────────────────
@@ -167,8 +179,11 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
             };
             const remote = new ProjectRemoteMountService(systemFS, options.remoteSourceProvider,
                 async projectId => { for (const id of await affected(projectId)) await remoteGuard(id); },
-                async projectId => { for (const id of await affected(projectId)) { await sessionFiles.invalidate(id); await mountChanged(id); } });
-            await remote.init(); projects.remoteMounts = remote;
+                async projectId => { for (const id of await affected(projectId)) { await sessionFiles.invalidate(id); await mountChanged(id); } }, new MCPRemoteConnections(agentService,options.remoteSourceProvider));
+            await remote.init(); remoteConnections = remote; projects.remoteMounts = remote;
+            remote.existingProjectIds = () => projects.storedProjectIds();
+            await traceBoot('projects.remoteReferences', () => remote.reconcileMCPReferences());
+            configuration.mcpDeletion = remote;
             projects.execution = new ProjectExecutionService(remote,
                 options.projectExecutionProvider ?? createRemoteExecutionProvider(sessionFiles, options.remoteSourceProvider));
             sourceCleanupFns.push(() => remote.dispose());
@@ -304,6 +319,13 @@ export async function createApplicationRuntime(options: ApplicationRuntimeOption
         await traceBoot('seedDefaultFlows', () => seedDefaultFlows(new FlowDefinitionStore(flowEngine, kernel.dagPlugins)));
 
         const runCatalog = new RunCatalog(sessionRepository, kernel.kernel);
+        if (remoteConnections) {
+            const lifecycle = new SessionLifecycleService({repository:sessionRepository,kernel:kernel.kernel});
+            remoteConnections.inspectRemoteProjects = ids => projects.inspectRemoteProjectRemoval(ids);
+            remoteConnections.removeRemoteProjects = async ids => {
+                for (const id of ids) await projects.removeRemoteProjectRecord(id,path => lifecycle.deleteFolder(path,true));
+            };
+        }
 
         let disposed = false;
         const dispose = async () => {

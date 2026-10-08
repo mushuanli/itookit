@@ -13,7 +13,7 @@ export { acquireSessionProcessContext } from './vfs/session-process-context';
 export type { SessionProcessFactory, SessionProcessMount } from './vfs/session-process-context';
 export { acquireWorkspaceProcessContext, type WorkspaceProcessSource } from './vfs/workspace-process-context';
 export { createSessionBrowser, taskSummary, taskKeyEvent } from './session/session-browser';
-export { folderBrowserPath, folderPathFromBrowserPath, resolveBrowserTarget, browserTargetFolder } from './session/browser-routes';
+export { remoteSessionPath, folderBrowserPath, folderPathFromBrowserPath, resolveBrowserTarget, browserTargetFolder } from './session/browser-routes';
 export type { BrowserTarget } from './session/browser-routes';
 export type { SessionBrowserDependencies } from './session/session-browser';
 export { SessionLifecycleService } from './session/session-lifecycle';
@@ -65,7 +65,7 @@ export { ToolboxResources } from './configuration/toolbox-resources';
 export { ToolboxDrawers, DRAWER_KINDS, drawerKind, ungroupedId } from './configuration/toolbox-drawers';
 export type { Drawer, DrawerKind } from './configuration/toolbox-drawers';
 export { ModelConfigurationCommands, ConfigurationMutationError } from './configuration/model-commands';
-export type { ConfigurationStore, ProviderDeletionImpact, ConfigurationDeletionTarget } from './configuration/model-commands';
+export type { ConfigurationStore, ProviderDeletionImpact, ConfigurationDeletionTarget, MCPDeletionImpact, MCPDeletedProject, MCPDeletionReference, MCPDeletionPort } from './configuration/model-commands';
 export { toolGrant } from './configuration/tool-grants';
 export type { ToolGrantTarget } from './configuration/tool-grants';
 export { ProjectSessions } from './projects/project-sessions';
@@ -77,6 +77,8 @@ export type { ToolboxTool } from './configuration/toolbox-catalog';
 export { OcrService, type OcrSettings, type OcrConnection } from './configuration/ocr-service';
 
 export { ProjectRemoteMountService } from './projects/remote-mounts';
+export { RemoteConnectionUnavailableError, reportRemoteFailure } from './projects/remote-diagnostics';
+export type { MCPConnectionDiagnostic, MCPConnectionReason } from './projects/remote-diagnostics';
 export type { RemoteFileSystemConfig, RemoteFileSystemInput } from './projects/remote-connections';
 export type { ProjectRemoteMount, RemoteFileSourceProvider, RemoteFileConnection, RemoteConnectionStatus } from './projects/remote-mounts';
 
@@ -102,7 +104,14 @@ export { DEFAULT_HARNESS_TOOL_IDS } from './presets/harness-tools';
 export { createMindosDirectAgentPolicy } from './presets/direct-agent-policy';
 
 export { ProjectSyncService } from './projects/sync/service';
-export type { ProjectSyncProvider, ProjectSyncSession } from './projects/sync/service';
+export type { ProjectSyncProvider, ProjectSyncSession, ProjectSyncComparison, ProjectSyncContent } from './projects/sync/service';
 
 export { prepareProjectSync } from './projects/sync/prepare';
 export type { ProjectSyncPreparationRemote } from './projects/sync/prepare';
+export type { HarnessClient, HarnessProfile, HarnessSession, HarnessPage, HarnessHistory, HarnessEvent, HarnessEvents, HarnessReceipt } from '@itookit/piagent-driver/harness';
+
+export { MCPRemoteConnections, PI_AGENT_EXTENSION, remoteMCPConnection, piAgentConfiguration, isPiAgentTool } from './projects/mcp-remote-connections';
+export type { PiAgentConfiguration, MCPConfigurationStore } from './projects/mcp-remote-connections';
+
+export { listRemoteHarnessAgents } from './projects/remote-agent-catalog';
+export type { RemoteHarnessAgent } from './projects/remote-agent-catalog';

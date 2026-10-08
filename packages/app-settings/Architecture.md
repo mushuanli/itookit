@@ -89,4 +89,4 @@ const factory = createSettingsFactory(
 - `AppearanceSettingsEditor` 写 `/ui/theme.json`，通过 `app:theme-change` 事件广播
 - `SystemFSExploreEditor` 经 `createSystemFileInspector()` 组装只读视图：`/dev` 挂载设备描述，`/workspaces/<name>` 挂载各工作区文件系统
 
-Storage 的远程文件系统区域由 `createSettingsFactory({ remoteFiles })` 注入，支持多个命名连接，子编辑器随 Storage 销毁。已删除旧同步 UI、服务、HTTP 同步协议及自动同步定时器；旧同步配置不再读取。
+pi-agent 连接位于工具箱 MCP，Storage 不再注入远程连接编辑器。MCP 表单通过中立 ConfigurationFormControls 扩展，业务授权与控制中心由 app-shell/app-core 装配。

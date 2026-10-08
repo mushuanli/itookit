@@ -28,7 +28,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 | `@itookit/vfs-sync` | 多端文件同步核心：规范 manifest、扫描完整性与三方计划、持久操作序列、冲突决策和恢复；零运行时依赖，I/O 由端口注入。 |
 | `@itookit/vfs-core` | VFS 引擎核心：协议层 + 引擎实现 + 事件总线 + 通用 IO（IIOStream/pipe）。 |
 | `@itookit/vfsdriver-indexeddb` | IndexedDB 存储后端（浏览器）；既有 SeqFile 记录存储与通用原生事务能力；同步适配、原子应用与 Web Locks 由 sync-adapters 提供。 |
-| `@itookit/vfsdriver-agent` | HTTP 外挂文件驱动（Web/Tauri/CLI），可取消批量读取与条件写入；另提供独立 HttpSyncClient；服务端为 `tools/fs-agent`。 |
+| `@itookit/piagent-driver` | 统一 pi-agent 连接/凭据接入：文件、远程进程、HTTP 同步与 MCP harness 控制；独立于应用策略与 UI。 |
 | `@itookit/vfsdriver-local` | SQLite + 本地 FS 后端（Node/Electron）。 |
 | `@itookit/llm-ui` | Chat UI：聊天界面、流式历史视图、会话编排可视化。 |
 | `@itookit/llm-settings-ui` | LLM 设置 UI：Agent/Provider/Connection/MCP/Skill/Cost/SystemPrompt 编辑器 + 配置导入导出（`llm-import`）。 |
@@ -52,7 +52,7 @@ llm-session ──▶ llm-flow ──▶ llm-tasks ──▶ durable-kernel ─�
 
 ### 独立 npm 库与同步接入
 
-vfs-core、vfs-ui、三个 vfsdriver、vfs-sync 和 driver-llm 已从工作区移出。itookit 固定依赖 npm 版本，不使用源码别名或开发子模块；独立仓库保存在 `../pair-x1/`，不参与应用构建。版本和发布流程见 [npm 库接入](design/npm-library-consumption.md)。
+vfs-core、vfs-ui、IndexedDB/Local 两个 vfsdriver、vfs-sync 和 driver-llm 已从工作区移出，通过固定 npm 版本接入，独立仓库保存在 `../pair-x1/`。原 HTTP 驱动并入 piagent-driver，当前以 workspace 开发并准备独立发布，文件与进程实现位于其 src/files。版本和发布流程见 [npm 库接入](design/npm-library-consumption.md)。
 
 VFS 驱动和 vfs-ui 的内部运行依赖仅为 vfs-core；本地驱动另依赖 better-sqlite3。vfs-sync、driver-llm 没有运行时包依赖。`packages/sync-adapters` 负责宿主同步接入，调用 vfs-sync 与驱动公共端口；同步范围和项目绑定由应用决定。
 

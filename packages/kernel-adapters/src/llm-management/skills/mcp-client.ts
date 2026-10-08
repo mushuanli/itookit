@@ -1,3 +1,4 @@
+import { mcpAuthenticatedFetch } from './mcp-auth';
 // @file: device-llm/skills/mcp-client.ts
 //
 // MCPClient — MCP (Model Context Protocol) client.
@@ -184,8 +185,9 @@ export class MCPClient {
 export class MCPServerConnection {
     private client: import('@modelcontextprotocol/client').Client | undefined;
     private connecting: Promise<void> | undefined;
+    private closing = false;
     private readonly options: MCPConnectionOptions;
-    constructor(private readonly config: MCPServerConfig, options: MCPConnectionOptions = {}) { this.options = snapshotMCPConnectionOptions(options); }
+    constructor(private readonly config: MCPServerConfig, options: MCPConnectionOptions = {}, private readonly onConnectionFailure?: (error: unknown) => void) { this.options = snapshotMCPConnectionOptions(options); }
 
     connect(): Promise<void> {
         if (this.client) return Promise.resolve();
@@ -195,16 +197,22 @@ export class MCPServerConnection {
     private async open(): Promise<void> {
         const { Client } = await import('@modelcontextprotocol/client');
         const client = new Client(this.options.clientInfo ?? { name: 'mcp-client', version: '1.0.0' }, {
-            supportedProtocolVersions: [MCP_PROTOCOL_VERSION],
             inputRequired: { autoFulfill: false },
-            versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } },
+            versionNegotiation: { mode: 'auto', probe: {timeoutMs:this.config.timeout ?? 30000,maxRetries:0} },
         });
         const transport = await this.createTransport();
         let transportError: Error | undefined;
-        client.onerror = error => { transportError = error; };
+        client.onerror = error => {
+            transportError = error;
+            if (this.client === client && !this.closing) this.onConnectionFailure?.(error);
+        };
         try { await client.connect(transport, { timeout: this.config.timeout ?? 30000 }); }
         catch (error) { await client.close(); throw transportError ?? error; }
-        client.onclose = () => { if (this.client === client) this.client = undefined; };
+        client.onclose = () => {
+            if (this.client !== client) return;
+            this.client = undefined;
+            if (!this.closing) this.onConnectionFailure?.(new Error('Connection closed'));
+        };
         this.client = client;
     }
 
@@ -222,14 +230,16 @@ export class MCPServerConnection {
         const url = new URL(config.url);
         if (config.transport !== 'http') throw new Error(`MCP ${MCP_PROTOCOL_VERSION} supports only stdio and Streamable HTTP; update transport ${config.transport}`);
         const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/client');
-        return new StreamableHTTPClientTransport(url, { requestInit: { headers: config.headers } });
+        return new StreamableHTTPClientTransport(url, { requestInit: { headers: config.headers },
+            ...(config.auth ? { fetch: mcpAuthenticatedFetch(config.auth, this.options.resolveCredential) } : {}) });
     }
 
     async disconnect(): Promise<void> {
         await this.connecting;
         const client = this.client;
-        await client?.close();
-        if (this.client === client) this.client = undefined;
+        this.closing = true;
+        try { await client?.close(); if (this.client === client) this.client = undefined; }
+        finally { this.closing = false; }
     }
     isConnected(): boolean { return Boolean(this.client); }
     async listTools(): Promise<MCPToolInfo[]> {
@@ -258,7 +268,9 @@ export class MCPServerConnection {
             const page = await this.client!.listPrompts({ cursor }, { timeout: this.config.timeout ?? 30000 });
             return { items: page.prompts, nextCursor: page.nextCursor };
         }) : [];
-        return { protocolVersion: MCP_PROTOCOL_VERSION, tools, resources, prompts, capabilities: { tools: !!capabilities?.tools, resources: !!capabilities?.resources, prompts: !!capabilities?.prompts } };
+        return { protocolVersion: this.client.getNegotiatedProtocolVersion(), tools, resources, prompts,
+            metadata: this.client.getDiscoverResult()?._meta,
+            capabilities: { tools: !!capabilities?.tools, resources: !!capabilities?.resources, prompts: !!capabilities?.prompts } };
     }
 
     private async listPages<T>(kind: string, fetch: (cursor?: string) => Promise<{ items: T[]; nextCursor?: string }>): Promise<T[]> {

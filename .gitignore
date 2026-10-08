@@ -6,6 +6,7 @@ priv/
 node_modules/
 # Local checkout of the independently published npm library.
 /packages/vfs-ui/
+/packages/driver-llm/
 # Library crate: the CLI Session Bash fixture builds it, but its lock file is not committed.
 packages/sanbox/native/Cargo.lock
 .pnpm-store/
@@ -58,6 +59,6 @@ localhost-recording*.json
 /Trace-*.json
 /t[0-9]*.json
 
-# Local fs-agent executable and pre-upgrade backup
+# Local pi-agent executable and pre-upgrade backup
 /tools/svr
 /tools/svr.bak-before-autoinit

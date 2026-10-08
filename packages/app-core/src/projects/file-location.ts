@@ -26,7 +26,7 @@ export function projectFileLocation(project: ProjectFolder, relative: string,
     if (mount) {
         const suffix = mount.at === '/' ? relative : relative.slice(mount.at.length);
         const path = normalizeVirtualPath(mount.root.replace(/\/$/, '') + '/' + suffix);
-        return { namespace: JSON.stringify(['remote', mount.endpoint, mount.username ?? '', mount.alias]), path,
+        return { namespace: JSON.stringify(['remote', mount.serverId ?? mount.endpoint, mount.username ?? '', mount.alias]), path,
             label: `${mount.endpoint}/${mount.alias}${path === '/' ? '' : path}` };
     }
     if (project.project.source?.kind === 'remote') {

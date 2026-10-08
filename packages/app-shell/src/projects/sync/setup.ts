@@ -1,10 +1,11 @@
 import { t } from '@itookit/common';
 import { SyncDialog, paragraph } from './dialog';
+import { directionSelect } from './controls';
 
 export interface ProjectSyncSetupPorts {
     connections(): { id: string; name: string }[];
     inspect(connectionId: string): Promise<{ projectId: string }[]>;
-    bind(connectionId: string, projectId: string, create: boolean): Promise<void>;
+    bind(connectionId: string, projectId: string, create: boolean, direction?: 'both' | 'upload' | 'download'): Promise<void>;
 }
 
 /** The host resolves credentials and persistence; the view only selects identities. */
@@ -19,20 +20,21 @@ function mountSetup(ports: ProjectSyncSetupPorts, suggestedId: string, signal: A
     const name = document.createElement('input'); name.value = suggestedId; name.setAttribute('aria-label', t('project.sync.newCloudProject'));
     const label = document.createElement('label'); label.textContent = t('project.sync.newCloudProject'); label.append(name); dialog.body.append(label);
     paragraph(dialog.body, t('project.sync.bindHint'));
+    const direction = directionSelect(dialog.body, 'both');
     if (!connection.options.length) paragraph(dialog.body, t('remote.connectionEmpty'));
-    const load = installActions(dialog, ports, connection, project, name, signal);
+    const load = installActions(dialog, ports, connection, project, name, direction, signal);
     project.onchange = () => { label.hidden = !!project.value; };
     dialog.open();
     if (connection.value) void dialog.run(load, true);
 }
 function installActions(dialog: SyncDialog, ports: ProjectSyncSetupPorts, connection: HTMLSelectElement,
-    project: HTMLSelectElement, name: HTMLInputElement, signal: AbortSignal): () => Promise<void> {
+    project: HTMLSelectElement, name: HTMLInputElement, direction: HTMLSelectElement, signal: AbortSignal): () => Promise<void> {
     let inspected: string | undefined;
     const bind = dialog.button(t('project.sync.bindConfirm'), async () => {
         if (!inspected || inspected !== connection.value) throw new Error(t('project.sync.inspectFirst'));
         const create = !project.value, id = create ? name.value.trim() : project.value;
         if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw new Error(t('project.sync.invalidDirectory'));
-        await ports.bind(inspected, id, create); dialog.close();
+        await ports.bind(inspected, id, create, direction.value as 'both' | 'upload' | 'download'); dialog.close();
     });
     const inspect = async () => {
         const id = connection.value, items = await ports.inspect(id);

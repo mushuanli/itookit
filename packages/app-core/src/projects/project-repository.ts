@@ -6,7 +6,7 @@ const ROOT = '/home/admin/projects';
 const INFO = '/.mindos/info.seq';
 const READONLY = `${ROOT}/.mindos/readonly`;
 const EXTERNAL = `${ROOT}/.mindos/local.seq`;
-export interface ProjectIdentity { version: 1; id: string; name: string; createdAt: number }
+export interface ProjectIdentity { version: 1; id: string; name: string; createdAt: number; navigationName?: string }
 export interface StoredProject extends ProjectIdentity { directory: string; kind: 'local' | 'remote'; metadataDirectory?: string }
 
 /** Local identity lives with its directory; remote records are explicit workbench references. */
@@ -70,17 +70,18 @@ export class ProjectRepository {
             await this.saveReference(EXTERNAL, { ...identity, directory, kind: 'local' });
     }
     async createRemote(identity: ProjectIdentity): Promise<void> {
-        const path = `${READONLY}/${identity.name}/info.seq`;
-        if (!await this.root.driver.exists(path)) await this.root.driver.createFile({ parentPath: `${READONLY}/${identity.name}`, name: 'info.seq', type: 'seqfile', recursive: true });
+        const directory = identity.navigationName ?? identity.name;
+        const path = `${READONLY}/${directory}/info.seq`;
+        if (!await this.root.driver.exists(path)) await this.root.driver.createFile({ parentPath: `${READONLY}/${directory}`, name: 'info.seq', type: 'seqfile', recursive: true });
         const existing = await this.root.meta.seq!.getEntry(path, 'identity');
         if (existing && this.decode(existing).id !== identity.id) throw new FSError('EEXIST', 'Readonly project already exists');
         await this.root.meta.seq!.setEntry(path, 'identity', JSON.stringify(identity));
     }
-    async rename(project: StoredProject, name: string): Promise<void> {
-        const identity: ProjectIdentity = { version: 1, id: project.id, name, createdAt: project.createdAt };
+    async rename(project: StoredProject, name: string, navigationName?: string): Promise<void> {
+        const identity: ProjectIdentity = { version:1,id:project.id,name,createdAt:project.createdAt,...(navigationName ? {navigationName} : {}) };
         if (project.kind === 'remote') {
-            await moveSessionDataDirectory(this.root, project.metadataDirectory!, `${READONLY}/${name}`);
-            await this.root.meta.seq!.setEntry(`${READONLY}/${name}/info.seq`, 'identity', JSON.stringify(identity));
+            await moveSessionDataDirectory(this.root, project.metadataDirectory!, `${READONLY}/${navigationName ?? name}`);
+            await this.root.meta.seq!.setEntry(`${READONLY}/${navigationName ?? name}/info.seq`, 'identity', JSON.stringify(identity));
             return;
         }
         const owner = await this.directories.openDirectory(project.directory);
@@ -122,7 +123,7 @@ export class ProjectRepository {
     private decode(raw: string): ProjectIdentity {
         const identity = JSON.parse(raw) as ProjectIdentity;
         if (identity.version !== 1 || !/^[a-zA-Z0-9_-]+$/.test(identity.id) || !identity.name?.trim()
-            || /[/\\\0]/.test(identity.name) || !Number.isFinite(identity.createdAt)) throw new FSError('EINVAL', 'Invalid project identity');
+            || /[/\\\0]/.test(identity.name) || (identity.navigationName !== undefined && (typeof identity.navigationName !== 'string' || !identity.navigationName || /[/\\\0]/.test(identity.navigationName))) || !Number.isFinite(identity.createdAt)) throw new FSError('EINVAL', 'Invalid project identity');
         return identity;
     }
     private async references(path: string): Promise<StoredProject[]> {

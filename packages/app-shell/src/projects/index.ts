@@ -5,7 +5,7 @@ import { setupHitlVfsBridge } from '../workspaces/hitl-bridge';
 import { createWorkspaceModule, type WorkspaceModule } from '../workspaces/module';
 import { SessionWorkbench, type SessionWorkbenchOptions } from './SessionWorkbench';
 
-interface ProjectModuleOptions extends Pick<SessionWorkbenchOptions, 'sidebar' | 'container' | 'factory' | 'fileFactory' | 'onSelect' | 'hostContext' | 'sessionSkills' | 'onSidebarReady' | 'initialResourceId' | 'uiPersistence' | 'workbenchState' | 'projectSyncSetup'> {
+interface ProjectModuleOptions extends Pick<SessionWorkbenchOptions, 'sidebar' | 'container' | 'factory' | 'fileFactory' | 'onSelect' | 'hostContext' | 'sessionSkills' | 'onSidebarReady' | 'initialResourceId' | 'uiPersistence' | 'workbenchState' | 'projectSyncSetup' | 'projectSyncDirectory'> {
     runtime: Pick<ApplicationRuntime, 'sessionRepository' | 'sessionFiles' | 'kernel' | 'directoryMounts' | 'sessionManager' | 'flowEngine' | 'projects' | 'commandBus' | 'projectSync'>;
     createFlowContextMenu: AppUI['createFlowContextMenu'];
 }

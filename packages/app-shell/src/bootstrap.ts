@@ -1,6 +1,5 @@
 import { DEFAULT_HARNESS_TOOL_IDS } from '@itookit/app-core';
 import { FSError } from '@itookit/vfs-core';
-import { RemoteFilesSettingsEditor } from './files/RemoteFilesSettingsEditor';
 import { createFileChatHandler } from './projects/file-chat';
 import { createOcrControls } from './configuration/ocr-controls';
 import { OcrService } from '@itookit/app-core';
@@ -125,11 +124,8 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const ocrService = new OcrService(await vfs.openFileSystem('/etc'), agentService, kernel.llmService);
     await ocrService.init();
     const ocr = createOcrControls(ocrService, agentService, request => handleNavigationRequest(request));
-    const deletionDialog = new ConfigurationDeletionDialog(runtime.configuration, undefined, ocr.deletionImpact);
+    const deletionDialog = new ConfigurationDeletionDialog(runtime.configuration, undefined, ocr.deletionImpact, runtime.projects);
     const settingsFactory = createSettingsFactory({
-        remoteFiles: runtime.projects.remoteMounts ? async (container, editorOptions) => {
-            const editor = new RemoteFilesSettingsEditor(container, runtime.projects, editorOptions); await editor.init(container); return editor;
-        } : undefined,
         settingsService: settingsModule.service, agentService, connectionService: llmDriver, llmUiEditors: options.ui.llmUiEditors,
         connectBrowser: (browser, fs, container, factory) => connectEditorLifecycle(browser, fs, container, factory, { readOnly: true }),
         restoreFlows: options.ui.restoreFlowLibrary ? () => options.ui.restoreFlowLibrary!(commandBus) : undefined,
@@ -298,7 +294,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                 options.onWorkspaceReady?.({ editor: editorEl });
                 return true;
             };
-            const module = createProjectModule({ runtime, sessionSkills, projectSyncSetup: options.projectSyncSetup, sidebar: sidebarEl, container: editorEl,
+            const module = createProjectModule({ runtime, sessionSkills, projectSyncSetup: options.projectSyncSetup, projectSyncDirectory: options.projectSyncDirectory, sidebar: sidebarEl, container: editorEl,
                 factory, fileFactory: defaultEditorFactory, createFlowContextMenu: options.ui.createFlowContextMenu,
                 initialResourceId, onSidebarReady: revealSidebar,
                 uiPersistence: await uiState.port(SESSION_BROWSER_SCOPE),

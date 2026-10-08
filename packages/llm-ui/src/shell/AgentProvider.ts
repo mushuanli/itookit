@@ -9,6 +9,7 @@ import type { ModelTier } from '@itookit/driver-llm/contracts';
 
 export async function buildExecutorOptions(
     agentService: IAgentConfigService,
+    remote?: import('@itookit/ui-common').RemoteAgentControls,
 ): Promise<ExecutorOption[]> {
     const agents = agentService.listAgents();
 
@@ -37,7 +38,7 @@ export async function buildExecutorOptions(
         });
     }
 
-    return options;
+    return [...options, ...await remote?.list() ?? []];
 }
 
 export function validateAgentId(agentService: IAgentConfigService, id: string): string {

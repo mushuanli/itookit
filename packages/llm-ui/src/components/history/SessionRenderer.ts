@@ -1,7 +1,7 @@
 // @file: llm-ui/components/history/SessionRenderer.ts
 
 import { SessionGroup, ExecutionNode } from '@itookit/llm-session/contracts';
-import { MDxController } from '../mdx/MDxController';
+import { MDxController, type MDxControllerOptions } from '../mdx/MDxController';
 import { NodeRenderer } from './NodeRenderer';
 import { NodeTemplates } from '../templates/NodeTemplates';
 import { LayoutTemplates } from '../templates/LayoutTemplates';
@@ -10,8 +10,12 @@ import { t } from '@itookit/common';
 import { TimerManager } from '../common';
 import { getPreviewText } from '../../utils/textUtils';
 import { IconResolver } from '../../utils/iconResolver';
+import type { MDxPlugin } from '@itookit/mdxeditor';
 
 export interface RendererContext {
+    readOnly?: boolean;
+    markdownPlugins?: MDxPlugin[];
+    codeBlockControls?: MDxControllerOptions['codeBlockControls'];
     fs?: IFileSystem;
     assets?: IFileSystem;
     collapsedState?: (id: string, fallback: boolean) => boolean;
@@ -36,6 +40,7 @@ export class SessionRenderer {
     private renderedSessionIds = new Set<string>();
     private lastExecutionRoot: HTMLElement | null = null;
     private timers = new TimerManager();
+    private snapshotContent = new Map<string, string>();
 
     constructor(
         private container: HTMLElement,
@@ -94,6 +99,10 @@ export class SessionRenderer {
         const wrapper = document.createElement('div');
         wrapper.className = `llm-ui-session llm-ui-session--${group.role}`;
         wrapper.dataset.sessionId = group.id;
+        if (this.context.readOnly) {
+            wrapper.dataset.role = group.executionRoot?.data.metaInfo?.nativeRole ?? group.role;
+            wrapper.dataset.historyId = group.executionRoot?.id ?? group.id;
+        }
 
         // origin CSS class + label element
         if (group.origin && group.origin !== 'user') {
@@ -129,6 +138,52 @@ export class SessionRenderer {
             this.container.appendChild(wrapper);
             this.lastExecutionRoot = wrapper.querySelector('.llm-ui-execution-root');
         }
+        this.restrictActions(wrapper);
+    }
+
+    async reconcileSessions(groups: SessionGroup[]): Promise<void> {
+        if (!this.renderedSessionIds.size && groups.length) this.container.replaceChildren();
+        const retained = new Set(groups.map(group => group.id));
+        for (const id of this.renderedSessionIds) if (!retained.has(id)) {
+            this.removeMessages([...this.getEditorIdsForSession(id), id], false);
+            this.snapshotContent.delete(id);
+        }
+        for (const [index, group] of groups.entries()) {
+            if (!this.isRendered(group.id)) {
+                this.appendSession(group, false);
+                if (group.executionRoot) this.renderExecutionTree(group.executionRoot, false);
+            }
+            this.updateSnapshotContent(group);
+            const wrapper = this.getSessionElement(group.id)!;
+            const at = this.container.children[index];
+            if (at !== wrapper) this.container.insertBefore(wrapper, at ?? null);
+        }
+        if (!groups.length) this.renderWelcome();
+        await Promise.all([...this.editorMap.entries()].filter(([id]) => this.isEditorVisible(id)).map(([, editor]) => editor.waitUntilReady()));
+    }
+
+    private updateSnapshotContent(group: SessionGroup): void {
+        const content = group.executionRoot?.data.output ?? group.content ?? '';
+        const id = group.executionRoot?.id ?? group.id;
+        if (this.snapshotContent.get(group.id) !== content) {
+            this.editorMap.get(id)?.setContent(content); this.snapshotContent.set(group.id, content);
+            const preview = this.getSessionElement(group.id)?.querySelector('.llm-ui-header-preview');
+            if (preview) preview.textContent = getPreviewText(content);
+        }
+        const node = group.executionRoot && this.getNode(id);
+        if (node && group.executionRoot) {
+            node.dataset.status = group.executionRoot.status;
+            const status = node.querySelector('.llm-ui-node__status');
+            if (status) { status.textContent = group.executionRoot.status; status.className = `llm-ui-node__status llm-ui-node__status--${group.executionRoot.status}`; }
+        }
+    }
+
+    private restrictActions(element: HTMLElement): void {
+        if (!this.context.readOnly) return;
+        for (const button of element.querySelectorAll<HTMLElement>('[data-action]')) {
+            if (!['copy', 'collapse'].includes(button.dataset.action!)) button.remove();
+        }
+        element.querySelector('.llm-ui-edit-actions')?.remove();
     }
 
     /**
@@ -173,6 +228,7 @@ export class SessionRenderer {
         this.nodeMap.set(node.id, element);
         parentEl.appendChild(element);
         this.mountNodeEditor(element, node);
+        this.restrictActions(element);
     }
 
     private flowWindow(parentId: string, node: ExecutionNode, fallback: HTMLElement, collapsed: boolean): HTMLElement {
@@ -234,6 +290,9 @@ export class SessionRenderer {
 
         const controller = new MDxController(mountPoint, group.content || '', {
             readOnly: true,
+            editable: this.context.readOnly ? false : undefined,
+            plugins: this.context.markdownPlugins,
+            codeBlockControls: this.context.codeBlockControls,
             deferred: !!mountPoint.closest('.is-collapsed'),
             onChange: (text) => {
                 this.onContentChange?.(group.id, text, 'user');
@@ -260,8 +319,11 @@ export class SessionRenderer {
 
         const controller = new MDxController(mountPoint, node.data.output || '', {
             readOnly: true,
+            editable: this.context.readOnly ? false : undefined,
+            plugins: this.context.markdownPlugins,
+            codeBlockControls: this.context.codeBlockControls,
             deferred: !!mountPoint.closest('.is-collapsed'),
-            streaming: isStreaming,
+            streaming: isStreaming && !this.context.readOnly,
             onChange: (text) => {
                 if (controller.isEditing()) {
                     this.onContentChange?.(effectiveId, text, 'node');
@@ -377,6 +439,7 @@ export class SessionRenderer {
         this.editorMounts.clear();
         this.nodeMap.clear();
         this.flowWindows.clear();
+        this.snapshotContent.clear();
         this.renderedSessionIds.clear();
         this.lastExecutionRoot = null;
         this.container.innerHTML = '';

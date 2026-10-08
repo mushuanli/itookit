@@ -1,4 +1,4 @@
-import { createHttpSourceProvider } from '@itookit/vfsdriver-agent';
+import { createPiAgentDriver } from '@itookit/piagent-driver';
 import { selectFinalResult } from './run-store';
 import { recordRuntimeDiagnostic, traceRuntimeStage } from './diagnostics';
 import { leaseSkewConfig } from './lease-config';
@@ -34,6 +34,7 @@ import {
     DirectoryMountService,
     ProjectService,
     ProjectRemoteMountService,
+    MCPRemoteConnections,
     ProjectExecutionService,
     createRemoteExecutionProvider,
     SessionFilesService,
@@ -141,9 +142,13 @@ export async function createCliRuntime(
     const sidecarDir = vfsRoot ? path.join(vfsRoot, '_meta') : path.join(workflow.stateDir, 'runtime', 'meta');
     const additionalMounts = hostOptions.useProfileConfig ? [] : [{ path: '/etc', backend: new MemoryBackend() }];
     const { manager: vfs } = await openCliVfs(root, sidecarDir, additionalMounts);
+    const remoteProvider = createPiAgentDriver(ref => process.env[`MINDOS_REMOTE_${ref.replace(/-/g, '_')}`] ?? '');
+    let remoteConnections: ProjectRemoteMountService | undefined;
     const llmDriver = new LLMDeviceDriver(vfs, {
         presets: createMindosLlmPresets(), providerConnectionPolicy: firstChatModelConnection,
-        mcp: { clientInfo: { name: 'mindos-cli', version: '1.0.0' } },
+        mcp: { clientInfo: { name:'mindos-cli',version:'1.0.0' },resolveCredential:ref => remoteProvider.resolveCredential(ref),
+            beforeSave:(server,previous) => remoteConnections?.beforeMCPChange(server,previous),
+            beforeDelete:id => remoteConnections?.beforeMCPDelete(id),configurationChanged:() => remoteConnections?.refreshMCPConnections() },
     });
     await traceRuntimeStage('runtime.llm', () => initializeLlmQuietly(llmDriver));
     if (!hostOptions.useProfileConfig) await configureLlm(llmDriver, workflow);
@@ -177,11 +182,10 @@ export async function createCliRuntime(
     const directoryMounts = new DirectoryMountService(systemFS, sessionFiles, directorySource);
     await directoryMounts.init();
     const projects = new ProjectService(systemFS, sessionRepository, directoryMounts, sessionFiles);
-    const remoteProvider = createHttpSourceProvider(ref => process.env[`MINDOS_REMOTE_${ref.replace(/-/g, '_')}`] ?? '');
     const remoteMounts = new ProjectRemoteMountService(systemFS,
         remoteProvider,
-        async () => { throw new Error('Change project mounts from the workbench while the CLI is stopped'); }, async () => {});
-    await remoteMounts.init();
+        async () => { throw new Error('Change project mounts from the workbench while the CLI is stopped'); }, async () => {}, new MCPRemoteConnections(llmDriver,remoteProvider));
+    await remoteMounts.init(); remoteConnections = remoteMounts;
     // Same wiring as createApplicationRuntime: ProjectService must compose remote mounts for every
     // consumer of openFiles(), not only for the Session workspace path below.
     projects.remoteMounts = remoteMounts;

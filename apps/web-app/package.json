@@ -38,9 +38,9 @@
     "immer": "^10.2.0",
     "marked": "^16.4.2",
     "mermaid": "^11.12.1",
-    "@itookit/vfsdriver-agent": "5.3.0",
     "@itookit/tools": "workspace:*",
-    "@itookit/sync-adapters": "workspace:*"
+    "@itookit/sync-adapters": "workspace:*",
+    "@itookit/piagent-driver": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.19.25",

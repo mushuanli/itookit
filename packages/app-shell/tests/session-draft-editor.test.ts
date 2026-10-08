@@ -124,3 +124,18 @@ it('retries failed binary writes without publishing an incomplete reference', as
     expect(JSON.parse(await codec.encode(config, [file]))).toMatchObject({ files: [{ id: 'retry-id' }] });
     expect(attachments.put).toHaveBeenCalledTimes(2);
 });
+
+it('routes a remote harness directly without materializing a local Session', async () => {
+    const materialize=vi.fn(),send=vi.fn(async () => {}),clear=vi.fn(async () => {});
+    const editor=new SessionDraftEditor(document.createElement('div'),{} as never,{sessionDraft:{materialize,clear},remoteAgents:{list:async () => [],send}});
+    await editor.init(document.createElement('div'));await state.options.onSend('remote prompt',[],'remote:codex');
+    expect(send).toHaveBeenCalledWith('remote:codex','remote prompt');expect(materialize).not.toHaveBeenCalled();expect(clear).toHaveBeenCalledOnce();await editor.destroy();
+});
+
+it('rejects remote attachments before creating or sending a native conversation', async () => {
+    const materialize=vi.fn(),send=vi.fn();
+    const editor=new SessionDraftEditor(document.createElement('div'),{} as never,{sessionDraft:{materialize},remoteAgents:{list:async () => [],send}});
+    await editor.init(document.createElement('div'));
+    await expect(state.options.onSend('remote prompt',[new File(['data'],'file.txt')],'remote:codex')).rejects.toThrow();
+    expect(send).not.toHaveBeenCalled();expect(materialize).not.toHaveBeenCalled();await editor.destroy();
+});

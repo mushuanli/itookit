@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FSError } from '@itookit/vfs-core';
+import { RemoteConnectionUnavailableError } from '@itookit/app-core';
 import { t } from '@itookit/common';
 import { createVFSUI } from '@itookit/vfs-ui';
 vi.mock('@itookit/vfs-ui', async (importOriginal) => ({ ...(await importOriginal<typeof import('@itookit/vfs-ui')>()),
@@ -26,6 +27,15 @@ function setup() {
 }
 afterEach(() => vi.unstubAllGlobals());
 describe('Session workbench lifecycle', () => {
+    it('retains an unavailable MCP binding when restoring a route instead of replacing it as stale', async () => {
+        const f = setup(); await f.workbench.start();
+        const error = new RemoteConnectionUnavailableError({connectionId: 'missing', connectionName: 'Office',
+            reason: 'mcp-not-found', revision: 1, configured: []}, ['project']);
+        const open = vi.spyOn(f.workbench, 'openResource').mockRejectedValue(error);
+        f.onSelect.mockClear();
+        try { await expect(f.workbench.restoreResource('/remote')).resolves.toBeUndefined(); expect(f.onSelect).not.toHaveBeenCalled(); }
+        finally {open.mockRestore(); await f.workbench.destroy();}
+    });
     it('recovers invalid saved routes but continues to surface storage failures', async () => {
         const f = setup(); await f.workbench.start();
         await f.workbench.restoreResource('/旧项目.prj');

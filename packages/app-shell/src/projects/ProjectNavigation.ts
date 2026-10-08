@@ -1,6 +1,8 @@
 import { fileFirst, projectItems } from './navigation-policy';
 import { remapProjectPath } from './project-paths';
-import { t, FILE_BROWSER_ICONS, VFS_TOOLBAR_ICONS } from '@itookit/common';
+import { t, FILE_BROWSER_ICONS, VFS_TOOLBAR_ICONS, ENTITY_ICONS, FEEDBACK_ICONS } from '@itookit/common';
+import { ProjectSyncStatusIndicator, projectSyncIcon } from './sync/indicator';
+import type { ProjectSyncIndicator } from './sync/presentation';
 import { browserTargetFolder, folderBrowserPath, resolveBrowserTarget, type ProjectFolder, type ProjectNavigationSnapshot, type ProjectService } from '@itookit/app-core';
 import { ScopeSelector } from '@itookit/vfs-ui';
 import type { VFSActionDefinition, VFSActionContext, VFSToolbarContext, VFSColumnsOptions, VFSNodeUI, VFSUIShell } from '@itookit/vfs-ui';
@@ -10,6 +12,8 @@ interface Actions {
     projectRenamed?(from: ProjectFolder, to: ProjectFolder): void;
     projectMenu?(event: MouseEvent, project: ProjectFolder): Promise<void>;
     projectsChanged?(projects: ProjectFolder[]): void;
+    syncIndicator?(projectId: string): ProjectSyncIndicator | undefined;
+    syncStatus?(projectId: string): Promise<void>;
     createProject(path?: string | null): Promise<unknown>; createSession(path?: string): Promise<unknown>;
     createChild(id: string): Promise<unknown>; importItems(context: VFSToolbarContext): Promise<void>; exportItems(context: VFSToolbarContext): Promise<void>;
     report(error: unknown): void; retryDeletions(): Promise<void>;
@@ -29,6 +33,7 @@ export class ProjectNavigation {
     private readonly selector: ScopeSelector;
     private readonly retry = document.createElement('button');
     private readonly menu = document.createElement('button');
+    private readonly syncStatus: ProjectSyncStatusIndicator;
     private project?: ProjectFolder;
     private path = '/';
     private session?: string;
@@ -38,7 +43,11 @@ export class ProjectNavigation {
     private revision = 0;
     private offlinePaths = new Set<string>();
     private readonly revealedFiles = new Set<string>();
+    private projectChoices: ProjectFolder[] = [];
     constructor(private readonly projects: ProjectService, private readonly ui: () => VFSUIShell | undefined, private readonly actions: Actions) {
+        this.syncStatus = new ProjectSyncStatusIndicator(() => {
+            if (this.project) void this.actions.syncStatus?.(this.project.project.id).catch(this.actions.report);
+        });
         this.selector = new ScopeSelector({ label: t('project.workspace'), onError: actions.report,
             select: async value => {
                 if (value === '@new-project') await actions.createProject('/');
@@ -77,7 +86,7 @@ export class ProjectNavigation {
         };
         this.selector.element.oncontextmenu = event => { if (this.project) { event.preventDefault(); this.showMenu(event); } };
         this.toolbarContainer.className = 'workbench-project-navigation__transfer';
-        this.header.append(this.selector.element, this.create, this.toolbarContainer, this.menu, this.retry);
+        this.header.append(this.selector.element, this.syncStatus.element, this.create, this.toolbarContainer, this.menu, this.retry);
     }
     private async choose(path: string): Promise<void> {
         this.project = path === '/' ? undefined : await this.projects.forFolder(browserTargetFolder(resolveBrowserTarget(path), path));
@@ -110,8 +119,9 @@ export class ProjectNavigation {
     private async apply(snapshot: ProjectNavigationSnapshot, path: string, revision: number, resolved?: ProjectFolder, preserveProject = false): Promise<void> {
         const target = resolveBrowserTarget(path), manifest = 'sessionId' in target ? snapshot.sessions.find(item => item.id === target.sessionId) : undefined;
         const folder = browserTargetFolder(target, path, manifest?.folder);
-        const project = preserveProject ? this.project : resolved ?? await this.projects.forFolder(folder, snapshot.folders);
+        let project = preserveProject ? this.project : resolved ?? await this.projects.forFolder(folder, snapshot.folders);
         const projects = await this.projects.list(snapshot.folders);
+        if (preserveProject && project) project = projects.find(item => item.project.id === project!.project.id) ?? project;
         if (revision !== this.revision) return;
         if (this.project?.project.id !== project?.project.id) this.familyVisible = false;
         const family = manifest ? snapshot.roots.get(manifest.id) : undefined;
@@ -120,7 +130,7 @@ export class ProjectNavigation {
         this.offlinePaths = new Set(projects.filter(item => this.projects.remoteMounts?.projectOffline(item.project.id)).map(item => folderBrowserPath(item.path)));
         this.updateHeader(projects, snapshot.pending.length);
         this.actions.projectsChanged?.(projects);
-        this.ui()?.setTitle(project?.name ?? t('workbench.allProjects')); this.ui()?.refreshList();
+        this.ui()?.setTitle(project?.displayName ?? project?.name ?? t('workbench.allProjects')); this.ui()?.refreshList();
         if (project) {
             await this.ui()?.expandPath(folderBrowserPath(project.path));
             if (revision !== this.revision) return;
@@ -133,20 +143,42 @@ export class ProjectNavigation {
         if (revision === this.revision) this.ui()?.refreshList();
     }
     private updateHeader(projects: ProjectFolder[], pending: number): void {
+        this.projectChoices = projects;
         const project = this.project;
+        this.syncStatus.update(project && this.actions.syncIndicator?.(project.project.id));
         this.create.hidden = !project; this.toolbarContainer.hidden = !!project;
         this.menu.hidden = !project || !this.actions.projectMenu;
         this.create.disabled = !!project && this.offlinePaths.has(folderBrowserPath(project.path));
         this.create.setAttribute('aria-current', this.draftActive ? 'page' : 'false');
         this.retry.hidden = !pending; this.retry.textContent = t('project.retryDeletion', { count: pending });
+        this.updateSelector();
+    }
+    private updateSelector(): void {
         this.selector.update([{ id: '/', label: t('workbench.allProjects') },
-            ...projects.map(item => ({ id: folderBrowserPath(item.path), label: item.name })),
-            { id: '@new-project', label: t('project.create') + '…' }], project ? folderBrowserPath(project.path) : '/');
+            ...this.projectChoices.map(item => ({ id: folderBrowserPath(item.path), label: this.projectLabel(item) })),
+            { id: '@new-project', label: t('project.create') + '…' }], this.project ? folderBrowserPath(this.project.path) : '/');
     }
     navigationItems(items: VFSNodeUI[], query = ''): VFSNodeUI[] {
         const root = this.project ? findNode(items, folderBrowserPath(this.project.path)) : undefined;
         const nodes = projectItems(this.project ? root?.children ?? [] : items, query, this.familyVisible ? this.family : undefined);
-        return nodes.sort((a, b) => fileFirst(a, b) ?? 0);
+        return this.syncItems(nodes).sort((a, b) => fileFirst(a, b) ?? 0);
+    }
+    refreshSyncIndicators(): void {
+        this.syncStatus.update(this.project && this.actions.syncIndicator?.(this.project.project.id));
+        this.updateSelector();
+        this.ui()?.refreshList();
+    }
+    private projectLabel(project: ProjectFolder): string {
+        const indicator = this.actions.syncIndicator?.(project.project.id), name = project.displayName ?? project.name;
+        return indicator ? `${name} ${indicator.state === 'configured' ? ENTITY_ICONS.sync : FEEDBACK_ICONS.warning}` : name;
+    }
+    private syncItems(items: VFSNodeUI[]): VFSNodeUI[] {
+        return items.map(item => {
+            const id = item.metadata.custom.projectId;
+            const indicator = typeof id === 'string' ? this.actions.syncIndicator?.(id) : undefined;
+            return {...item, ...(indicator ? {icon: projectSyncIcon(item.metadata.custom.remoteProject === true, indicator)} : {}),
+                children: item.children && this.syncItems(item.children)};
+        });
     }
     showContent(): void { this.familyVisible = !this.familyVisible; this.ui()?.refreshList(); }
     async refresh(): Promise<void> {

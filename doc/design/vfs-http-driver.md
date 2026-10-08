@@ -2,11 +2,11 @@
 
 状态：已实施基础读取、项目外挂与条件写入，2026-09-28。本文保留总体设计约束；本轮实际实现、验证与尚未开放的能力见第 14 节。连续操作与结束语义见第 6.3 节，评审取舍见第 13 节。
 
-后续演进见 [fs-agent 与 Harness：统一工作目录、挂载与执行环境](agent-server.md)。该文将核心收敛为 cwd、挂载表和有效权限，不改变本文现有文件协议；远端执行按能力独立接入，同步与结果回传不作为 Harness MVP 前提。
+后续演进见 [pi-agent 与 Harness：统一工作目录、挂载与执行环境](agent-server.md)。该文将核心收敛为 cwd、挂载表和有效权限，不改变本文现有文件协议；远端执行按能力独立接入，同步与结果回传不作为 Harness MVP 前提。
 
 ## 1. 目标与决策
 
-在 tools/fs-server 新建独立 Rust HTTP 文件服务，在 packages/vfsdriver-agent 新建三端共用驱动。服务端仅暴露预配置目录别名；工作台可把别名中的目录外挂到项目，项目文件树、编辑器和 Agent 使用同一授权视图。
+Rust HTTP 文件服务位于 tools/pi-agent，三端共用文件驱动源码已并入 packages/piagent-driver/src/files，随统一接入包 @itookit/piagent-driver 发布。服务端仅暴露预配置目录别名；工作台可把别名中的目录外挂到项目，项目文件树、编辑器和 Agent 使用同一授权视图。
 
 核心决策：
 
@@ -495,7 +495,7 @@ processMounts 必须区分 VFS 可访问性与本地进程目录能力。HTTP �
 
 ## 14. 本轮实现与验收边界（2026-09-28）
 
-服务端位于 `tools/fs-agent/`（独立 git 仓库，自带 README 与 Rust 测试）；`tools/` 另放部署用的可执行文件与 `config.toml`（均被 `.gitignore` 忽略）。配置格式见第 4 节与第 14.2 节。服务端实际采用 Linux `openat2(BENEATH | NO_SYMLINKS | NO_MAGICLINKS)` 的目录句柄实现；不在不支持的平台退化成字符串检查。三种客户端均使用可注入的 fetch，Tauri 当前复用 WebView fetch，遵守同样的 CORS/混合内容限制，尚未引入原生 HTTP 插件。
+服务端位于 `tools/pi-agent/`（独立 git 仓库，自带 README 与 Rust 测试）；`tools/` 另放部署用的可执行文件与 `config.toml`（均被 `.gitignore` 忽略）。配置格式见第 4 节与第 14.2 节。服务端实际采用 Linux `openat2(BENEATH | NO_SYMLINKS | NO_MAGICLINKS)` 的目录句柄实现；不在不支持的平台退化成字符串检查。三种客户端均使用可注入的 fetch，Tauri 当前复用 WebView fetch，遵守同样的 CORS/混合内容限制，尚未引入原生 HTTP 插件。
 
 | 部分 | 已实现 |
 |---|---|
@@ -504,7 +504,7 @@ processMounts 必须区分 VFS 可访问性与本地进程目录能力。HTTP �
 | 可写 | exclusive 根锁、epoch + inode generation；条件 replace、mkdir、禁止覆盖的 rename、文件/空目录 remove；operationId 注册/状态/取消/过期、临时上传清理，响应丢失返回 unknown |
 | 项目 | ProjectRemoteMountService；挂载名称保留、远程优先、同名诊断、断线占位、Session 继承、重连与撤权；连接描述符存 `/etc/fs/remote/<connectionId>.seq`，项目挂载存 `/etc/fs/projects/<projectId>.seq`；索引与记录事务 CAS 防止覆盖其他管理端更新 |
 | 三端 | Web/Tauri 注入 provider；CLI HTTP runtime、工作流 runtime 与 `mindos fs list/read/stat/status`；项目带远程挂载时不为 Agent 装配宿主 Shell/TTY |
-| 工作台 | Settings → Storage 命名连接；新建本地/远程项目，按连接和路径去重，会话仅在项目内创建；默认只读，显式授权读写；凭据不入项目配置；关闭对话框取消连接；冲突或未知结果时保留编辑内容 |
+| 工作台 | 工具箱 → MCP 多实例配置；新建本地/远程项目，按连接和路径去重，会话仅在项目内创建；默认只读，显式授权读写；凭据不入项目配置；关闭对话框取消连接；冲突或未知结果时保留编辑内容 |
 
 实现收窄与后续扩展：
 
@@ -522,33 +522,33 @@ Settings 与断线状态补充后的回归：app-core 174 项、app-shell 420 �
 
 ### 14.1 Settings 与断线项目状态
 
-Settings → Storage 的“远程文件系统”区域管理可复用连接：名称、IP:端口或 HTTP(S) endpoint、用户名、密码。连接使用稳定 ID 和 credentialRef，项目引用 ID，界面显示可重命名的名称；密码保存到连接 seqfile 的独立 password 记录，启动时加载到宿主凭据缓存，不进入 catalog 或公开连接描述符。包含远程来源的项目抽屉使用 common 的 remoteProject 图标。
+工具箱 → MCP 管理多条 pi-agent 配置，名称可自定义。启用 pi-agent 并测试连接后，通过 `piagent_capabilities` 验证协议和同源文件服务地址；普通 MCP 不可绑定远程项目。配置保存稳定 ID 和 credentialRef，密码仅放宿主运行期凭据缓存，重启后重新输入。旧远程连接自动迁移到 MCP 并清除旧密码记录；未升级的旧服务保留文件访问兼容，需能力验证才能启用控制中心。远程项目显示「服务器名:项目名」，显示改名不移动项目与会话。
 
-断线仅禁用该项目的文件入口、文件操作及新建会话；项目抽屉仍可展开，已有 Session 和历史可查看，其他项目不受影响。不可用文件项置灰并阻止操作，已打开文件区保留编辑状态并禁用交互；已有会话不设 inert。Settings 的配置入口保持可用。断线不删除文件，也不自动取消已经运行的 Task。
+断线仅禁用该项目的文件入口、文件操作及新建会话；项目抽屉仍可展开，已有 Session 和历史可查看，其他项目不受影响。不可用文件项置灰并阻止操作，已打开文件区保留编辑状态并禁用交互；已有会话不设 inert。工具箱 MCP 的配置入口保持可用。断线不删除文件，也不自动取消已经运行的 Task。
 
 工作台存续期间每轮完成后 15 秒检查一次连接，单次探测预算 3 秒；读取检测到传输失败时也标记离线。状态为 unknown/checking/online/offline；成功检查或显式重连恢复状态。探测使用目录 stat，不读文件内容；缓存来源视图通过动态可用性门恢复，避免把断线当成本地同名目录。原生 WebView/浏览器的网络权限限制也会体现为连接失败。
 
 
 ### 14.2 命名连接与远程项目
 
-工作台“+ 项目”提供本地/远程选择。远程项目引用 Settings 中的连接，指定 `/导出别名/子目录`；例如连接“团队资料”下的 `/docs/a` 与 `/docs/b` 是两个项目。第一段 alias 保持服务端访问范围约束，不能传宿主绝对根。整个项目文件根挂到所选远程目录，Session 通过 `/workspace` 继承；本地管理目录仅保留应用组织身份，不作为断线回退文件源。全局“+ 会话”入口隐藏，只能在项目内创建；程序调用同样校验当前项目和离线状态。
+工作台“+ 项目”提供本地/远程选择。远程项目引用 工具箱 MCP 中已验证的 pi-agent 配置，指定 `/导出别名/子目录`；例如连接“团队资料”下的 `/docs/a` 与 `/docs/b` 是两个项目。第一段 alias 保持服务端访问范围约束，不能传宿主绝对根。整个项目文件根挂到所选远程目录，Session 通过 `/workspace` 继承；本地管理目录仅保留应用组织身份，不作为断线回退文件源。全局“+ 会话”入口隐藏，只能在项目内创建；程序调用同样校验当前项目和离线状态。
 
-项目去重键为规范化 endpoint + alias + root：移除 endpoint 尾斜杠、折叠路径重复/尾斜杠，拒绝 `..`、反斜杠和 NUL，不做 Unicode 归一化或物理路径推断。重复选择同一路径打开已有项目（保留原名称和权限），不同路径创建独立项目。当前运行期创建串行化；catalog CAS 防止跨宿主并发提交重复授权，CAS 失败的一方回滚未发布的项目并报冲突。不同网络地址指向同一物理服务、大小写不敏感宿主上的路径别名不进行跨地址/物理身份合并。
+项目去重键为服务身份（有 serverId 时采用该身份，否则使用规范化 endpoint）+ username + alias + root。路径折叠重复与尾斜杠，拒绝 `..`、反斜杠和 NUL，不做物理路径推断。重复选择同一服务器同一路径打开已有项目，保留名称与权限；不同服务器可使用相同项目名，其导航路由在冲突时加入稳定项目 ID，展示名仍为服务器名:项目名。当前运行期创建串行化，catalog CAS 防止跨宿主并发提交重复授权。
 
-连接名称唯一；同 endpoint + username 不重复配置。一个连接可被多个项目引用，修改显示名称不改变项目身份；已被引用的连接禁止删除或改 endpoint，修改凭据前检查关联会话，撤销旧视图并重新探测。连接配置与挂载授权按稳定 ID 分别存入 `/etc/fs/remote/` 和 `/etc/fs/projects/`，旧 catalog 自动迁移，旧附加挂载结构仍可读取，新 UI 以命名连接和项目根引用为主。
+MCP 配置以稳定 ID 区分，名称不承担类型或身份判断，可维护多个实例。一个配置可被多个项目引用；被引用配置禁止删除或修改地址、账号、凭据引用及移除 pi-agent 标记。MCP catalog 是连接配置的唯一来源，挂载授权仍保存在 `/etc/fs/projects/`；旧 `/etc/fs/remote/` 记录迁移后清理。凭据更新检查关联会话并撤销旧视图。
 
-Rust 服务端采用单用户配置：顶层凭据可为内联 `password`、环境变量 `password_env = "ENV"`（至少 8 字节，二者只能选一种），或旧 Bearer 的 `token` / `token_env`（至少 24 字节，与密码互斥且不设置 `username`）；用户名取 `username`，未写时读 `FS_SERVER_USER`。导出目录写成一个扁平 `[[exports]]` 列表，`alias` 默认取目录名、`access` 默认 `ro`，`rw` 直接申请独占锁，因此不再有 per-client 授权与 `writer_policy` 二次配置。Basic 内容采用 UTF-8 编码，跨机器部署使用 HTTPS；不在 URL 或日志输出密码。Web/Tauri/CLI 共用相同认证实现。密码使用本地 VFS 持久化，重启后自动加载；CLI 在没有本地密码时仍可由凭据引用环境变量注入。
+Rust 服务端采用单用户配置：顶层凭据可为内联 `password`、环境变量 `password_env = "ENV"`（至少 8 字节，二者只能选一种），或旧 Bearer 的 `token` / `token_env`（至少 24 字节，与密码互斥且不设置 `username`）；用户名取 `username`，未写时读 `FS_SERVER_USER`。导出目录写成一个扁平 `[[exports]]` 列表，`alias` 默认取目录名、`access` 默认 `ro`，`rw` 直接申请独占锁，因此不再有 per-client 授权与 `writer_policy` 二次配置。Basic 内容采用 UTF-8 编码，跨机器部署使用 HTTPS；不在 URL 或日志输出密码。Web/Tauri/CLI 共用相同认证实现。密码保存在运行期凭据缓存，重启后重新输入；CLI 在没有本地密码时仍可由凭据引用环境变量注入。
 
 命名连接补充验收：app-core 175 项、app-shell 421 项通过；HTTP 驱动单元测试 6 项、Rust 服务端 9 项通过。测试包含连接名称选择、同路径并发去重、不同路径隔离、Session 继承、目录删除后释放引用、catalog 重载、Basic 错误用户名/密码拒绝与禁止 Bearer 降级。工作台/CLI 类型检查、Rust clippy、文档/样式/架构边界检查通过。
 
 
 ### 14.3 Storage 整合与旧同步清理
 
-远程文件系统位于 Settings → Storage 中，移除独立 remote-files 分类。列表支持多条命名连接，每条提供编辑、凭据更新、连接检查和删除；项目选择连接名称与路径。Storage 生命周期负责释放注入的远程设置子编辑器。
+远程服务配置现统一位于工具箱 → MCP，Storage 中的旧远程设置入口已移除。每条配置独立维护名称、认证和能力测试，只有 pi-agent 配置显示 harness 控制中心并可用于远程项目绑定；编辑器生命周期负责释放控制中心与连接测试。
 
 移除旧远程同步 UI/Service/类型/样式、同步缓存清理入口与“上次同步”指标，同时删除 SettingsService 中重复的 HTTP 同步实现、配置加载、自动同步订阅及定时器。已有 `/etc/sync_config.json` 不再读取或执行，不自动删除用户历史数据。本地存储统计、快照、导入导出和重置功能继续保留。
 
-失去入口的项目额外挂载对话框（`showRemoteMountDialog`）与仅为它保留的文案一并移除：当前产品流是「Settings 管理命名连接 → 新建项目选择连接与路径」，项目根即所选远程目录。`ProjectRemoteMountService` 仍保留多挂载点的能力与测试。
+失去入口的项目额外挂载对话框（`showRemoteMountDialog`）与仅为它保留的文案一并移除：当前产品流是「工具箱 MCP 管理 pi-agent 配置 → 新建项目选择配置与路径」，项目根即所选远程目录。`ProjectRemoteMountService` 仍保留多挂载点的能力与测试。
 
 ### 14.4 断线降级与契约校正（2026-09-28 修复）
 
@@ -560,8 +560,8 @@ Rust 服务端采用单用户配置：顶层凭据可为内联 `password`、环�
 
 ### 远程文件系统配置与目录选择交互
 
-- Storage 内的远程文件系统是按内容高度布局的嵌入区域，不继承整页编辑器的 `height: 100%`。连接列表仅提供编辑、删除；连接检测放在配置弹窗内，保存前验证当前草稿。
-- 编辑时密码留空沿用凭据提供器中的原密码；非空密码只用于草稿检测，成功保存才替换原凭据。失败保留表单，关闭取消检测。密码与连接配置在同一事务中持久化，重启后自动加载。
+- 工具箱 MCP 编辑器提供 pi-agent 开关、用户名、运行期密码和连接检测。启用开关只记录待验证意图，测试通过并取得能力描述后才允许远程项目绑定。
+- 编辑时密码留空沿用凭据提供器中的原密码；非空密码用于连接测试，保存失败恢复先前凭据。关闭编辑器取消检测；密码仅驻留运行期缓存，不随 MCP 配置导出或持久化。
 - 新建远程项目可从授权导出别名逐级浏览子目录，也可以输入路径；列表按页读取，只展示目录，切换连接/路径或关闭弹窗取消旧请求，过期响应不更新界面。目录选择不自动创建项目，仍需确认项目名称和路径。
 - 无需修改 fs-server：复用 `GET /v1/exports` 与 `GET /v1/fs/{alias}/entries`。客户端不请求或展示宿主物理根路径，不全量递归扫描。
 
@@ -580,14 +580,14 @@ Rust 服务端采用单用户配置：顶层凭据可为内联 `password`、环�
 
 ### 配置存储布局迁移
 
-- `/etc/fs/remote/<connectionId>.seq` 的 `config` 保存命名连接；`/etc/fs/projects/<projectId>.seq` 的 `config` 保存该项目的挂载数组。
+- MCP catalog 保存连接配置；`/etc/fs/projects/<projectId>.seq` 的 `config` 保存该项目的挂载数组。旧 `/etc/fs/remote/<connectionId>.seq` 仅作为迁移输入。
 - `/etc/fs/catalog.seq` 的 `index` 仅保存版本、revision 和连接/项目 ID 列表。索引与变更记录在同一 SeqFile 事务提交，加载也使用事务快照和批量记录读取。日常保存只写变更的记录；索引 CAS 拒绝陈旧管理端覆盖。
 - 启动发现旧 `/etc/project-remote-mounts.seq` 而尚无新索引时，验证后自动迁移；保持连接、项目、挂载 ID 与 credentialRef。迁移前准备的空 seqfile 不代表迁移完成，只有事务提交的新索引才是完成标志。旧文件保留备份，新索引存在时不再读取它；不支持旧版本继续修改备份。
 - 移除配置在事务内删除 `config` 记录与索引引用，空 seqfile 可保留，避免事务外删除与并发重新创建发生竞争。
-- 项目名称与组织关系仍在 `/var/lib/sessions/folders.seq`，本次迁移仅拆分连接与挂载配置，不移动项目文件和会话历史。密码写入连接 seqfile 的独立 `password` 记录，运行时使用宿主凭据缓存。
+- 项目身份由项目元数据保存，组织关系在 `/var/lib/sessions/folders.seq`；MCP 迁移保留项目和连接 ID，不移动文件及会话。旧连接密码载入宿主缓存后删除其持久记录。
 
 
-密码持久化：`/etc/fs/remote/<connectionId>.seq` 的 `password` 键保存密码（本地 VFS 原文存储，未加密）；`config`、项目挂载、索引和公开连接 API 不含密码。编辑留空不改密码，显式新密码与配置原子更新；删除连接同时删除密码记录并清除运行时缓存。以前仅存内存的密码不能从旧文件恢复，旧连接首次升级后需输入并保存一次。Web 使用宿主 VFS 的 IndexedDB 持久化，Tauri/CLI 使用对应本地 profile 存储。
+凭据：MCP 记录只保存 credentialRef；密码由宿主运行期 provider 解析。编辑留空沿用当前缓存，失败回滚草稿凭据，删除配置清除运行期缓存。旧连接迁移保留引用 ID，清除旧 `config` 和 `password` 记录；应用重启后需重新输入密码，CLI 仍可通过凭据引用环境变量注入。
 
 ### 大文件读取与预览
 
@@ -598,7 +598,7 @@ HTTP 单次内存读取默认限制 32 MiB。超过上限返回 `EFBIG`（不是
 
 ## 15. SQLite SeqFile 接口（2026-10-04）
 
-fs-agent 在 export 内提供独立 `.seq` 文件的结构化记录读写。文件本身是 SQLite 数据库，记录表为 `entries(key TEXT PRIMARY KEY, value TEXT)`，value 保存 JSON。路径仍受 export 的认证、只读权限与禁止符号链接越界规则约束；不使用 sync 对象库，也不接受任意 SQL。
+pi-agent 在 export 内提供独立 `.seq` 文件的结构化记录读写。文件本身是 SQLite 数据库，记录表为 `entries(key TEXT PRIMARY KEY, value TEXT)`，value 保存 JSON。路径仍受 export 的认证、只读权限与禁止符号链接越界规则约束；不使用 sync 对象库，也不接受任意 SQL。
 
 | API | 请求 | 响应 |
 |---|---|---|
@@ -612,3 +612,8 @@ fs-agent 在 export 内提供独立 `.seq` 文件的结构化记录读写。文�
 限制为每文件 16 MiB、每请求最多 256 项变更、key 最多 1024 字节且非空、不含 NUL；额外受到 HTTP 请求体限制约束。存储错误不会被解释成空快照或已删除。无效 SQLite 文件保持原位并报告错误。
 
 `HttpSeqClient` 提供快照与条件事务 API。当前实现是**单文件事务**，没有把 HTTP 后端声明为完整的 VFS `IRecordStore`；跨多个 SeqFile 的会话、成员索引与身份更新尚不能作为一个事务提交。因此本接口为可写远程项目提供记录基础，但不等于完整远程项目会话存储已经开放。IndexedDB 的逻辑 SeqFile 仍由其记录后端实现，不要求与 SQLite 字节格式相同。
+
+
+### 服务端项目授权
+
+新 `[projects]` 模式支持导出目录下的子目录项目与受控挂载，文件请求附带项目 ID/revision；服务端逐路径核对授权。客户端项目支持 ro/rw，组织和 MindOS Session 数据仍存本地 profile；旧无项目协议服务保持只读项目兼容。详见 [项目与同步模型](pi-agent-project-model.md)。

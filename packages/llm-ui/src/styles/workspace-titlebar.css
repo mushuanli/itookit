@@ -142,6 +142,10 @@
     background: var(--llm-color-success);
 }
 
+.llm-workspace-status__dot.--queued {
+    background: var(--llm-color-warning);
+}
+
 .llm-workspace-status__dot.--failed {
     background: var(--llm-color-error);
 }

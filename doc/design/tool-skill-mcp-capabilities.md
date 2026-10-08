@@ -16,9 +16,9 @@ llm-ui 的 Skill 面板分别显示指令加载状态和当前 Agent 声明的�
 
 ## MCP 宿主与协议
 
-使用官方 `@modelcontextprotocol/client` / `@modelcontextprotocol/core` **2.0.0**，Node 最低版本为 20。应用只接受 **MCP 2026-07-28**：`Client.versionNegotiation.mode.pin` 与 `supportedProtocolVersions` 均锁定该版本，通过 `server/discover` 确认支持，没有 `initialize` 或旧版本回退。共享版本常量为 `MCP_PROTOCOL_VERSION`。
+使用官方 `@modelcontextprotocol/client` / `@modelcontextprotocol/core` **2.0.0**，Node 最低版本为 20。通用 MCP 客户端采用 `Client.versionNegotiation.mode: 'auto'` 和 SDK 支持的协议版本：优先 `server/discover`，遇到旧协议或未知方法时由 SDK 使用 `initialize` 协商。认证失败及服务器故障不会触发协议降级。`MCPDiscovery.protocolVersion` 返回实际协商版本；`MCP_PROTOCOL_VERSION` 是现代协议版本常量。piagent-driver 的专用 harness 网关仍要求服务声明的 2026-07-28 契约。
 
-只保留 stdio 和 Streamable HTTP（JSON-RPC over HTTP，可返回 JSON 或 SSE）。移除旧 HTTP+SSE 和 WebSocket 配置入口；已有旧配置显示“不支持”，连接或保存时明确拒绝，需要用户升级服务器并选择新传输。SDK 自动生成逐请求版本/客户端元数据，以及 HTTP 的 `MCP-Protocol-Version`、`Mcp-Method`、`Mcp-Name`；不建立 MCP 协议级 Session。返回数据按新版本的 `resultType` 和缓存字段校验。
+只保留 stdio 和 Streamable HTTP（JSON-RPC over HTTP，可返回 JSON 或 SSE）。移除旧 HTTP+SSE 和 WebSocket 配置入口；已有旧传输配置显示“不支持”，连接或保存时明确拒绝，需要选择支持的传输。SDK 按协商版本生成请求头、客户端元数据并验证响应；现代协议不建立 MCP 协议级 Session，旧协议的初始化及 Session 生命周期由 SDK 管理。
 
 本次覆盖 tools/resources/prompts、分页、取消、超时及 progress。未启用 sampling/roots/elicitation 的宿主回调，也不声明这些客户端能力；收到需要这些交互的 `input_required` 时 SDK 明确报错，不误报工具成功。参见 [官方版本说明](https://ts.sdk.modelcontextprotocol.io/v2/protocol-versions) 与 [SDK 迁移说明](https://ts.sdk.modelcontextprotocol.io/v2/migration/support-2026-07-28)。
 
@@ -32,9 +32,19 @@ Tauri 在装配 LLM 服务时通过 `createMCPStdioTransportFactory` 创建实�
 
 stdio 服务器是用户配置的外部进程，使用该服务器的启动目录、参数和环境变量。其文件访问不经过 Session VFS；MCP 调用属于 external 能力并走工具审批。Session 的内置文件工具与 Bash 继续使用各自挂载和隔离边界。
 
-“测试连接”使用当前表单草稿进行 MCP 最新协议协商和能力发现，不把 HTTP 200 视为协议成功。成功后保存配置与服务器返回的 tools/resources/prompts。发现列表不可通过手工添加虚构运行时能力。资源支持读取，Prompt 支持填写参数并预览；模型侧对应能力也经过工具白名单和 external 审批。
+“测试连接”使用当前表单草稿进行 MCP 协议协商和能力发现，不把 HTTP 200 视为协议成功。成功后保存配置与服务器返回的 tools/resources/prompts。发现列表不可通过手工添加虚构运行时能力。资源支持读取，Prompt 支持填写参数并预览；模型侧对应能力也经过工具白名单和 external 审批。
 
 配置页支持 HTTP headers 与 stdio env 的字符串 JSON 对象；所有配置和返回文案先转义再渲染。导出不包含 apiKey、headers、env 中的凭据。
+
+## MCP 配置扩展
+
+`MCPConnectionOptions.extensions` 注册 `MCPConfigurationExtension`。管理器完成标准发现后，以本地 `matches` 筛选扩展；扩展只消费 `MCPDiscovery.metadata` 或经同一连接调用已声明的工具。普通 MCP 不发 pi-agent 能力探测。服务名称只用于展示，不参与类型识别。
+
+pi-agent 在 `server/discover._meta['itookit/pi-agent']` 中声明安装身份、同源文件端点和项目/harness 能力；应用扩展验证描述后生成 `MCPDiscovery.extensions`。旧服务只有声明 `piagent_capabilities` 或 `fsagent_capabilities` 时才调用对应工具。元数据无效时失败，不回退以绕过验证。这里的描述是应用扩展，不是 MCP 标准的项目或 harness 接口。
+
+验证结果按配置 ID 和连接身份保留在管理器内存中。测试成功后的保存及显示名修改复用结果；地址、认证、headers、stdio 参数或环境变量变化时重新验证已识别扩展。导入的新扩展描述不能代替验证。新的发现不再声明扩展时移除旧描述；删除、身份变更或关闭管理器清理缓存。授权钩子继续检查项目引用，扩展发现不会授予工具或目录权限。兼容迁移的纯 HTTP 文件连接保留旧 itookit/fs-agent 描述，不要求旧文件服务提供 MCP；显式升级到新扩展须完成通用发现。
+
+设置 UI 只呈现已验证配置。宿主的 `MCPConfigurationControlsRegistry` 按扩展匹配展示控件，`PiAgentMCPControls` 提供控制中心；验证属于管理器及应用扩展，测试与保存共用一条发现链。增加服务扩展无需为每一种 MCP 修改通用表单。
 
 ## 超时与连接生命周期
 
@@ -59,6 +69,9 @@ CLI 的 worktree 创建、恢复和清理由宿主 Git 通道执行；Agent 的 
 - [配置表单测试](../../packages/app-shell/tests/capability-settings.test.ts)：策略保留、MCP 授权、转义、单位换算、草稿测试和失败处理。
 - [Agent 导入导出](../../packages/kernel-adapters/tests/llm-management/agent-config-roundtrip.test.ts)：显式空白名单、策略和嵌套配置。
 - [连接管理测试](../../packages/kernel-adapters/tests/llm-management/mcp-manager.test.ts)：配置失效、并发修改、删除、reload 及旧单位。
+- [配置扩展测试](../../packages/kernel-adapters/tests/llm-management/mcp-extensions.test.ts)：匹配、结果复用、身份变化、导入验证及失败不保存。
+- [pi-agent 扩展测试](../../packages/app-core/tests/pi-agent-mcp-extension.test.ts)：标准元数据、已声明工具兼容、名称不能冒充和同源验证。
+- [真实 pi-agent 集成](../../packages/app-shell/tests/web-project-sync.test.ts)：通用 MCP 发现、保存/改名无额外验证及远程项目绑定。
 - [宿主 stdio 测试](../../packages/kernel-adapters/tests/llm-management/mcp-host-transport.test.ts)：真实子进程、SDK 2026-07-28 协商、分页、资源、Prompt、progress 和启动取消。
 - [MCP 工具适配](../../packages/kernel-adapters/src/tool/mcp-tools.test.ts)：能力 ID、参数验证、external 标记及进度。
 - [Harness 提交](../../packages/llm-session/__tests__/direct-execution-mode.test.ts)：profile 展开进入实际 Task 输入，Chat 不加载 MCP。
@@ -68,4 +81,4 @@ CLI 的 worktree 创建、恢复和清理由宿主 Git 通道执行；Agent 的 
 
 2026-09-22 的隔离 Tauri/WebKit 验证使用真实配置编辑器、LLMDeviceDriver、MCP SDK、原生 stdio、Session Bash 和 HistoryView：MCP 2026-07-28 progress 约 64ms 可见（约 116ms 完成），Bash 首段输出约 254ms 可见、1058ms 完成；资源与 Prompt 的配置页预览及工具调用均成功。测试使用本地协议 fixture，没有调用远程 LLM。临时报告保存在 `/tmp/x1-capability-tauri-probe/profile/capabilities-result.json`。
 
-MCP 2.0.0 迁移验收：driver-llm 全包 80 项测试、CLI MCP 集成 4 项、配置页 6 项通过；全仓类型检查、driver-llm 构建、Tauri 前端构建、文档与样式检查通过。协议测试验证旧版本/未知方法/鉴权失败/服务故障均不回退，HTTP JSON-RPC headers 与逐请求元数据、SSE 响应中的实时进度，以及未实现的多轮交互不会被误报成功。完整测试矩阵（含 CLI crash matrix 与 Rust）在本次 SDK 迁移前通过，迁移后复测受影响模块及桌面集成。
+MCP 2.0.0 初次迁移验收：driver-llm 全包 80 项测试、CLI MCP 集成 4 项、配置页 6 项通过；全仓类型检查、driver-llm 构建、Tauri 前端构建、文档与样式检查通过。2026-10-08 的配置扩展重构将通用连接改为协议自动协商：协议测试验证旧版本/未知方法可协商旧协议，鉴权失败/服务故障不回退，并保留 HTTP JSON-RPC headers 与逐请求元数据、SSE 实时进度及未实现多轮交互的失败语义。完整测试矩阵在初次 SDK 迁移前通过；各次改动复测受影响模块及集成。

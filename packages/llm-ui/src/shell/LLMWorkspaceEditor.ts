@@ -322,7 +322,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private async initComponents(session: InitialSessionData['session']): Promise<Omit<InitialSessionData, 'session'>> {
         const initialSettings = session.settings;
         const [initialAgents, savedUIState] = await Promise.all([
-            buildExecutorOptions(this.agentService),
+            buildExecutorOptions(this.agentService, this.options.remoteAgents),
             this.stateManager.loadUIState(session.manifest),
         ]);
         const historyEl = this.domCache.byId('llm-ui-history')!;
@@ -405,10 +405,10 @@ export class LLMWorkspaceEditor implements IEditor {
                 onUnloadSkill: (id: string) => this.options.sessionSkills!.unload(this.options.sessionId, id),
             } : {}),
             onSend: (text, files, agentId, overrides) =>
-                this.sendCommand.run({ text, files, agentId, overrides }).then(() => {})
+                this.routeMessage({ text, files, agentId, overrides }).then(() => {})
                     // Direct commands reject on purpose (no fallback to chat): report the reason the
                     // command could not start instead of leaving an unhandled rejection.
-                    .catch(error => this.errorHandler.handle(error, 'Send message')),
+                    .catch(error => { this.errorHandler.handle(error, 'Send message'); if (agentId.startsWith('remote:')) throw error; }),
             onStop: () => this.commandBus.execute(SessionCommand.Abort).catch(error => this.errorHandler.handle(error, 'Stop execution')),
             initialAgents,
             initialConfig: {
@@ -873,12 +873,19 @@ export class LLMWorkspaceEditor implements IEditor {
     // Agent / Connection 辅助 → 委托到 AgentProvider
     // ================================================================
 
+    private async routeMessage(message: import('../commands/SendMessageCommand').SendMessageParams): Promise<void> {
+        if (!message.agentId?.startsWith('remote:')) { await this.sendCommand.run(message); return; }
+        if (message.files.length) throw new Error(t('harness.remoteAttachments'));
+        if (!this.options.remoteAgents) throw new Error(t('toolbox.unavailable'));
+        try { await this.options.remoteAgents.send(message.agentId, message.text); }
+        catch (error) { this.chatInput?.restoreInput(message.text, message.agentId); throw error; }
+    }
     private async refreshAgents(): Promise<void> {
         if (!this.chatInput) return;
-        const agents = await buildExecutorOptions(this.agentService);
+        const agents = await buildExecutorOptions(this.agentService, this.options.remoteAgents);
         const changed = this.chatInput.refreshAgents(
             agents,
-            (id) => validateAgentId(this.agentService, id)
+            (id) => agents.some(a => a.id === id) ? id : 'default'
         );
         await this.chatInput.refreshConnections();
         if (changed) {
@@ -945,7 +952,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
     setReadOnly(): void { }
     get commands() { return { rerunSession: () => this.rerunSession(),
-        sendMessage: (message: import('../commands/SendMessageCommand').SendMessageParams) => this.sendCommand.run(message),
+        sendMessage: (message: import('../commands/SendMessageCommand').SendMessageParams) => this.routeMessage(message),
     }; }
 
     private async rerunSession(): Promise<void> {

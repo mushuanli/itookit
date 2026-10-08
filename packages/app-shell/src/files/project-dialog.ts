@@ -59,7 +59,7 @@ export async function showProjectDialog(projects: ProjectService, parent: string
     const abort = () => controller.abort(); signal.addEventListener('abort', abort, { once: true });
     try { await showNameDialog(t('project.create'), t('project.name'), signal, async name => {
         const project = remote?.isRemote()
-            ? await projects.createRemote(name, select.value || null, remote.connection.value, remote.path.value.trim(), remote.writable.checked ? 'rw' : 'ro', { signal: controller.signal, timeoutMs: 10000 })
+            ? await projects.createRemote(name, select.value || null, remote.connection.value, remote.path.value.trim(), remote.writable.checked ? 'rw' : 'ro', { signal: controller.signal, timeoutMs: 10000, createDirectory:remote.createDirectory.checked })
             : await projects.create(name, select.value || null, directory);
         await created(project.path);
     }, fields); } finally { controller.abort(); signal.removeEventListener('abort', abort); }

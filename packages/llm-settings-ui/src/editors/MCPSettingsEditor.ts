@@ -9,12 +9,14 @@ import {
     ENTITY_ICONS
 } from '@itookit/common';
 import { BaseSettingsEditor, Toast, Modal } from '@itookit/ui-common';
-import type { MCPServer } from '@itookit/tools/mcp-contracts';
+import type { MCPServer, MCPDiscovery } from '@itookit/tools/mcp-contracts';
 import type { IAgentManagementService } from '@itookit/kernel-adapters/contracts';
 import { bindMCPContent, renderMCPPrompts, parseMCPStringMap } from './mcp-content';
-import { mcpTimeoutMs } from '@itookit/tools/mcp-contracts';
+import { mcpConfiguration, mcpTimeoutMs } from '@itookit/tools/mcp-contracts';
 
 
+
+export type MCPConfigurationControls = import('@itookit/ui-common').ConfigurationFormControls<MCPServer,MCPDiscovery>;
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -35,6 +37,9 @@ function statusBadge(status?: MCPServer['status']): string {
 // ─── MCPSettingsEditor ────────────────────────────────────────────────────────
 
 export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementService> {
+    constructor(container: HTMLElement, service: IAgentManagementService, options: import('@itookit/ui-common').EditorOptions,
+        private readonly controls?: MCPConfigurationControls) { super(container,service,options); }
+    async destroy(): Promise<void> { await super.destroy(); this.controls?.dispose?.(); }
     private selectedId: string | null = null;
     private formOnly = false;
     async init(container: HTMLElement): Promise<void> {
@@ -81,6 +86,11 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                 </div>
             </div>`;
 
+        if (selected && this.controls) {
+            const section = document.createElement('section'); section.className = 'settings-section';
+            this.container.querySelector('.settings-page, .settings-split__content')?.append(section);
+            this.controls.render(section,selected);
+        }
         this.bindEvents(servers);
         if (selected) bindMCPContent(this.container, selected, this.service);
     }
@@ -344,7 +354,8 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         if (existing) this.bindAutoSave(this.container.querySelector<HTMLElement>('.settings-split__content') ?? this.container, async () => {
             let draft: MCPServer;
             try { draft = this.readDraft(existing); } catch (error) { throw new SettingsValidationError((error as Error).message); }
-            await this.service.saveMCPServer(structuredClone(draft));
+            try { await this.service.saveMCPServer(structuredClone(draft)); this.controls?.committed?.(); }
+            catch (error) { this.controls?.failed?.(); throw error; }
             Object.assign(existing, draft);
             const title = [...this.container.querySelectorAll<HTMLElement>('[data-name-for]')].find(element => element.dataset.nameFor === existing.id);
             if (title && !title.querySelector('input')) title.textContent = draft.name;
@@ -417,7 +428,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         if (!['stdio', 'http'].includes(transport)) throw new Error(t('mcp.unsupportedTransport'));
         const seconds = Number(this.val('timeout'));
         if (!Number.isFinite(seconds) || seconds <= 0) throw new Error(t('mcp.invalidTimeout'));
-        return {
+        const draft: MCPServer = {
             ...existing, transport,
             headers: parseMCPStringMap(this.val('headers')), env: parseMCPStringMap(this.val('env')),
             name: this.val('header-name') || this.val('name') || existing.name,
@@ -429,6 +440,11 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
             apiKey: transport !== 'stdio' ? this.val('apiKey') || undefined : undefined,
             timeout: seconds * 1000, timeoutUnit: 'ms', autoConnect: this.chk('autoConnect'),
         };
+        if (draft.apiKey && draft.auth) {
+            draft.auth = undefined;
+            draft.headers = Object.fromEntries(Object.entries(draft.headers ?? {}).filter(([key]) => key.toLowerCase() !== 'authorization'));
+        }
+        return this.controls?.read(draft) ?? draft;
     }
 
     private async deleteCurrent(): Promise<void> {
@@ -449,10 +465,14 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         try {
             const draft = this.readDraft(existing);
             const discovered = await this.service.testMCPServer(draft);
-            await this.service.saveMCPServer({ ...draft, ...discovered, status: 'connected' });
+            const verified = {...draft,extensions:{...draft.extensions,...discovered.extensions}};
+            const configured = await this.controls?.tested?.(verified,discovered) ?? verified;
+            await this.service.saveMCPServer({ ...configured, ...discovered, status: 'connected' });
+            this.controls?.committed?.();
+            Object.assign(existing,configured,discovered,{status:'connected'});
             Toast.success(t('mcp.discoverySuccess', { count: discovered.tools.length }));
             await this.render();
-        } catch (error) { Toast.error(t('mcp.toast.testError', { message: (error as Error).message })); }
+        } catch (error) { this.controls?.failed?.(); Toast.error(t('mcp.toast.testError', { message: (error as Error).message })); }
         finally { if (btn.isConnected) { btn.innerHTML = originalHTML; btn.disabled = false; } }
     }
 
@@ -487,7 +507,9 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
 
     private async exportAll(servers: MCPServer[]) {
         // Remove apiKey from export for security
-        const safe = servers.map(({ apiKey: _k, headers: _h, env: _e, ...rest }) => rest);
+        const safe = servers.map(server => {
+            const {apiKey: _k, headers: _h, env: _e, ...rest} = mcpConfiguration(server); return rest;
+        });
         const blob = new Blob([JSON.stringify(safe, null, 2)], { type: 'application/json' });
         const a = Object.assign(document.createElement('a'), {
             href: URL.createObjectURL(blob), download: 'mcp-servers.json',

@@ -12,8 +12,12 @@
 
 import path from 'node:path';
 
+// Prepare imports hidden behind excluded workspace entries before serving the page.
+export const REGISTRY_PREBUNDLES = ['@itookit/vfs-ui'];
+
 /** `[包名, 相对仓库根的源码入口]`；入口必须与 package.json 的 exports/main 一致。 */
 export const WORKSPACE_SOURCES = [
+    ['@itookit/piagent-driver', 'packages/piagent-driver/src/index.ts'],
     ['@itookit/app-core', 'packages/app-core/src/index.ts'],
     ['@itookit/app-settings', 'packages/app-settings/src/index.ts'],
     ['@itookit/app-shell', 'packages/app-shell/src/index.ts'],

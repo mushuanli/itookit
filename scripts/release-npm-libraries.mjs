@@ -17,10 +17,13 @@ function validateExports(value, directory) {
     }
 }
 function preparePackage(library, sourceRoot) {
-    const source = resolve(sourceRoot, library.directory), staging = join(releaseRoot, library.directory);
+    const candidate = resolve(sourceRoot, library.directory);
+    const source = !existsSync(candidate) && library.workspace ? join(root,'packages',library.directory) : candidate;
+    const staging = join(releaseRoot, library.directory);
     process.stdout.write(`Building ${library.name}\n`);
     writeFileSync(join(releaseRoot, `${library.directory}.build.log`), run('pnpm', ['build'], source));
     const manifest = releaseManifest(JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')), library.version);
+    if (manifest.name !== library.name || manifest.private) throw new Error(`Invalid release identity: ${library.name}`);
     mkdirSync(staging, { recursive: true });
     cpSync(join(source, 'dist'), join(staging, 'dist'), { recursive: true });
     for (const name of ['README.md', 'LICENSE']) if (existsSync(join(source, name))) cpSync(join(source, name), join(staging, name));
@@ -31,11 +34,17 @@ function preparePackage(library, sourceRoot) {
     if (!existsSync(tarball)) throw new Error(`Missing tarball: ${tarball}`);
     return { ...library, tarball, sha256: sha256(tarball) };
 }
-function prepare(sourceRoot) {
+function prepare(sourceRoot, packageName) {
     mkdirSync(releaseRoot, { recursive: true });
-    const artifacts = libraries.map(library => preparePackage(library, sourceRoot));
+    const selected = packageName ? libraries.filter(library => library.name === packageName) : libraries;
+    if (!selected.length) throw new Error(`Unknown release package: ${packageName}`);
+    const prepared = selected.map(library => preparePackage(library, sourceRoot));
+    const index = join(releaseRoot,'artifacts.json');
+    const previous = packageName && existsSync(index) ? JSON.parse(readFileSync(index,'utf8')) : [];
+    const artifacts = [...previous.filter(item => libraries.some(library => library.name === item.name && library.version === item.version)
+        && !selected.some(library => library.name === item.name)),...prepared];
     writeFileSync(join(releaseRoot, 'artifacts.json'), JSON.stringify(artifacts, null, 2) + '\n');
-    process.stdout.write(`Prepared ${artifacts.length} packages in ${releaseRoot}\n`);
+    process.stdout.write(`Prepared ${prepared.length} packages in ${releaseRoot}\n`);
 }
 function publish() {
     run('npm', ['whoami']);
@@ -48,9 +57,9 @@ function publish() {
 }
 const command = process.argv[2];
 try {
-    if (command === 'prepare') prepare(resolve(process.argv[3] ?? join(root, '../pair-x1')));
+    if (command === 'prepare') prepare(resolve(process.argv[3] ?? join(root, '../pair-x1')),process.argv[4]);
     else if (command === 'publish') publish();
-    else throw new Error('Usage: node scripts/release-npm-libraries.mjs prepare [source-root] | publish');
+    else throw new Error('Usage: node scripts/release-npm-libraries.mjs prepare [source-root] [package-name] | publish');
 } catch (error) {
     process.stderr.write((error.stderr?.toString() || error.message) + '\n');
     process.exitCode = 1;

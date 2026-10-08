@@ -14,13 +14,18 @@ export function directoryPathLabel(path: string, title?: string): string {
         if (title && physical.length) physical[physical.length - 1] = title;
         names.push(...physical);
     } else if (target.kind === 'favorites') names.push(t('project.favorites'));
+    else if (target.kind === 'remote') {
+        names.push(t('harness.remoteSessions'));
+        if (target.profileId) names.push(target.profileId);
+        if (target.cursor) names.push(t('harness.more'));
+    }
     return names.join(' / ') || t('workbench.allProjects');
 }
 
 /** Synthetic project/folder names are route segments; file names remain literal. */
 export function directoryEntryName(node: FSNode): string {
     const target = resolveBrowserTarget(node.path);
-    if (target.kind === 'folder' || target.kind === 'session' || node.metadata._fixedEntry)
+    if (target.kind === 'folder' || target.kind === 'session' || target.kind === 'remote' || node.metadata._fixedEntry)
         return String(node.metadata.title || (target.kind === 'folder' ? folderPathFromBrowserPath(node.path)?.split('/').pop() || node.name : node.name));
     return node.name;
 }

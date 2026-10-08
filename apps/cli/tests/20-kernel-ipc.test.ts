@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'tsup';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const localDriver = createRequire(import.meta.url).resolve('@itookit/vfsdriver-local');
+const nativeModules = dirname(dirname(createRequire(localDriver).resolve('better-sqlite3/package.json')));
 let bundle: string, root: string;
 const children: ChildProcess[] = [];
 const diagnostics = new WeakMap<ChildProcess, string>();
@@ -25,7 +27,7 @@ function receive(child: ChildProcess, matches: (message: any) => boolean): Promi
 }
 async function worker() {
     const child = fork(join(bundle, 'ipc-worker.cjs'), [root, mountMode], {
-        env: { ...process.env, NODE_PATH: join(dirname(createRequire(import.meta.url).resolve('@itookit/vfsdriver-local')), '../node_modules') },
+        env: { ...process.env, NODE_PATH: nativeModules },
         stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     });
     children.push(child);

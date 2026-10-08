@@ -1,4 +1,5 @@
 import { trackFavoriteFiles } from './favorites/lifecycle';
+import type { MCPDeletedProject } from '../configuration/model-commands';
 import { overlappingProjectRoots, projectFileLocation, type ProjectFileRoot } from './file-location';
 import { ProjectSessionMoves } from './session-moves';
 import { recoverProjectDirectories } from './project-directory-recovery';
@@ -16,7 +17,7 @@ import type { ISessionRepository, SessionFolder } from '@itookit/llm-session';
 import type { DirectoryMountService } from '../vfs/directory-mounts';
 import type { SessionFilesService } from '../vfs/session-files';
 
-export type ProjectFolder = SessionFolder & { project: NonNullable<SessionFolder['project']> };
+export type ProjectFolder = SessionFolder & { displayName?: string } & { project: NonNullable<SessionFolder['project']> };
 export type ProjectFileSource = { kind: 'local'; directory: string } | { kind: 'remote'; reference: string };
 
 /** Project identity and file roots survive navigation-folder renames and moves. */
@@ -27,7 +28,8 @@ export class ProjectService {
     set remoteMounts(remote: ProjectRemoteMountService | undefined) {
         this.remote = remote;
         if (remote) remote.rootValidator = async (id, mount) => {
-            if (mount.access === 'rw') throw new FSError('ECAPABILITY', 'Writable remote project storage requires project-wide SeqFile transactions');
+            if (mount.access === 'rw' && (!mount.connectionId || !remote.connection(mount.connectionId).projects))
+                throw new FSError('ECAPABILITY', 'Writable remote projects require the server project protocol');
             await this.assertIndependent(await this.get(id), [mount]);
         };
     }
@@ -114,8 +116,10 @@ export class ProjectService {
     }
     private projectFolder(project: StoredProject, folders: readonly SessionFolder[]): ProjectFolder {
         const cached = folders.find(folder => folder.project?.id === project.id);
-        const path = `${cached?.parentPath ?? ''}/${project.name}`;
-        return { path, name: project.name, parentPath: cached?.parentPath ?? null, updatedAt: project.createdAt,
+        const path = `${cached?.parentPath ?? ''}/${project.navigationName ?? project.name}`;
+        const connection = this.remoteMounts?.list(project.id).find(mount => mount.at === '/')?.connectionId;
+        const server = this.remoteMounts?.connections().find(item => item.id === connection);
+        return { path, name: project.name,displayName:server ? `${server.name}:${project.name}` : project.name, parentPath: cached?.parentPath ?? null, updatedAt: project.createdAt,
             project: { id: project.id, directory: project.directory, source: { kind: project.kind } } };
     }
     async navigationFolders(folders?: readonly SessionFolder[]): Promise<SessionFolder[]> {
@@ -169,12 +173,34 @@ export class ProjectService {
         try { await this.repository.renameFolder(from, to); }
         catch (error) {
             const current = (await this.projectRepository.list()).find(item => item.id === stored.id)!;
-            await this.projectRepository.rename(current, stored.name); throw error;
+            await this.projectRepository.rename(current, stored.name,stored.navigationName); throw error;
         }
     }
     async removeProjectSource(project: ProjectFolder): Promise<void> {
         const stored = (await this.projectRepository.list()).find(item => item.id === project.project.id);
         if (stored) await this.projectRepository.remove(stored);
+    }
+    async storedProjectIds(): Promise<string[]> {
+        return (await this.projectRepository.list()).map(project => project.id);
+    }
+    async inspectRemoteProjectRemoval(ids: readonly string[]): Promise<MCPDeletedProject[]> {
+        const records = (await this.projectRepository.list()).filter(record => record.kind === 'remote' && ids.includes(record.id));
+        const sessions = await this.repository.list();
+        const projects = await this.list();
+        return records.map(record => {
+            const project = projects.find(item => item.project.id === record.id)!;
+            return {id:record.id,name:record.name,path:project.path,localSessions:sessions
+                .filter(session => session.folder === project.path || session.folder?.startsWith(project.path + '/'))
+                .map(session => ({id:session.id,title:session.title})).sort((a,b) => a.id.localeCompare(b.id))};
+        }).sort((a,b) => a.id.localeCompare(b.id));
+    }
+    async removeRemoteProjectRecord(id: string, deleteFolder: (path: string) => Promise<void>): Promise<void> {
+        const record = (await this.projectRepository.list()).find(project => project.id === id);
+        if (!record) return;
+        if (record.kind !== 'remote') throw new FSError('EACCES','Cannot delete a local project through an MCP configuration');
+        const project = await this.get(id);
+        await deleteFolder(project.path);
+        await this.projectRepository.remove(record);
     }
     async get(id: string): Promise<ProjectFolder> {
         const project = (await this.list()).find(item => item.project.id === id);
@@ -239,24 +265,27 @@ export class ProjectService {
     }
 
     createRemote(name: string, parent: string | null, connectionId: string, path: string,
-        access: 'ro' | 'rw' = 'ro', options?: OperationOptions): Promise<ProjectFolder> {
-        if (access === 'rw') return Promise.reject(new FSError('ECAPABILITY', 'Writable remote project storage requires project-wide SeqFile transactions'));
+        access: 'ro' | 'rw' = 'ro', options?: OperationOptions & {createDirectory?: boolean}): Promise<ProjectFolder> {
         const work = this.remoteCreation.catch(() => {}).then(async () => {
             const remote = this.remoteMounts;
             if (!remote) throw new FSError('ECAPABILITY', 'Remote file systems unavailable');
+            if (access==='rw' && !remote.connection(connectionId).projects) throw new FSError('ECAPABILITY','Writable remote projects require the server project protocol');
             const existing = remote.findRemoteProject(connectionId, path);
             if (existing) {
                 const project = (await this.list()).find(item => item.project.id === existing);
                 if (project) return project;
                 await remote.forgetProject(existing);
             }
-            const projectPath = await this.assertName(name, parent), id = randomUUID();
-            await this.projectRepository.createRemote({ version: 1, id, name: name.trim(), createdAt: Date.now() });
+            const id = randomUUID();
+            const projectPath = await this.remoteNavigationPath(name,parent,id);
+            const navigationName = projectPath.split('/').pop()!;
+            await this.projectRepository.createRemote({version:1,id,name:name.trim(),createdAt:Date.now(),
+                ...(navigationName !== name.trim() ? {navigationName} : {})});
             let project: ProjectFolder | undefined;
             try {
                 project = await this.repository.createFolder(projectPath, { id, directory: `project:${id}`, source: { kind: 'remote' } }) as ProjectFolder;
-                await remote.bindProject(id, connectionId, path, access, options);
-                await this.sessionFolder(project); return project;
+                await remote.bindProject(id, connectionId, path, access, {...options,projectName:name.trim()});
+                await this.sessionFolder(project); return this.get(id);
             }
             catch (error) {
                 // A published grant must remain recoverable if view invalidation fails.
@@ -269,6 +298,16 @@ export class ProjectService {
             }
         });
         this.remoteCreation = work; return work;
+    }
+
+    private async remoteNavigationPath(name: string, parent: string | null, id: string): Promise<string> {
+        if ((await this.list()).some(project => project.project.source?.kind === 'remote' && project.name === name.trim()))
+            return this.assertName(`${name.trim()}~${id}`,parent);
+        try { return await this.assertName(name,parent); }
+        catch (error) {
+            if (!(error instanceof FSError) || error.code !== 'EEXIST') throw error;
+            return this.assertName(`${name.trim()}~${id}`,parent);
+        }
     }
 
     /** Rollback hook for a fresh managed project whose navigation records were removed. */

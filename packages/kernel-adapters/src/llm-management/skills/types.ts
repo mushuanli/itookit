@@ -1,3 +1,5 @@
+import type { MCPAuthentication } from '@itookit/tools/mcp-contracts';
+
 // ─── MCP Types (local definition, host integration contracts) ──────────────────
 
 /** MCP 服务器连接配置 */
@@ -7,6 +9,7 @@ export interface MCPServerConfig {
     /** 传输类型 */
     transport: 'stdio' | 'http';
     headers?: Record<string, string>;
+    auth?: MCPAuthentication;
     cwd?: string;
     timeout?: number;
     /** 启动命令（stdio 模式） */

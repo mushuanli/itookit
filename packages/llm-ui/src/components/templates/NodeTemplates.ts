@@ -11,6 +11,7 @@ export class NodeTemplates {
      * 格式化时间显示
      */
     private static formatTime(timestamp: number): string {
+        if (!timestamp) return '';
         const date = new Date(timestamp);
         const now = new Date();
 
@@ -108,7 +109,7 @@ export class NodeTemplates {
              data-round-id="${escapeHTML(group.roundId ?? '')}"
              data-round-role="user"
              data-context-mode="${escapeHTML(group.historyPolicy ?? 'include')}"
-             data-context-source="default">>
+             data-context-source="default">
             <div class="llm-ui-bubble__header">
                 <div class="llm-ui-avatar">👤</div>
                 
@@ -156,7 +157,7 @@ export class NodeTemplates {
         isCollapsed: boolean = false,
     ): string {
         if (node.messageRole) return `<div class="llm-ui-node__header">
-            ${renderFlowIdentity(node)}
+            ${node.data.metaInfo?.nativeRole ? `<span class="llm-ui-node__name">${escapeHTML(node.name)}</span>` : renderFlowIdentity(node)}
             <span class="llm-ui-node__status llm-ui-node__status--${node.status}">${escapeHTML(node.status)}</span>
             <div class="llm-ui-time">${this.formatTime(node.startTime)}</div>${this.renderReadActions(isCollapsed)}</div>`;
         const timeStr = this.formatTime(node.startTime);

@@ -1,4 +1,4 @@
-import { t } from '@itookit/common';
+import { getLocale, t } from '@itookit/common';
 import { resolveBrowserTarget, folderPathFromBrowserPath } from '@itookit/app-core';
 import type { VFSNodeUI } from '@itookit/vfs-ui';
 
@@ -7,9 +7,16 @@ export function fileFirst(a: VFSNodeUI, b: VFSNodeUI): number | undefined {
     if (favorites(a) !== favorites(b)) return favorites(a) ? -1 : 1;
     const files = (item: VFSNodeUI) => resolveBrowserTarget(item.id).kind === 'project-files';
     if (files(a) !== files(b)) return files(a) ? -1 : 1;
-    const session = (item: VFSNodeUI) => resolveBrowserTarget(item.id).kind === 'session';
-    if (session(a) && session(b)) return (new Date(b.metadata.lastModified).getTime() - new Date(a.metadata.lastModified).getTime()) || a.id.localeCompare(b.id);
+    const session = (item: VFSNodeUI) => { const target = resolveBrowserTarget(item.id); return target.kind === 'session' || target.kind === 'remote' && !!target.nativeSessionId; };
+    if (session(a) && session(b)) return ((Date.parse(b.metadata.lastModified) || 0) - (Date.parse(a.metadata.lastModified) || 0)) || a.id.localeCompare(b.id);
     return undefined;
+}
+function remoteItem(item: VFSNodeUI): VFSNodeUI {
+    const known = (value: string) => Date.parse(value) > 0 ? value : '';
+    const createdAt = known(item.metadata.createdAt), lastModified = known(item.metadata.lastModified);
+    const subtitle = [[t('workbench.modified'), lastModified], [t('workbench.created'), createdAt]]
+        .filter(([, time]) => time).map(([label, time]) => `${label}: ${new Date(time!).toLocaleString(getLocale())}`).join(' · ');
+    return {...item, presentation: {...item.presentation, subtitle}, metadata: {...item.metadata, createdAt, lastModified}};
 }
 export function projectItems(items: VFSNodeUI[], query = '', family?: string): VFSNodeUI[] {
     return items.flatMap(item => {
@@ -24,6 +31,7 @@ export function projectItems(items: VFSNodeUI[], query = '', family?: string): V
         }
         if (kind === 'favorite') return [{ ...item, children: undefined }];
         if (kind === 'favorites') return [item];
+        if (kind === 'remote') return [{...remoteItem(item), children: item.children && projectItems(item.children, query, family).sort((a, b) => fileFirst(a, b) ?? 0)}];
         if (kind === 'project-files') return [{ ...item, children: item.children && projectItems(item.children, query, family) }];
         if (kind !== 'folder') return [];
         if (folderPathFromBrowserPath(item.id)?.endsWith('/@sessions')) return projectItems(item.children ?? [], query, family);

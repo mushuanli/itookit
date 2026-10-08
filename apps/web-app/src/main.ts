@@ -1,6 +1,6 @@
 import { createMindosFlowLibrary } from '@itookit/app-core';
 import { configureAppCache } from './app-cache';
-import { createHttpSourceProvider } from '@itookit/vfsdriver-agent';
+import { createPiAgentDriver } from '@itookit/piagent-driver';
 import { initApp, installMobileNavigation, windowSessionLeaseToken, type AppUI } from '@itookit/app-shell';
 import { createApplicationRuntime } from '@itookit/app-core';
 import { openIndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
@@ -51,7 +51,7 @@ async function main() {
             SystemPromptSettingsEditor,
         },
     };
-    const remoteSourceProvider = createHttpSourceProvider();
+    const remoteSourceProvider = createPiAgentDriver();
     const sync = new WebProjectSync(backend, remoteSourceProvider);
     const runtime = await createApplicationRuntime({
         remoteSourceProvider,
@@ -65,10 +65,12 @@ async function main() {
         },
     });
     sync.projects = runtime.projects;
+    sync.service = runtime.projectSync;
     try {
         await initApp({
             runtime,
             projectSyncSetup: (id, signal) => sync.setup(id, signal),
+            projectSyncDirectory: (id, signal) => sync.directory(id, signal),
             workspaces: WORKSPACES,
             defaultSlug: 'chat',
             routeAliases: { home: 'llm-workspace', projects: 'llm-workspace', workbench: 'llm-workspace' },

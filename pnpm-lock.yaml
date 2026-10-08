@@ -59,9 +59,6 @@ importers:
       '@itookit/vfs-ui':
         specifier: 0.5.5
         version: 0.5.5
-      '@itookit/vfsdriver-agent':
-        specifier: 5.3.0
-        version: 5.3.0
       '@itookit/vfsdriver-indexeddb':
         specifier: 5.3.1
         version: 5.3.1
@@ -107,15 +104,15 @@ importers:
       '@itookit/llm-tasks':
         specifier: workspace:*
         version: link:../../packages/llm-tasks
+      '@itookit/piagent-driver':
+        specifier: workspace:*
+        version: link:../../packages/piagent-driver
       '@itookit/tools':
         specifier: workspace:*
         version: link:../../packages/tools
       '@itookit/vfs-core':
         specifier: 5.3.1
         version: 5.3.1
-      '@itookit/vfsdriver-agent':
-        specifier: 5.3.0
-        version: 5.3.0
       '@itookit/vfsdriver-local':
         specifier: 5.3.0
         version: 5.3.0
@@ -208,6 +205,9 @@ importers:
       '@itookit/mdxeditor':
         specifier: 0.5.1
         version: 0.5.1
+      '@itookit/piagent-driver':
+        specifier: workspace:*
+        version: link:../../packages/piagent-driver
       '@itookit/tools':
         specifier: workspace:*
         version: link:../../packages/tools
@@ -217,9 +217,6 @@ importers:
       '@itookit/vfs-ui':
         specifier: 0.5.5
         version: 0.5.5
-      '@itookit/vfsdriver-agent':
-        specifier: 5.3.0
-        version: 5.3.0
       '@itookit/vfsdriver-indexeddb':
         specifier: 5.3.1
         version: 5.3.1
@@ -317,6 +314,9 @@ importers:
       '@itookit/mdxeditor':
         specifier: 0.5.1
         version: 0.5.1
+      '@itookit/piagent-driver':
+        specifier: workspace:*
+        version: link:../../packages/piagent-driver
       '@itookit/sync-adapters':
         specifier: workspace:*
         version: link:../../packages/sync-adapters
@@ -332,9 +332,6 @@ importers:
       '@itookit/vfs-ui':
         specifier: 0.5.5
         version: 0.5.5
-      '@itookit/vfsdriver-agent':
-        specifier: 5.3.0
-        version: 5.3.0
       '@itookit/vfsdriver-indexeddb':
         specifier: 5.3.1
         version: 5.3.1
@@ -390,6 +387,9 @@ importers:
       '@itookit/llm-tasks':
         specifier: workspace:*
         version: link:../llm-tasks
+      '@itookit/piagent-driver':
+        specifier: workspace:*
+        version: link:../piagent-driver
       '@itookit/tools':
         specifier: workspace:*
         version: link:../tools
@@ -476,6 +476,9 @@ importers:
       '@itookit/llm-flow':
         specifier: workspace:*
         version: link:../llm-flow
+      '@itookit/piagent-driver':
+        specifier: workspace:*
+        version: link:../piagent-driver
       '@itookit/tools':
         specifier: workspace:*
         version: link:../tools
@@ -995,6 +998,31 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/debug@4.1.13)(@types/node@20.19.43)(jiti@1.21.7)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.2)
 
+  packages/piagent-driver:
+    dependencies:
+      '@itookit/vfs-core':
+        specifier: 5.3.1
+        version: 5.3.1
+      '@itookit/vfs-sync':
+        specifier: 0.1.0
+        version: 0.1.0
+      '@modelcontextprotocol/client':
+        specifier: 2.0.0
+        version: 2.0.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.19.25
+        version: 20.19.25
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@20.19.25))(jiti@1.21.7)(postcss@8.5.16)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.2)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@20.19.25)(jiti@1.21.7)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.2)
+
   packages/sanbox:
     devDependencies:
       '@types/node':
@@ -1012,12 +1040,12 @@ importers:
 
   packages/sync-adapters:
     dependencies:
+      '@itookit/piagent-driver':
+        specifier: workspace:*
+        version: link:../piagent-driver
       '@itookit/vfs-sync':
         specifier: 0.1.0
         version: 0.1.0
-      '@itookit/vfsdriver-agent':
-        specifier: 5.3.0
-        version: 5.3.0
       '@itookit/vfsdriver-indexeddb':
         specifier: 5.3.1
         version: 5.3.1
@@ -1783,9 +1811,6 @@ packages:
   '@itookit/vfs-ui@0.5.5':
     resolution: {integrity: sha512-6skFBx5GROm8ARDIwHMSpNM3TpfT1xfw4mUfw5T90dHRj3OZPAld91RaWheAcsRjYpVvCfKeyfdKvgtCiQEo4g==}
     engines: {node: '>=16.0.0'}
-
-  '@itookit/vfsdriver-agent@5.3.0':
-    resolution: {integrity: sha512-bG7AsfTzVtKrDmCg/uou8aFfoNOMTHQNS22b2gUteXYMbOOoctqZRwHHLIuN3RrINypJA3re182oPisHL1/K/g==}
 
   '@itookit/vfsdriver-indexeddb@5.3.1':
     resolution: {integrity: sha512-PHAKGyyVy1aWeH3Q/Nna+dHeGiSxZAKhMbrn6dWgvz7Mt+JpAopUQyvriJVaP8TkwZ6uLvxzQV8wouMOBhi+Gg==}
@@ -5471,10 +5496,6 @@ snapshots:
   '@itookit/vfs-sync@0.1.0': {}
 
   '@itookit/vfs-ui@0.5.5':
-    dependencies:
-      '@itookit/vfs-core': 5.3.1
-
-  '@itookit/vfsdriver-agent@5.3.0':
     dependencies:
       '@itookit/vfs-core': 5.3.1
 

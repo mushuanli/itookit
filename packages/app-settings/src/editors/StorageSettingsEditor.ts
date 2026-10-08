@@ -1,4 +1,4 @@
-import { BaseSettingsEditor, type EditorFactory, type EditorOptions, type IEditor } from '@itookit/ui-common';
+import { BaseSettingsEditor, type EditorOptions } from '@itookit/ui-common';
 import { escapeHTML, t } from '@itookit/common';
 import { SettingsService } from '../services/SettingsService';
 import { StorageOverviewSection } from './storage/StorageOverviewSection';
@@ -8,13 +8,12 @@ import { DangerZoneSection } from './storage/DangerZoneSection';
 
 interface StorageSection { init(): void | Promise<void>; destroy?(): void | Promise<void>; }
 
-/** The host injects remote connection management without an upward app-core dependency. */
+/** Storage maintenance is separate from toolbox connection configuration. */
 export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
     private sections: StorageSection[] = [];
-    private remoteEditor?: IEditor;
     private initialization?: Promise<void>;
     private closed = false;
-    constructor(container: HTMLElement, service: SettingsService, options: EditorOptions, private readonly remoteFiles?: EditorFactory) {
+    constructor(container: HTMLElement, service: SettingsService, options: EditorOptions) {
         super(container, service, options);
     }
     async render(): Promise<void> {
@@ -28,7 +27,6 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
                 <p class="settings-page__description">${escapeHTML(t('storage.description'))}</p>
             </div></div>
             <div data-storage-section="overview"></div>
-            <div data-storage-section="remote"></div>
             <div data-storage-section="snapshot"></div>
             <div data-storage-section="migration"></div>
             <div data-storage-section="danger"></div>
@@ -37,14 +35,11 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
         this.sections = [new StorageOverviewSection(section('overview')), new SnapshotSection(section('snapshot'), this.service),
             new MigrationSection(section('migration'), this.service), new DangerZoneSection(section('danger'), this.service)];
         await Promise.all(this.sections.map(item => item.init()));
-        if (this.closed || !this.remoteFiles) return;
-        const editor = await this.remoteFiles(section('remote'), this.options);
-        if (this.closed) await editor.destroy(); else this.remoteEditor = editor;
+
     }
     async destroy(): Promise<void> {
         this.closed = true;
         await this.initialization?.catch(() => {});
-        await this.remoteEditor?.destroy(); this.remoteEditor = undefined;
         await Promise.all(this.sections.map(section => section.destroy?.())); this.sections = [];
         await super.destroy();
     }

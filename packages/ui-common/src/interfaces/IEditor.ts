@@ -99,7 +99,19 @@ export interface EditorHostContext {
 }
 
 // ✨ [重构] 提升 fs 和 nodeId 为核心配置
+export interface ConfigurationFormControls<T, TDiscovery> {
+    render(container: HTMLElement, record: T): void;
+    read(record: T): T;
+    tested?(record: T, discovery: TDiscovery): Promise<T>;
+    committed?(): void;
+    failed?(): void;
+    dispose?(): void;
+}
+
 export interface EditorOptions<TSubmission = unknown> {
+    onConversationSession?(sessionId: string): void;
+    conversation?: import('./ConversationControls').ConversationControls;
+    remoteAgents?: import('./ConversationControls').RemoteAgentControls;
     /** Explicit initial input for conversation editors. */
     initialInputState?: { text?: string; agentId?: string };
     /** A project draft is separate from Session history until first submission. */
