@@ -44,6 +44,7 @@ export class ProjectNavigation {
     private offlinePaths = new Set<string>();
     private readonly revealedFiles = new Set<string>();
     private projectChoices: ProjectFolder[] = [];
+    private pendingDeletions = 0;
     constructor(private readonly projects: ProjectService, private readonly ui: () => VFSUIShell | undefined, private readonly actions: Actions) {
         this.syncStatus = new ProjectSyncStatusIndicator(() => {
             if (this.project) void this.actions.syncStatus?.(this.project.project.id).catch(this.actions.report);
@@ -90,8 +91,18 @@ export class ProjectNavigation {
     }
     private async choose(path: string): Promise<void> {
         this.project = path === '/' ? undefined : await this.projects.forFolder(browserTargetFolder(resolveBrowserTarget(path), path));
-        await this.sync(path, { preserveProject: true });
-        await this.actions.navigate?.(path);
+        this.updateSelector();
+        if (this.actions.navigate) await this.actions.navigate(path);
+        else await this.sync(path, { preserveProject: true });
+    }
+    /** Select known project roots immediately; expansion runs after the content is ready. */
+    selectScope(path: string): void {
+        const project = this.projectChoices.find(item => folderBrowserPath(item.path) === path);
+        if (path !== '/' && !project) return;
+        this.cancelPending(); this.path = path; this.session = undefined; this.draftActive = false;
+        if (this.project?.project.id !== project?.project.id) { this.familyVisible = false; this.family = undefined; }
+        this.project = project; this.updateHeader(this.projectChoices, this.pendingDeletions);
+        this.ui()?.setTitle(project?.displayName ?? project?.name ?? t('workbench.allProjects')); this.ui()?.refreshList();
     }
     private showMenu(event: MouseEvent): void {
         const project = this.project;
@@ -143,6 +154,7 @@ export class ProjectNavigation {
         if (revision === this.revision) this.ui()?.refreshList();
     }
     private updateHeader(projects: ProjectFolder[], pending: number): void {
+        this.pendingDeletions = pending;
         this.projectChoices = projects;
         const project = this.project;
         this.syncStatus.update(project && this.actions.syncIndicator?.(project.project.id));

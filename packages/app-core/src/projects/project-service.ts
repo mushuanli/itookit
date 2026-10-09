@@ -405,9 +405,12 @@ export class ProjectService {
         return path;
     }
     async openFiles(folder: string) {
-        const project = (await this.list()).find(item => item.path === folder);
+        const catalog = await this.list(), project = catalog.find(item => item.path === folder);
         if (!project) throw new FSError('ENOENT', 'Project not found');
-        await this.assertIndependent(project);
+        return this.openProjectFiles(project, catalog);
+    }
+    private async openProjectFiles(project: ProjectFolder, catalog: readonly ProjectFolder[]) {
+        await this.assertIndependent(project, this.remoteMounts?.list(project.project.id) ?? [], catalog);
         if (this.fileSource(project).kind === 'remote' && !this.remoteMounts?.list(project.project.id).some(mount => mount.at === '/'))
             throw new FSError('EACCES', t('project.error.remoteSourceMissing'));
         const open = () => this.directories.openDirectory(project.project.directory);
@@ -426,8 +429,8 @@ export class ProjectService {
         return { ...project, project: { ...project.project, directory: remote ? `project:${project.project.id}` : project.project.directory,
             source: { kind: remote ? 'remote' : 'local' } } };
     }
-    async assertIndependent(project: ProjectFolder, mounts = this.remoteMounts?.list(project.project.id) ?? []): Promise<void> {
-        const catalog = await this.list();
+    async assertIndependent(project: ProjectFolder, mounts = this.remoteMounts?.list(project.project.id) ?? [], knownCatalog?: readonly ProjectFolder[]): Promise<void> {
+        const catalog = knownCatalog ?? await this.list();
         const location = projectFileLocation(project, '/', mounts);
         const roots: ProjectFileRoot[] = catalog.filter(item => item.project.id !== project.project.id)
             .map(item => ({ projectId: item.project.id, name: item.name,
@@ -447,9 +450,9 @@ export class ProjectService {
     }
     /** The editor and tools share canonical project paths; openFiles remains a source view. */
     async openWorkspace(folder: string) {
-        const project = await this.forFolder(folder);
-        if (!project || project.path !== folder) throw new FSError('ENOENT', 'Project not found');
-        const source = await this.openFiles(folder);
+        const catalog = await this.list(), project = catalog.find(item => item.path === folder);
+        if (!project) throw new FSError('ENOENT', 'Project not found');
+        const source = await this.openProjectFiles(project, catalog);
         try {
             const fs = createFileSystemView({ viewId: `project-workspace:${source.fs.viewId}`, mounts: [
                 { mountId: 'workspace', at: WORKSPACE_PATH, fs: source.fs, access: 'rw' },

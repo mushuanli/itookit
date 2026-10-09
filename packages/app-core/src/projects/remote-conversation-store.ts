@@ -13,10 +13,14 @@ export class RemoteConversationStore {
         if (record.draft !== undefined && (typeof record.draft !== 'string' || record.draft.length > 1024 * 1024)) throw new FSError('EINVAL', 'Invalid remote input draft');
         if (record.sessionId !== undefined && typeof record.sessionId !== 'string' || record.pending &&
             (!record.pending.requestId || typeof record.pending.epoch !== 'string' || typeof record.pending.operation !== 'string')) throw new FSError('EINVAL', 'Invalid remote conversation recovery');
+        if (record.deletedSessionIds !== undefined && (!Array.isArray(record.deletedSessionIds) || record.deletedSessionIds.length > 16401
+            || record.deletedSessionIds.some(id => typeof id !== 'string' || !id))) throw new FSError('EINVAL', 'Invalid native deletion recovery');
         validateAttachments(record.draftAttachments);
         return record;
     }
     async save(record: HarnessRecovery): Promise<void> {
+        if (record.deletedSessionIds !== undefined && (!Array.isArray(record.deletedSessionIds) || record.deletedSessionIds.length > 16401
+            || record.deletedSessionIds.some(id => typeof id !== 'string' || !id))) throw new FSError('EINVAL', 'Invalid native deletion recovery');
         validateAttachments(record.draftAttachments);
         if (!await this.fs.driver.exists(this.path)) {
             try { await this.fs.driver.createFile({parentPath: '/etc/fs', name: 'harness-conversations.seq', type: 'seqfile', recursive: true}); }

@@ -21,6 +21,32 @@ async function readSession(runtime: ApplicationRuntime, id: string, path: string
     try { return await owner.vfs.readFile(path); } finally { await owner.release(); }
 }
 
+it('reads a directory header and rows from one workspace and one projection', async () => {
+    const r = await setup(), project = (await r.projects.current())!, path = folderBrowserPath(project.path) + '/@files';
+    await r.browser.fs.driver.createFile({parentPath: path, name: 'fast.md', content: 'Ready'});
+    const open = vi.spyOn(r.projects, 'openWorkspace'), favorites = vi.spyOn(r.projects.favorites, 'list');
+    const directory = await r.browser.readFileDirectory(path);
+    expect(open).toHaveBeenCalledOnce(); expect(favorites).toHaveBeenCalledOnce();
+    expect(directory.node).toMatchObject({path, parentPath: folderBrowserPath(project.path), type: 'directory', metadata: {_fixedEntry: true, _readOnly: false}});
+    expect(directory.nodes.map(node => node.name)).toContain('fast.md');
+});
+
+it('reuses the catalog when opening a workspace and reuses a caller-owned directory source', async () => {
+    const r = await setup(), project = (await r.projects.current())!, path = folderBrowserPath(project.path) + '/@files';
+    const catalog = vi.spyOn(r.projects, 'list'), owner = await r.projects.openWorkspace(project.path);
+    expect(catalog).toHaveBeenCalledOnce();
+    const node = (await owner.fs.driver.getNode('/workspace'))!;
+    const getNode = vi.spyOn(owner.fs.driver, 'getNode'), dispose = vi.spyOn(owner, 'dispose');
+    const open = vi.spyOn(r.projects, 'openWorkspace'); open.mockClear();
+    try {
+        expect((await r.browser.readFileDirectory(path, {fs: owner.fs, node})).node.path).toBe(path);
+        expect(getNode).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled(); expect(dispose).not.toHaveBeenCalled();
+        const controller = new AbortController(); controller.abort();
+        await expect(r.browser.readFileDirectory(path, {signal: controller.signal})).rejects.toMatchObject({code: 'ECANCELLED'});
+        expect(open).not.toHaveBeenCalled();
+    } finally {await owner.dispose();}
+});
+
 it('does not relocate an unknown project owner into the currently selected project', async () => {
     const r = await setup(), current = (await r.projects.current())!;
     const root = await r.vfs.openFileSystem('/');

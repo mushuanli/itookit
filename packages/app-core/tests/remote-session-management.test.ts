@@ -58,3 +58,15 @@ it('manages native metadata through the journal and updates an existing favorite
     await expect(manageRemoteSession(projects, '/P', 'codex', 's', {kind: 'archive'})).rejects.toMatchObject({code: 'EBUSY'});
     expect(controls.archive).not.toHaveBeenCalled(); expect(controls.close).toHaveBeenCalledTimes(2);
 });
+
+it('cleans deleted native favorites after commitment and can finish local cleanup without replay', async () => {
+    const {projects} = fixture(), result = {title: 'Removed', archived: true, pending: false, deletedSessionIds: ['s', 'child']};
+    const controls = {read: vi.fn(async () => ({pending: false})), delete: vi.fn(async () => result), close: vi.fn(async () => {})};
+    projects.remoteMounts!.projectConversation = vi.fn(async () => controls) as never;
+    projects.favorites = {deleteNativeSessions: vi.fn(async () => {})} as never;
+    await manageRemoteSession(projects, '/P', 'codex', 's', {kind: 'delete'});
+    expect(projects.favorites!.deleteNativeSessions).toHaveBeenCalledWith('p', expect.objectContaining({connectionId: 'mcp', serverId: 'server', sessionId: 's'}), ['s', 'child']);
+    controls.read.mockResolvedValue(result);
+    await manageRemoteSession(projects, '/P', 'codex', 's', {kind: 'delete'});
+    expect(controls.delete).toHaveBeenCalledOnce(); expect(controls.close).toHaveBeenCalledTimes(2);
+});

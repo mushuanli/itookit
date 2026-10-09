@@ -78,7 +78,7 @@ export class RemoteConversationEditor extends BaseSettingsEditor<ConversationCon
         this.view.setSessionTimes(snapshot.createdAt, snapshot.updatedAt);
         const status = conversationStatus(snapshot.observation ?? {execution: snapshot.requests.some(r => r.kind === 'approval') ? 'waiting-approval'
             : snapshot.requests.some(r => r.kind === 'input') ? 'waiting-input' : snapshot.active || snapshot.canInterrupt ? 'running' : 'unknown',
-            connection: snapshot.disconnected ? 'offline' : 'online', stale: snapshot.gap, receiptUnknown: snapshot.pending, source: 'history', observedAt: 0});
+            updatedAt: snapshot.updatedAt, connection: snapshot.disconnected ? 'offline' : 'online', stale: snapshot.gap, receiptUnknown: snapshot.pending, source: 'history', observedAt: 0});
         this.view.setStatus(status.text, status.indicator);
         this.updateControls();
         this.queueHistory();

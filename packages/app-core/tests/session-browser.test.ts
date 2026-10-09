@@ -27,6 +27,13 @@ async function setup(kernelOverrides: Record<string, unknown> = {}) {
     return { a, b, files, repository, browser, kernel, lifecycle };
 }
 describe('Session browser projection', () => {
+    it('reads Session directory rows and their header with one file lease', async () => {
+        const f = await setup(), acquire = vi.spyOn(f.files, 'acquireFiles');
+        const directory = await f.browser.readFileDirectory(`/${f.a}/files`);
+        expect(acquire).toHaveBeenCalledOnce();
+        expect(directory.node).toMatchObject({path: `/${f.a}/files`, parentPath: `/${f.a}`, metadata: {title: '文件'}});
+        expect(directory.nodes.map(node => node.name)).toContain('workspace');
+    });
     it('emits canonical folder rename paths and keeps Session identities stable', async () => {
         const f = await setup();
         await f.repository.createFolder('/原项目文档');

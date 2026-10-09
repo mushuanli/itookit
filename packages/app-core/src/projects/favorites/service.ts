@@ -48,6 +48,11 @@ export class ProjectFavorites {
     async moveFiles(projectId: string, moves: readonly FavoriteMove[]): Promise<void> {
         await this.change(projectId, items => moveFavorites(items, moves));
     }
+    async deleteNativeSessions(projectId: string, target: Extract<ProjectFavoriteTarget, {kind: 'remote-session'}>, ids: readonly string[]): Promise<void> {
+        validateTarget(target);
+        const keys = new Set(ids.map(sessionId => favoriteKey({...target, sessionId})));
+        await this.change(projectId, items => items.filter(item => !keys.has(favoriteKey(item.target))));
+    }
     async updateNativeSession(projectId: string, target: Extract<ProjectFavoriteTarget, {kind: 'remote-session'}>, title: string, archived: boolean): Promise<void> {
         validateTarget(target);
         const key = favoriteKey(target);

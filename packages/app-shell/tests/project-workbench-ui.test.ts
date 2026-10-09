@@ -42,8 +42,10 @@ it('creates project Sessions from the selected project and edits its files in th
         await vi.waitFor(() => expect(workbench.getActiveResourceId()).toBe(projectPath));
         const projectPanel = main.querySelector('.workbench-tabs__panel:not([hidden])')!;
         await vi.waitFor(() => expect(projectPanel.querySelector(`[data-resource-id="${projectPath}/@files"]`)).not.toBeNull());
-        expect(selector.value).toBe('/');
-        expect(sidebar.querySelector(`[data-item-id="${folderBrowserPath((await projects.personal()).path)}"]`)).not.toBeNull();
+        expect(selector.value).toBe(projectPath);
+        expect(sidebar.querySelector(`[data-item-id="${folderBrowserPath((await projects.personal()).path)}"]`)).toBeNull();
+        selector.value = '/'; selector.dispatchEvent(new Event('change', {bubbles: true}));
+        await vi.waitFor(() => expect(workbench.getActiveResourceId()).toBe('/'));
         await workbench.startSessionDraft(projectPath);
         expect(selector.value).toBe('/');
         expect(sidebar.querySelector(`[data-item-id="${folderBrowserPath((await projects.personal()).path)}"]`)).not.toBeNull();
@@ -96,7 +98,7 @@ it('creates project Sessions from the selected project and edits its files in th
         expect(activePanel().querySelector('.workbench-directory__table')?.textContent).toContain('notes.md');
         expect(activePanel().textContent).toContain('修改时间');
         expect(activePanel().querySelector<HTMLButtonElement>('.workbench-directory__name')?.title).toContain('创建时间');
-        expect(navigation.querySelector(`[data-item-id="${projectPath}/@files/notes.md"]`)).not.toBeNull();
+        await vi.waitFor(() => expect(navigation.querySelector(`[data-item-id="${projectPath}/@files/notes.md"]`)).not.toBeNull());
         await workbench.openResource(projectPath + '/@files/notes.md');
         expect(file.mock.calls.at(-1)![1].initialContent).toBe('research notes');
         const options = file.mock.calls.at(-1)![1];
@@ -183,6 +185,7 @@ it('restores a bookmark inside an unreachable remote project without aborting bo
         await expect(workbench.createResource({ parentPath: folderBrowserPath(remote.path) })).rejects.toThrow();
         await workbench.openResource(folderBrowserPath(remote.path) + '/@files');
         expect(main.inert).toBe(true);
+        expect(workbench.getActiveResourceId()).toBe(folderBrowserPath(remote.path) + '/@files');
         expect(main.textContent).toContain('远程文件无法连接');
         await workbench.openResource(`${folderBrowserPath(await projects.sessionFolder(remote))}/${existing}`);
         expect(main.inert).toBe(false);

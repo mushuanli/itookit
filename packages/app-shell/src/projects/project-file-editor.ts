@@ -17,7 +17,7 @@ interface ProjectFileOptions {
 interface OpenedProjectFile { node: FSNode; editor?: IEditor; context: FileSystemContextOwner; previewCleanup?: () => void }
 
 export async function openProjectFileEditor(projects: ProjectService, target: { folder: string; path: string },
-    load: ViewLoad, options: ProjectFileOptions): Promise<OpenedProjectFile | undefined> {
+    load: ViewLoad, options: ProjectFileOptions): Promise<OpenedProjectFile> {
     let owner: Awaited<ReturnType<ProjectService['openWorkspace']>> | undefined;
     let editor: IEditor | undefined;
     let mount: HTMLElement | undefined;
@@ -28,9 +28,7 @@ export async function openProjectFileEditor(projects: ProjectService, target: { 
         const driver = source.fs.driver;
         const node = await load.read(() => traceBoot('projectFile.type', () => driver.getNode(target.path, { signal: load.signal })));
         if (!node) throw new FSError('ENOENT', 'File not found');
-        if (node.type === 'directory') {
-            await context.release(); owner = undefined; load.check(); return undefined;
-        }
+        if (node.type === 'directory') return {node, context};
         mount = await options.mount(); load.check();
         const large = async () => {
             previewCleanup = await showLargeFilePreview(context, target.path, node.type === 'file' ? node.size : undefined, mount!, load);

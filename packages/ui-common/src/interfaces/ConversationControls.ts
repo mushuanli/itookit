@@ -13,6 +13,8 @@ export interface ConversationSnapshot {
     attachments?: Array<'text' | 'image'>;
     archived?: boolean; canRename?: boolean; canArchive?: boolean; canUnarchive?: boolean;
     observation?: {
+        rawStatus?: string | null;
+        updatedAt?: number | null;
         execution: 'unknown' | 'idle' | 'running' | 'waiting-approval' | 'waiting-input';
         lastResult?: 'completed' | 'failed' | 'cancelled';
         nativeError?: boolean;

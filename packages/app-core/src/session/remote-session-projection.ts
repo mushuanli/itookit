@@ -68,8 +68,8 @@ export class RemoteSessionProjection {
     }
     private management(profile: HarnessProfile, root: ProjectRemoteMount, session: HarnessSession, archived = false) {
         const caps = profile.capabilities;
-        if (root.access !== 'rw' || !caps.rename && !caps.archive && !caps.unarchive) return;
-        return {rename: !!caps.rename, archive: !archived && !!caps.archive && !!session.owned && session.status === 'idle', unarchive: archived && !!caps.unarchive};
+        if (root.access !== 'rw' || !caps.rename && !caps.archive && !caps.unarchive && !caps.delete) return;
+        return {delete: !!caps.delete && (archived && session.status === 'notLoaded' || !!session.owned && session.status === 'idle'), rename: !!caps.rename, archive: !archived && !!caps.archive, archiveDisabled: !(session.status === 'notLoaded' || !!session.owned && session.status === 'idle'), unarchive: archived && !!caps.unarchive};
     }
     private favorite(projectId: string, root: ProjectRemoteMount, profileId: string, sessionId: string): boolean {
         return !!root.serverId && !!root.connectionId && !!root.serverProjectId && !!this.projects?.favorites.has(projectId,

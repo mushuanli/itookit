@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { t } from '@itookit/common';
-import { MemoryBackend, createFileSystemSource } from '@itookit/vfs-core';
-import { createApplicationRuntime, remoteSessionPath } from '@itookit/app-core';
+import { MemoryBackend, createFileSystemSource, FSError } from '@itookit/vfs-core';
+import { createApplicationRuntime, remoteSessionPath, folderBrowserPath } from '@itookit/app-core';
 import { HarnessConversation, type HarnessClient, type ProjectClient } from '@itookit/piagent-driver';
 import { RemoteConversationEditor } from '../../llm-ui/src/shell/RemoteConversationEditor';
 import { SessionWorkbench } from '../src/projects/SessionWorkbench';
@@ -50,6 +50,41 @@ it('browses mounted native history pages, opens their conversations and routes a
         await workbench.start();
         const selector = sidebar.querySelector<HTMLSelectElement>('.workbench-project-navigation select')!;
         const initialScope = selector.value;
+        const localPath = folderBrowserPath((await runtime.projects.current())!.path), remotePath = folderBrowserPath(project.path);
+        await workbench.openResource(localPath);
+        await vi.waitFor(() => expect(selector.disabled).toBe(false));
+        selector.value = remotePath; selector.dispatchEvent(new Event('change', {bubbles: true}));
+        await vi.waitFor(() => expect(workbench.getActiveResourceId()).toBe(remotePath));
+        await vi.waitFor(() => expect(selector.value).toBe(remotePath));
+        await vi.waitFor(() => expect(selector.disabled).toBe(false));
+        selector.value = '/'; selector.dispatchEvent(new Event('change', {bubbles: true}));
+        await vi.waitFor(() => expect(workbench.getActiveResourceId()).toBe('/'));
+        await vi.waitFor(() => expect(sidebar.querySelector(`[data-item-id="${remotePath}"]`)).not.toBeNull());
+        const remoteProjectRow = sidebar.querySelector<HTMLElement>(`[data-item-id="${remotePath}"]`)!;
+        expect(remoteProjectRow).not.toBeNull(); remoteProjectRow.click();
+        await vi.waitFor(() => expect(workbench.getActiveResourceId()).toBe(remotePath));
+        await vi.waitFor(() => expect(selector.value).toBe(remotePath));
+        await vi.waitFor(() => expect(selector.disabled).toBe(false));
+        selector.value = initialScope; selector.dispatchEvent(new Event('change', {bubbles: true}));
+        await vi.waitFor(() => expect(workbench.getActiveResourceId()).toBe(initialScope));
+        const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const driver = (workbench as unknown as {navigationFiles: {driver: {getChildren(path: string): Promise<unknown[]>}}}).navigationFiles.driver;
+        const children = driver.getChildren.bind(driver), failure = new FSError('EIO', 'Remote directory unavailable');
+        const listFailure = vi.spyOn(driver, 'getChildren').mockImplementation(async path => {
+            if (path === remotePath) throw failure;
+            return children(path);
+        });
+        try {
+            await expect(workbench.openResource(remotePath, {reload: true})).rejects.toBe(failure);
+            expect(workbench.getActiveResourceId()).toBe(remotePath);
+            expect(selector.value).toBe(remotePath);
+            expect(main.querySelector('.workbench-tabs__panel:not([hidden])')!.textContent).toContain('Remote directory unavailable');
+            expect(diagnostic.mock.calls.some(([message, details]) => String(message).includes('[itookit/pi-agent]')
+                && details?.stage === 'project-open' && details?.projectId === project.project.id && details?.code === 'EIO')).toBe(true);
+        } finally {listFailure.mockRestore(); diagnostic.mockRestore();}
+        await workbench.openResource(remotePath);
+        expect(workbench.getActiveResourceId()).toBe(remotePath);
+        await workbench.openResource(initialScope);
         const activePanel = () => main.querySelector<HTMLElement>('.workbench-tabs__panel:not([hidden])')!;
         const profilePath = remoteSessionPath(project.path,'codex'), morePath = profilePath + '/@page:older%2Fbefore%2B%3D';
         await workbench.openResource(profilePath, {preserveProject: true});
@@ -69,6 +104,7 @@ it('browses mounted native history pages, opens their conversations and routes a
         expect(selector.value).toBe(initialScope);
         expect(main.textContent).toContain('Remote native history');
         expect(peer.read).toHaveBeenCalledWith('codex','older',expect.anything());
+        await vi.waitFor(() => expect(selector.disabled).toBe(false));
         selector.value = '/'; selector.dispatchEvent(new Event('change', {bubbles: true}));
         await vi.waitFor(() => expect(workbench.getActiveResourceId()).toBe('/'));
         const ui = (workbench as unknown as {sidebarUI: VFSUIShell}).sidebarUI;

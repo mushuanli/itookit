@@ -39,7 +39,7 @@ it('copies and moves a selected file between project file roots using the shared
         try { expect(await target.fs.driver.readContent('/workspace/a.md', { encoding: 'utf-8' })).toBe('project content'); }
         finally { await target.dispose(); }
         const selectedProject = sidebar.querySelector('select')!.value;
-        await (workbench as any).sidebarUI.selectPath(to + '/@files/a.md');
+        await workbench.openResource(to + '/@files/a.md');
         await vi.waitFor(() => expect(workbench.getActiveResourceId()).toBe(to + '/@files/a.md'));
         expect(file.mock.calls.at(-1)![1].initialContent).toBe('project content');
         expect(sidebar.querySelector('select')!.value).toBe(selectedProject);

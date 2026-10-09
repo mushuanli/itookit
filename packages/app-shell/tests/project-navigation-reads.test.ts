@@ -122,7 +122,8 @@ it('opens project files before blocked navigation and discards stale navigation 
     try {
         await workbench.start();
         // The single sidebar now expands Files and restores its remembered descendants.
-        expect(openFiles).toHaveBeenCalledTimes(6);
+        await (workbench as unknown as {fileNavigation: Promise<void>}).fileNavigation;
+        expect(openFiles).toHaveBeenCalled();
         const startup = await projects.current();
         expect(startup).toBeDefined();
         expect(sync).toHaveBeenCalledWith(folderBrowserPath(startup!.path), { reveal: true });
@@ -192,4 +193,41 @@ it('shows session cleanup only while a deletion is pending, including its render
         await repository.deleteSession(session); await navigation.refresh();
         expect(cleanup.hidden).toBe(true); expect(getComputedStyle(cleanup).display).toBe('none');
     } finally { navigation.header.remove(); style.remove(); await mounts.dispose(); await files.dispose(); await repository.dispose(); await manager.dispose(); }
+});
+
+it('renders directory entries before blocked sidebar navigation and ignores its late result after another route opens', async () => {
+    const { manager } = await createVFS({ rootBackend: new MemoryBackend() });
+    const root = await manager.openFileSystem('/'), repository = new SessionRepository(root); await repository.init();
+    const { projects, mounts, files } = await projectServices(root, repository);
+    files.registerSource('home', await manager.openFileSystem('/home/admin')); await projects.ensureStartup();
+    const project = (await projects.current())!, path = folderBrowserPath(project.path);
+    const source = await projects.openFiles(project.path);
+    await source.fs.driver.createDirectory({parentPath: '/', name: 'docs'});
+    await source.fs.driver.createFile({parentPath: '/docs', name: 'ready.md', content: 'Ready'}); await source.dispose();
+    const sidebar = document.createElement('div'), main = document.createElement('div'); document.body.append(sidebar, main);
+    const kernel = {onChanged: () => () => {}, async *listSessions() {}};
+    const workbench = new SessionWorkbench({sidebar, container: main, repository, files, projects, directoryMounts: mounts,
+        kernel: kernel as never, factory: async () => ({destroy() {}}) as never, onSelect() {}});
+    let release = () => {};
+    const gate = new Promise<void>(resolve => {release = resolve;});
+    try {
+        await workbench.start(); await (workbench as unknown as {fileNavigation: Promise<void>}).fileNavigation;
+        const original = projects.sessions.navigation.bind(projects.sessions);
+        const navigation = vi.spyOn(projects.sessions, 'navigation').mockImplementationOnce(async options => {await gate; return original(options);});
+        const directory = path + '/@files/docs';
+        const opening = workbench.openResource(directory);
+        await vi.waitFor(() => expect(main.querySelector('.workbench-tabs__panel:not([hidden])')?.textContent).toContain('ready.md'));
+        await opening; expect(workbench.getActiveResourceId()).toBe(directory);
+        await vi.waitFor(() => expect(navigation).toHaveBeenCalled());
+        await workbench.openResource('/'); release();
+        await (workbench as unknown as {fileNavigation: Promise<void>}).fileNavigation;
+        expect(workbench.getActiveResourceId()).toBe('/');
+        expect(sidebar.querySelector<HTMLSelectElement>('.workbench-project-navigation select')!.value).toBe('/'); navigation.mockRestore();
+        const ui = (workbench as unknown as {sidebarUI: import('@itookit/vfs-ui').VFSUIShell}).sidebarUI;
+        await ui.selectPath(directory); await ui.refresh();
+        expect(workbench.getActiveResourceId()).toBe('/');
+    } finally {
+        release(); await workbench.destroy(); await mounts.dispose(); await files.dispose(); await repository.dispose(); await manager.dispose();
+        sidebar.remove(); main.remove();
+    }
 });

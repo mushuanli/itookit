@@ -6,7 +6,7 @@ export type { BrowserTarget } from './browser-routes';
 import { WORKSPACE_PATH, projectRelativePath } from '../vfs/workspace-namespace';
 import { sessionFamilyRoots } from '../projects/session-family';
 import { containedProjectRoots, projectFileLocation, type ProjectFileLocation, type ProjectFileRoot } from '../projects/file-location';
-import { transferFileSystemEntry, checkOperation, createFileSystemSource, FSError, type FSNode, type IStorageBackend, type IFileSystem } from '@itookit/vfs-core';
+import { transferFileSystemEntry, checkOperation, createFileSystemSource, FSError, type FSNode, type IStorageBackend, type IFileSystem, type OperationOptions } from '@itookit/vfs-core';
 import { t, ENTITY_ICONS, ACTION_ICONS, fileTypeIcon } from '@itookit/common';
 import type { ISessionRepository, SessionFolder } from '@itookit/llm-session';
 import type { EventEnvelope, Kernel, TaskRecord } from '@itookit/durable-kernel';
@@ -61,8 +61,9 @@ export interface SessionBrowserDependencies {
     /** Defaults to a service over `repository` and `kernel`. */
     lifecycle?: SessionLifecycleService;
     /** Optional host presentation policy. Raw project/Session file APIs are unaffected. */
-    filterDisplayedFiles?(fs: IFileSystem, nodes: FSNode[]): Promise<FSNode[]>;
+    filterDisplayedFiles?(fs: IFileSystem, nodes: FSNode[], signal?: AbortSignal): Promise<FSNode[]>;
 }
+interface FileDirectoryOptions extends OperationOptions { fs?: IFileSystem; node?: FSNode }
 class BrowserBackend implements IStorageBackend {
     private get remoteSessions() { return new RemoteSessionProjection(this.deps.projects); }
     readonly name = 'session-browser';
@@ -146,10 +147,10 @@ class BrowserBackend implements IStorageBackend {
         const readOnly = node.metadata?._readOnly === true || (await fs.capabilitiesAt(node.path)).readonly;
         const routePath = (path: string) => prefix.endsWith('/@files') ? projectRelativePath(path) : path;
         const favorite = !!projection?.favorite(node.path, node.type === 'directory' ? 'directory' : 'file');
-        const path = routePath(node.path), parent = node.parentPath ? routePath(node.parentPath) : '/';
+        const path = routePath(node.path), parent = path !== '/' && node.parentPath ? routePath(node.parentPath) : '/';
         const protectedRoots = projection && node.type === 'directory' && (node.path === WORKSPACE_PATH || node.path.startsWith(WORKSPACE_PATH + '/'))
             ? containedProjectRoots(projection.location(node.path), projection.roots) : [];
-        return { ...node, ...(node.type === 'file' && node.assetDirPath ? { assetDirPath: prefix + routePath(node.assetDirPath) } : {}), path: prefix + (path === '/' ? '' : path), parentPath: path === '/' ? prefix : prefix + (parent === '/' ? '' : parent), metadata: { ...node.metadata, _favorite: favorite, _showAll: true, _fileDetails: true, _readOnly: readOnly,
+        return { ...node, ...(node.type === 'file' && node.assetDirPath ? { assetDirPath: prefix + routePath(node.assetDirPath) } : {}), path: prefix + (path === '/' ? '' : path), parentPath: path === '/' ? prefix.slice(0, prefix.lastIndexOf('/')) || '/' : prefix + (parent === '/' ? '' : parent), metadata: { ...node.metadata, _favorite: favorite, _showAll: true, _fileDetails: true, _readOnly: readOnly,
             ...(protectedRoots.length ? { _fixedEntry: true, projectStorageRoots: protectedRoots.map(root => root.projectId),
                 navigationDescription: t('project.error.storageRoot', { projects: protectedRoots.map(root => root.name).join(', ') }) } : {}),
             ...(node.metadata?.unavailable ? { _disabled: true, navigationDescription: t('remote.state.offline') } : {}) } };
@@ -283,15 +284,43 @@ class BrowserBackend implements IStorageBackend {
         throw new FSError('ENOTDIR', 'Task is a history entry');
     }
     private async listFiles(path: string, target: FileTarget): Promise<FSNode[]> {
+        return this.withFiles(target, fs => this.fileNodes(path, target, fs));
+    }
+    private async fileNodes(path: string, target: FileTarget, fs: IFileSystem, options?: OperationOptions,
+        projection = this.fileProjectionFor(target)): Promise<FSNode[]> {
         const prefix = filesBrowserPrefix(path);
-        const projection = await this.fileProjection(await this.filesFolder(target), target.kind === 'project-files');
-        const nodes = await this.withFiles(target, async fs => {
-            const raw = await fs.driver.getChildren(target.path);
-            const visible = this.deps.filterDisplayedFiles ? await this.deps.filterDisplayedFiles(fs, raw) : raw;
-            return Promise.all(visible.filter(node => node.path !== '/workspace/.mindos' && !this.isOtherProjectRoot(node, projection))
-                .map(node => this.mapped(fs, node, prefix, projection)));
-        });
-        return nodes.map(node => this.withMountStatus(node, prefix, target, projection));
+        const pending = [projection, fs.driver.getChildren(target.path, options)] as const;
+        let state: FileProjection | undefined, raw: FSNode[];
+        try { [state, raw] = await Promise.all(pending); } finally { await Promise.allSettled(pending); }
+        const visible = this.deps.filterDisplayedFiles ? await this.deps.filterDisplayedFiles(fs, raw, options?.signal) : raw;
+        const nodes = await Promise.all(visible.filter(node => node.path !== '/workspace/.mindos' && !this.isOtherProjectRoot(node, state))
+            .map(node => this.mapped(fs, node, prefix, state)));
+        return nodes.map(node => this.withMountStatus(node, prefix, target, state));
+    }
+    private async fileProjectionFor(target: FileTarget): Promise<FileProjection | undefined> {
+        return this.fileProjection(await this.filesFolder(target), target.kind === 'project-files');
+    }
+    /** One source and projection for the directory header and its rows. */
+    async readFileDirectory(path: string, options: FileDirectoryOptions = {}): Promise<{node: FSNode; nodes: FSNode[]}> {
+        const target = resolveBrowserTarget(path);
+        if (!isFileTarget(target)) throw new FSError('ENOTDIR', 'Not a file directory');
+        checkOperation(options);
+        const {fs: supplied, node: known, ...operation} = options;
+        const read = async (fs: IFileSystem) => {
+            const projection = this.fileProjectionFor(target);
+            const pending = [known ?? fs.driver.getNode(target.path, operation), this.fileNodes(path, target, fs, operation, projection), projection] as const;
+            let node: FSNode | null, nodes: FSNode[], state: FileProjection | undefined;
+            try { [node, nodes, state] = await Promise.all(pending); } finally { await Promise.allSettled(pending); }
+            checkOperation(options);
+            if (!node) throw new FSError('ENOENT', 'Directory not found');
+            if (node.type !== 'directory') throw new FSError('ENOTDIR', 'Not a directory');
+            const mapped = await this.mapped(fs, node, filesBrowserPrefix(path), state);
+            const root = target.kind === 'project-files' ? target.path === WORKSPACE_PATH : target.path === '/';
+            const directory = root ? {...mapped, metadata: {...mapped.metadata,
+                ...(target.kind === 'project-files' ? {_fixedEntry: true} : {}), title: t('project.files')}} : mapped;
+            return {node: this.withMountStatus(directory, filesBrowserPrefix(path), target, state), nodes};
+        };
+        return supplied ? read(supplied) : this.withFiles(target, read);
     }
     private isOtherProjectRoot(node: FSNode, projection?: FileProjection): boolean {
         if (!projection || node.type !== 'directory' || !(node.path === WORKSPACE_PATH || node.path.startsWith(WORKSPACE_PATH + '/'))) return false;
@@ -591,5 +620,7 @@ export async function createSessionBrowser(deps: SessionBrowserDependencies) {
         const segment = target.kind === 'folder' ? FOLDER_SEGMENT_PREFIX + encodeURIComponent(name) : name;
         await rename(path, segment, options);
     };
-    return Object.assign(owner, { transferItems: (mode: 'copy' | 'move', ids: string[], destination: string) => backend.transfer(mode, ids, destination), invalidateNavigation: () => backend.invalidateNavigation() });
+    return Object.assign(owner, { transferItems: (mode: 'copy' | 'move', ids: string[], destination: string) => backend.transfer(mode, ids, destination),
+        readFileDirectory: (path: string, options?: FileDirectoryOptions) => backend.readFileDirectory(path, options),
+        invalidateNavigation: () => backend.invalidateNavigation() });
 }

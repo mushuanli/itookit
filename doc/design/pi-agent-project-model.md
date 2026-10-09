@@ -55,6 +55,51 @@ itookit 保存自己的项目 ID 与服务端项目引用，显示「服务器�
 
 ## itookit 连接诊断
 
+### 目录显示：C4 组件与等待分析
+
+```mermaid
+C4Component
+    title 工作台远程目录显示（优化后）
+    Person(user, "用户", "点击目录或使用键盘激活")
+    Container_Boundary(client, "MindOS 客户端") {
+        Component(view, "SessionWorkbench", "原生 DOM / TypeScript", "目录正文、标签、取消过期读取")
+        Component(sidebar, "ProjectNavigation / VFSUI", "原生 DOM", "后台展开、选择与刷新")
+        Component(browser, "SessionBrowser", "app-core", "一次投影目录节点及条目")
+        Component(project, "ProjectService", "app-core", "项目目录、重叠校验、授权文件视图")
+        Component(ignore, "directory-visibility", "app-shell / FileIgnoreFilter", "并行祖先规则读取、保留忽略语义")
+        Component(http, "HttpFSBackend", "piagent-driver", "项目授权 HTTP 文件读取、stat 批处理")
+    }
+    System_Ext(remote, "pi-agent 文件服务", "项目授权、目录分页、文件属性及规则内容")
+    Rel(user, view, "激活资源")
+    Rel(view, browser, "readFileDirectory：目录节点与条目")
+    Rel(view, sidebar, "后台同步，不阻塞正文")
+    Rel(sidebar, browser, "读取树节点；刷新不发起打开")
+    Rel(browser, project, "获取一个授权文件视图及项目投影")
+    Rel(browser, ignore, "过滤已列出的节点")
+    Rel(project, http, "复用远程来源，装配文件视图")
+    Rel(ignore, http, "各祖先规则并行：stat 后按需读取字节")
+    Rel(browser, http, "目录 stat 与 entries 并行")
+    Rel(http, remote, "首次来源初始化；目录分页、stat、content", "HTTP")
+```
+
+HTTP 关系经过授权 VFS 视图；图中的组件关系不是 UI 绕过 VFS 直接访问远程服务。组织项目页展示“文件、收藏、会话”等入口，物理文件目录页读取项目目录条目，两者不要混为一个请求。
+
+| 阶段 | 原等待或冗余流程 | 当前实现 |
+| --- | --- | --- |
+| 资源打开 | 点击与刷新共用选中事件；刷新可能重新打开旧资源 | 启动时恢复选中项；之后只用资源激活事件打开。移除 `selectionSync` 及重复导航抑制逻辑 |
+| 已知目录 | 先进入文件编辑器查询类型，再切到目录页面 | 从侧栏、目录列表和文件根取得目录提示，直接读取目录；仍由真实源验证类型 |
+| 未知深链 | stat 后释放文件视图，再重新打开读取目录 | 识别为目录后保留已开的视图与节点，目录完成或失败时释放一次 |
+| 目录头与行 | 分别获取项目投影、收藏、文件视图；串行类型查询再列目录 | `readFileDirectory` 共用一个视图及投影；stat、entries、项目投影并行，已取得的 stat 不再查询 |
+| 项目文件视图 | `forFolder`、`openFiles`、重叠检查分别读取目录清单 | 同一次打开共用清单，保留来源与重叠校验 |
+| 忽略规则 | 每次过滤递归串行读取祖先；规则文件查询类型、属性，文本读取再触发类型检查 | 祖先规则并行，展示策略每个规则文件只调用一次属性查询及一次原始字节读取；同次调用按路径去重，VFS 保留必要校验 |
+| HTTP stat 批次 | VFS 路径校验可能在同一批次多次提交相同祖先路径 | 同一批次按路径去重，向每个订阅者分发对应结果；订阅者取消与期限仍独立，不跨批次缓存 |
+| 权限 | 映射节点已有只读状态，正文再查浏览器投影的 capability | 使用授权来源映射出的只读/禁用状态，保留行操作策略；实际写入仍由源授权校验 |
+| 刷新 | 列表返回前等待侧栏刷新与展开 | 条目返回后后台刷新侧栏，不再额外展开 |
+
+若有 K 个祖先目录、其中 S 个包含 `.gitignore`，展示策略调用 K 次 `getNode` 和 S 次原始内容读取；不查询每个普通文件的内容。VFS 读取仍验证文件类型，挂载视图仍检查路径中的链接，实际 HTTP stat 数量不能直接等同于 K。祖先请求同时启动，共享同次读取的 Promise，不跨次缓存，因此外部修改、删除规则文件会在下次目录读取生效。挂载的 discovery root 仍限制规则读取范围，保留父规则、否定规则、已忽略父目录及无内置默认排除的语义。投机读取的错误只有在规则实际被过滤器使用时传播；全部读取结束后才释放文件视图。
+
+已知目录的正文路径为：获取授权视图 → 并行目录 stat / entries / 项目投影 → 并行祖先规则 → 节点映射 → 渲染。首次来源初始化与非在线连接的有界探测仍需要等待；大目录仍按协议读完分页，不伪造完成。`projectDirectory.read` 记录正文总耗时，`projectFile.navigation` 记录后台导航耗时。测试验证源获取次数、规则请求数量与并行启动、修改后的刷新、取消与故障、只读创建限制以及侧栏刷新不会打开旧资源；真实远程网络的耗时需现场观测，不能由单元测试推断。
+
 远程项目持久保存 `connectionId`，运行时从工具箱 MCP 配置投影连接。原来的 `[ENOENT] fs: Remote file system not found` 来自本地连接查询，不能据此判断 pi-agent 上的目录或原生 session 已丢失。配置存在但未通过 pi-agent 能力验证时也不会进入连接投影。
 
 连接访问现使用结构化 `RemoteConnectionUnavailableError`，区分 `mcp-not-found`、`catalog-not-loaded`、`auth-missing`、`extension-missing`、`invalid-descriptor`、`endpoint-mismatch`、`invalid-endpoint` 和 `unsupported-transport`。界面显示配置名称与修复提示；目录说明及菜单生成容忍暂不可用的连接。异步 harness、连接检测、能力查询和目录浏览会先恢复当前引用的 MCP 配置，不按名称或服务器地址猜测并重绑项目。
@@ -192,13 +237,13 @@ API Key 通过既有 MCP 配置持久保存，启动时恢复到 piagent-driver 
 
 ## 原生状态观察与项目检索
 
-`HarnessObservation` 分离 execution（unknown/idle/running/waiting-approval/waiting-input）、lastResult、原生 systemError、连接、时效、receipt 未知及控制能力。列表保留 statusDetails.activeFlags；未知枚举退化为 unknown。`HarnessStatusObserver` 共享有界列表和 profile 事件，不读取每行完整历史，不 resume/adopt。app-core 的 `RemoteSessionStatus` 按项目完整 grant 身份共享订阅，授权变更立即使缓存失效；隐藏视图和项目退出释放订阅。正文、侧栏及标签使用同一状态解释。独立 Codex CLI 的 `notLoaded` 表示未知，不能推断完成或获得控制权。
+`HarnessObservation` 分离 execution（unknown/idle/running/waiting-approval/waiting-input）、lastResult、原生 systemError、连接、时效、receipt 未知及控制能力。列表保留 statusDetails.activeFlags；未知枚举退化为 unknown。`HarnessStatusObserver` 共享有界列表和 profile 事件，不读取每行完整历史，不 resume/adopt。app-core 的 `RemoteSessionStatus` 按项目完整 grant 身份共享订阅，授权变更立即使缓存失效；隐藏视图和项目退出释放订阅。正文、侧栏及标签使用同一状态解释。独立 Codex CLI 的 `notLoaded` 保持 execution=unknown，界面显示“未加载 · 外部运行状态不可见”；原生 idle 显示“就绪”，active 与审批/输入等待使用原生状态及请求证据。不能推断外部执行已完成或获得控制权。
 
 `project_search` 接收 projectId/revision/query/mode（path/content），固定 rg argv、字面匹配、默认忽略大小写，复用只读 pinned Bubblewrap 项目视图及 mount 遮蔽，禁止网络、隐藏/私有目录、二进制、链接跟随及原生 home。遵守 gitignore，最多 100 条命中、2 MiB 输出、2 MiB 单文件、10 秒和 4 个并发；stderr/隔离失败明确报不可用，无 rg 明确降级。超限返回 truncated，不承诺续页。
 
 `harness_session_search` 通过 Codex 插件遍历授权会话与解析后的用户/assistant 文本及命令摘要，不全扫 home。查询限定 profile/project/archived，最多 20 页会话、每会话 64 页历史、16 MiB、100 条命中、15 秒及 2 个并发。结果保留 sessionId/turnId/itemId；授权和 revision 在返回前再核对。旧服务不支持时返回能力不可用。
 
-工作台正式异步搜索视图区分文件路径、文件正文、原生标题、原生正文及归档范围，取消旧查询、丢弃旧响应、返回身份校验后导航；较早原生命中自动加载历史并定位。已注册项目的附加挂载通过完整远程身份匹配提供来源导航，普通目录挂载不授予原生控制。远程收藏包含 MCP/server/project/profile/session 身份，失效绑定不回退到同名服务器。归档视图只读；导出 `mindos-native-history` v1 JSON 保留原生来源和摘要历史，executable=false，不是本地 Kernel bundle。侧栏提供只读原生家族导航。Codex 已声明 rename/archive/unarchive 和 text/image 附件能力。原生标题直接通过 thread/name/set 修改；归档仅允许本服务持有且明确 idle 的会话，归档后释放所有权；恢复归档不 resume、不发送 turn。以上操作共享 epoch/requestId 回执与客户端 CAS journal，未知结果只核对回执。归档与恢复同步已有收藏的路由和标题，永久删除未声明能力。共享观察记录将标题通知用于侧栏及标签；fileChange 完成、turn 完成和重连快照修复触发项目目录有限刷新，文本 delta 不刷新。独立 CLI 的文件变化通过项目目录 watcher 刷新；Claude Code 已接入，DeepSeek CLI 和 VMM 尚未实现。
+工作台共用侧栏搜索输入框，默认筛选已加载树；非空查询时显示范围选项，可切换异步项目检索，清空即收起。异步搜索视图区分文件路径、文件正文、原生标题、原生正文及归档范围，取消旧查询、丢弃旧响应、返回身份校验后导航；较早原生命中自动加载历史并定位。已注册项目的附加挂载通过完整远程身份匹配提供来源导航，普通目录挂载不授予原生控制。远程收藏包含 MCP/server/project/profile/session 身份，失效绑定不回退到同名服务器。归档视图只读；导出 `mindos-native-history` v1 JSON 保留原生来源和摘要历史，executable=false，不是本地 Kernel bundle。侧栏提供只读原生家族导航。Codex 已声明 rename/archive/unarchive/delete 和 text/image 附件能力。原生标题直接通过 thread/name/set 修改；归档允许本服务持有且明确 idle 的会话或 notLoaded 原生历史；未加载不等于外部执行空闲，归档不会停止独立 CLI。运行中的受控会话显示禁用的归档菜单。归档前检查派生子会话的授权与状态，归档后释放所有权；恢复归档不 resume、不发送 turn。以上操作共享 epoch/requestId 回执与客户端 CAS journal，未知结果只核对回执。归档与恢复同步已有收藏的路由和标题。永久删除调用原生 thread/delete，要求受控 idle 或已归档 notLoaded，前置有界检查全部派生子会话的项目授权及可删除状态；保留项目文件，移除原生历史/元数据及对应已有收藏，关闭被删除会话的标签。客户端保存删除 tombstone；丢失响应后先核对 receipt，不读取已删除的历史，不重新提交删除。Claude 尚未声明归档或删除能力。共享观察记录将标题通知用于侧栏及标签；fileChange 完成、turn 完成和重连快照修复触发项目目录有限刷新，文本 delta 不刷新。独立 CLI 的文件变化通过项目目录 watcher 刷新；Claude Code 已接入，DeepSeek CLI 和 VMM 尚未实现。
 
 
 ## Claude Code 与目录 watcher
@@ -208,3 +253,14 @@ Claude 配置 `kind="claude"`、显式 command 和私有 home（CLAUDE_CONFIG_DI
 原生 projects JSONL 按实际 cwd/sessionId 核验，拒绝链接与目录逃逸；目录名称只用于缩小扫描，不能决定授权。历史分页最多 100 项/2 MiB，用户 UUID 定义真实轮次；工具摘要和增量消息共用原生 item 身份。目录元信息扫描有 2048 个目录名称、8192 个文件、16 MiB/5 秒上限。恢复使用核验后的日志绝对路径，兼容宿主 cwd 与沙箱虚拟路径；整份恢复日志最多 16 MiB并逐记录核验。独立 CLI 仅返回 notLoaded/owned=false，显式 resume 建立新受控进程，不能接管外部进程。真实 CLI 2.1.209 在临时数据和本地 Anthropic peer 下完成原生审批写文件、图片、历史、独立 CLI 发现与恢复；未做桌面人工视觉验收。
 
 `fileWatch` 协商 project_watch/project_unwatch。服务端使用 pinned 根及 mount 的有界 inotify，返回不含路径/正文的 watchId/version/gap/truncated；owner/project/revision 和根身份在观察前后核验。排除隐藏目录、私有 home、链接与挂载遮蔽；新目录及队列溢出重扫，溢出报告 gap。最多 16 个观察，60 秒空闲后在后续请求清理；扫描上限 2048 个目录、50000 项、2 秒，truncated 时 driver 以 30 秒补充刷新。客户端 close 释放，项目配置变化移除监听。共享状态观察在零会话时仍轮询目录版本，宿主合并通知刷新项目树；此版本不推断外部执行状态或控制所有权。
+
+
+## 会话活跃提示
+
+共享展示优先采用原生 ready、running、waiting-approval、waiting-input 等观测状态。对于执行状态 unknown（包括 notLoaded）的在线会话，原生更新时间距当前时间不超过 2 分钟时显示“近期活跃（推测）”；超过窗口显示“最近更新于…”；缺失或无效时间保留未加载/未知提示，未来时间不推测活跃。离线及原生错误优先显示。提示注明更新时间不能确认执行状态，使用静态未知图标，不修改 execution、所有权或归档/删除/停止权限。侧栏和标签以单一定时器在窗口到期时刷新，隐藏工作台和销毁时释放；编辑器随现有轮询刷新，不增加原生 API 请求。
+
+## 项目选择与目录正文
+
+侧栏点击项目根及项目选择器显式切换项目范围，复用已打开目录标签时也应用当前选择；文件和会话子项继续保留所在浏览范围。已知范围从当前目录清单立即显示，正文目录读取不等待整个侧栏导航、会话区和文件区展开。侧栏在后台补齐展开与选中状态，旧结果不得覆盖新路由，后台同步期间仍接受显式点击。
+
+目录读取复用已知节点，其他情况下并行读取条目与元数据；正文不重复执行侧栏展开。远程探测和打开错误停留在目标标签，显示原因并允许重试，不隐式回退到本地项目。项目文件、目录和原生会话错误使用统一带时间的 pi-agent 结构化日志，包含阶段、身份和错误码，不记录凭据或正文。
