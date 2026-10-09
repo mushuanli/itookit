@@ -40,11 +40,11 @@ it('preserves readable labels, independent timestamps and newest-first ordering 
         {id: 'new', title: 'Latest request', createdAt: 1791458550000, updatedAt: 1791458570000},
         {id: 'opaque-id', title: ' ', updatedAt: null}], nextCursor: null});
     const nodes = await projection.list(path, resolveBrowserTarget(path) as never);
-    expect(nodes.slice(1).map(node => node.metadata.title)).toEqual(['Latest request', 'First request', t('harness.untitledSession')]);
-    expect(nodes[2]).toMatchObject({createdAt: 1791458500000, modifiedAt: 1791458565000});
-    expect(nodes[3]).toMatchObject({name: 'opaque-id', createdAt: 0, modifiedAt: 0});
-    const stat = await projection.stat(nodes[2].path, resolveBrowserTarget(nodes[2].path) as never);
-    expect(stat).toEqual(nodes[2]);
+    expect(nodes.slice(2).map(node => node.metadata.title)).toEqual(['Latest request', 'First request', t('harness.untitledSession')]);
+    expect(nodes[3]).toMatchObject({createdAt: 1791458500000, modifiedAt: 1791458565000});
+    expect(nodes[4]).toMatchObject({name: 'opaque-id', createdAt: 0, modifiedAt: 0});
+    const stat = await projection.stat(nodes[3].path, resolveBrowserTarget(nodes[3].path) as never);
+    expect(stat).toEqual(nodes[3]);
 });
 it('returns a disabled offline row rather than failing project navigation', async () => {
     const {projection,peer} = setup(), path = remoteSessionPath('/Project'); peer.profiles.mockRejectedValue(new Error('offline'));
@@ -63,7 +63,7 @@ it('lists multiple native history pages through a mounted VFS without escaping t
     const view = createFileSystemView({viewId:'mounted-native-history',mounts:[{mountId:'history',at:'/history',root:path,access:'ro',fs:source.fs}]});
     try {
         const first = await view.driver.getChildren('/history');
-        const more = first.find(node => node.type === 'directory')!;
+        const more = first.find(node => node.name.startsWith('@page:'))!;
         expect(more).toBeDefined(); expect(more.parentPath).toBe('/history');
         const second = await view.driver.getChildren(more.path);
         expect(second.find(node => node.metadata.title === 'Older native session')).toBeDefined();

@@ -7,6 +7,8 @@ const IDENTITY = /^[a-zA-Z0-9_-]{1,128}$/;
 export const MAX_FAVORITES = 256;
 
 export function validateTarget(target: ProjectFavoriteTarget): void {
+    if (target?.kind === 'remote-session' && (target.archived === undefined || typeof target.archived === 'boolean') && [target.connectionId, target.serverId, target.serverProjectId, target.profileId, target.sessionId]
+        .every(id => typeof id === 'string' && !!id && id.length <= 512 && !/[\x00-\x1f/\\]/.test(id))) return;
     if (target?.kind === 'session' && typeof target.sessionId === 'string' && IDENTITY.test(target.sessionId)) return;
     if (target?.kind === 'file' && ['file', 'directory'].includes(target.nodeType) && typeof target.path === 'string'
         && normalizeVirtualPath(target.path) === target.path

@@ -70,6 +70,10 @@ export const STATUS_META: Record<'connected' | 'connecting' | 'error' | 'idle', 
     error:     { dot: '●', color: '#ef4444' }, // red-500
     idle:      { dot: '○', color: '#9ca3af' }, // gray-400
 } as const;
+export const HARNESS_STATE_ICONS = {
+    unknown: '?', idle: '○', running: '▶', 'waiting-approval': '◇', 'waiting-input': '◇', offline: '⊘', stale: '◌',
+    completed: '✓', failed: '!', cancelled: '■', error: '!',
+} as const;
 
 // ── Executor / node types ─────────────────────
 

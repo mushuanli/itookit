@@ -1,4 +1,5 @@
-export type ProjectFavoriteTarget = { kind: 'file'; path: string; nodeType: 'file' | 'directory' } | { kind: 'session'; sessionId: string };
+export type ProjectFavoriteTarget = { kind: 'file'; path: string; nodeType: 'file' | 'directory' } | { kind: 'session'; sessionId: string }
+    | {kind: 'remote-session'; connectionId: string; serverId: string; serverProjectId: string; profileId: string; sessionId: string; archived?: boolean};
 export interface ProjectFavorite { id: string; title: string; target: ProjectFavoriteTarget; }
 /**
  * Pure reducer from the stored list to the next list. A store may invoke it more than

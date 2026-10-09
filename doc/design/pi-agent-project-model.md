@@ -148,9 +148,9 @@ Codex 会话从显式配置的 home 通过原生 `thread/list` 发现，再以�
 
 绑定打开时按其 MCP ID 恢复连接投影；如保存的能力扩展缺失，仅重新验证该配置，验证成功后修复缓存及扩展。不会按显示名称猜测绑定，也不会探测全部 MCP。刷新带版本围栏，较旧异步结果不能覆盖更新后的目录。
 
-工具箱 Agent 将各个已验证的 pi-agent MCP 配置所声明的项目 harness 投影为只读条目，显示服务器、kind 和 profile。条目不保存为本地 AgentDefinition；详情只能选择同一服务器上已绑定的项目浏览会话或创建会话。当前服务端实际实现只有 Codex，Claude Code、DeepSeek 等不会凭名称生成虚假的可执行条目；增加驱动后由服务端能力声明决定显示。
+工具箱 Agent 将各个已验证的 pi-agent MCP 配置所声明的项目 harness 投影为只读条目，显示服务器、kind 和 profile。条目不保存为本地 AgentDefinition；详情只能选择同一服务器上已绑定的项目浏览会话或创建会话。当前服务端实际实现包括 Codex 与 Claude Code，DeepSeek 等不会凭名称生成虚假的可执行条目；增加驱动后由服务端能力声明决定显示。
 
-项目聊天和草稿的 Agent 选择器通过宿主注入 `RemoteAgentControls` 获取可用远程目标；本地会话仍使用原执行链。选择远程目标后，输入直接进入远程会话，不创建本地 Session、不经本地模型 Provider，也不把本地 Slash 工具提前执行。远程模式隐藏本地模型/执行模式设置，使用原生 harness 的配置。当前不传递浏览器附件，发送前拒绝并保留输入；可使用已同步或挂载的项目文件。
+项目聊天和草稿的 Agent 选择器通过宿主注入 `RemoteAgentControls` 获取可用远程目标；本地会话仍使用原执行链。选择远程目标后，输入直接进入远程会话，不创建本地 Session、不经本地模型 Provider，也不把本地 Slash 工具提前执行。远程模式隐藏本地模型/执行模式设置，使用原生 harness 的配置。原生 capability 声明附件时可发送内联 UTF-8 文本及 PNG/JPEG/WebP 图片：每次最多 5 个，文本每个 64 KiB、图片解码每个 256 KiB、全部编码内容 512 KiB。浏览器和服务端分别核验格式、容量与文件名，不接受远程 URL 或宿主路径。附件草稿与输入一起保存在客户端，不支持的格式在发送前拒绝并保留输入。
 
 `piagent-driver/HarnessConversation` 封装原生会话读取、创建/恢复、turn、事件、审批、中断和回执查询；`app-core` 为它提供项目授权及恢复记录，调用前检查当前本地挂载授权与连接仍与打开时一致。`ui-common/ConversationControls` 是注入 llm-ui 的展示接口，UI 不调用 MCP 或设备协议。远程编辑器显示原生 user/assistant 历史、工具摘要、增量回复及审批/人工输入卡片。内容通过共享 MDx 渲染，远端 HTML 按字面显示。打开历史不自动恢复执行；读档不可恢复、只读绑定、运行中、失联或结果未知时禁用发送，中断与审批按授权和网关原生会话控制权开放。
 
@@ -170,11 +170,11 @@ API Key 通过既有 MCP 配置持久保存，启动时恢复到 piagent-driver 
 
 ### Harness 内置插件
 
-`HarnessPlugin` 定义 kind、配置校验及实例创建，`HarnessPlugins` 注册并查找实现。`Harnesses` 通过注册表创建普通和项目作用域的 `HarnessDriver`，不直接引用 Codex。`State::from_config_with_plugins` 允许嵌入宿主注入注册表，默认二进制只注册 Codex；未知 kind、重复注册及插件配置错误都会拒绝启动。
+`HarnessPlugin` 定义 kind、配置校验及实例创建，`HarnessPlugins` 注册并查找实现。`Harnesses` 通过注册表创建普通和项目作用域的 `HarnessDriver`，不直接引用 Codex。`State::from_config_with_plugins` 允许嵌入宿主注入注册表，默认二进制注册 Codex 与 Claude Code；未知 kind、重复注册及插件配置错误都会拒绝启动。
 
 公共层保留项目目录授权、revision、回执、epoch、请求去重及实例生命周期。插件负责原生历史读取、进程初始化、协议转换，并输出现有统一 session/history/event/interaction 格式；项目实例获得 `ProjectRuntime`，启动参数由插件给出，目录挂载和联网仍由 ProjectLauncher 负责。新增 harness 必须完成其输出与审批格式的适配，不能仅替换 command。
 
-当前采用可信进程内、编译时注册的插件，不提供动态加载或外部插件进程协议。测试用独立 fixture 插件证明配置识别、非 Codex 调用路由、项目作用域、回执去重与关闭；真实 Claude Code 和 DeepSeek 驱动仍未提供。
+当前采用可信进程内、编译时注册的插件，不提供动态加载或外部插件进程协议。测试用独立 fixture 插件证明配置识别、非 Codex 调用路由、项目作用域、回执去重与关闭；Claude Code 已提供独立 SDK 驱动；DeepSeek CLI 尚未实现。
 
 ### 删除被项目引用的 MCP 配置
 
@@ -188,3 +188,23 @@ API Key 通过既有 MCP 配置持久保存，启动时恢复到 piagent-driver 
 ## 命名兼容
 
 服务及工具目录为 pi-agent（Personal Information Agent），统一接入包为 piagent-driver，公开创建函数为 createPiAgentDriver。新 MCP 扩展键为 itookit/pi-agent；读取旧 itookit/fs-agent 配置时保留 serverId、项目、挂载与凭据引用。能力描述优先随标准发现返回，能力工具 piagent_capabilities 和兼容别名 fsagent_capabilities 保留；无标准元数据的旧服务使用工具发现。共享文件／项目协议标识、HTTP 授权头和 fs-agent.files／fs-agent.bundle 规范编码保持原值，避免使已有内容摘要、回执或上游同步库失效。升级继续沿用原配置数据根及原生会话 home。
+
+
+## 原生状态观察与项目检索
+
+`HarnessObservation` 分离 execution（unknown/idle/running/waiting-approval/waiting-input）、lastResult、原生 systemError、连接、时效、receipt 未知及控制能力。列表保留 statusDetails.activeFlags；未知枚举退化为 unknown。`HarnessStatusObserver` 共享有界列表和 profile 事件，不读取每行完整历史，不 resume/adopt。app-core 的 `RemoteSessionStatus` 按项目完整 grant 身份共享订阅，授权变更立即使缓存失效；隐藏视图和项目退出释放订阅。正文、侧栏及标签使用同一状态解释。独立 Codex CLI 的 `notLoaded` 表示未知，不能推断完成或获得控制权。
+
+`project_search` 接收 projectId/revision/query/mode（path/content），固定 rg argv、字面匹配、默认忽略大小写，复用只读 pinned Bubblewrap 项目视图及 mount 遮蔽，禁止网络、隐藏/私有目录、二进制、链接跟随及原生 home。遵守 gitignore，最多 100 条命中、2 MiB 输出、2 MiB 单文件、10 秒和 4 个并发；stderr/隔离失败明确报不可用，无 rg 明确降级。超限返回 truncated，不承诺续页。
+
+`harness_session_search` 通过 Codex 插件遍历授权会话与解析后的用户/assistant 文本及命令摘要，不全扫 home。查询限定 profile/project/archived，最多 20 页会话、每会话 64 页历史、16 MiB、100 条命中、15 秒及 2 个并发。结果保留 sessionId/turnId/itemId；授权和 revision 在返回前再核对。旧服务不支持时返回能力不可用。
+
+工作台正式异步搜索视图区分文件路径、文件正文、原生标题、原生正文及归档范围，取消旧查询、丢弃旧响应、返回身份校验后导航；较早原生命中自动加载历史并定位。已注册项目的附加挂载通过完整远程身份匹配提供来源导航，普通目录挂载不授予原生控制。远程收藏包含 MCP/server/project/profile/session 身份，失效绑定不回退到同名服务器。归档视图只读；导出 `mindos-native-history` v1 JSON 保留原生来源和摘要历史，executable=false，不是本地 Kernel bundle。侧栏提供只读原生家族导航。Codex 已声明 rename/archive/unarchive 和 text/image 附件能力。原生标题直接通过 thread/name/set 修改；归档仅允许本服务持有且明确 idle 的会话，归档后释放所有权；恢复归档不 resume、不发送 turn。以上操作共享 epoch/requestId 回执与客户端 CAS journal，未知结果只核对回执。归档与恢复同步已有收藏的路由和标题，永久删除未声明能力。共享观察记录将标题通知用于侧栏及标签；fileChange 完成、turn 完成和重连快照修复触发项目目录有限刷新，文本 delta 不刷新。独立 CLI 的文件变化通过项目目录 watcher 刷新；Claude Code 已接入，DeepSeek CLI 和 VMM 尚未实现。
+
+
+## Claude Code 与目录 watcher
+
+Claude 配置 `kind="claude"`、显式 command 和私有 home（CLAUDE_CONFIG_DIR），项目实例使用共同授权及 Bubblewrap。SDK stream-json 控制协议独立于 Codex app-server：initialize、原生 user UUID replay、can_use_tool 审批、AskUserQuestion 和 interrupt 映射到统一接口。每会话独立子进程，最多 16 个；断线仅影响对应会话。turn 回执等待相同 user UUID 确认，结果未知不得自动重放。支持 create/resume/history/search/interactions/text/image，未声明 fork/rename/archive/unarchive。
+
+原生 projects JSONL 按实际 cwd/sessionId 核验，拒绝链接与目录逃逸；目录名称只用于缩小扫描，不能决定授权。历史分页最多 100 项/2 MiB，用户 UUID 定义真实轮次；工具摘要和增量消息共用原生 item 身份。目录元信息扫描有 2048 个目录名称、8192 个文件、16 MiB/5 秒上限。恢复使用核验后的日志绝对路径，兼容宿主 cwd 与沙箱虚拟路径；整份恢复日志最多 16 MiB并逐记录核验。独立 CLI 仅返回 notLoaded/owned=false，显式 resume 建立新受控进程，不能接管外部进程。真实 CLI 2.1.209 在临时数据和本地 Anthropic peer 下完成原生审批写文件、图片、历史、独立 CLI 发现与恢复；未做桌面人工视觉验收。
+
+`fileWatch` 协商 project_watch/project_unwatch。服务端使用 pinned 根及 mount 的有界 inotify，返回不含路径/正文的 watchId/version/gap/truncated；owner/project/revision 和根身份在观察前后核验。排除隐藏目录、私有 home、链接与挂载遮蔽；新目录及队列溢出重扫，溢出报告 gap。最多 16 个观察，60 秒空闲后在后续请求清理；扫描上限 2048 个目录、50000 项、2 秒，truncated 时 driver 以 30 秒补充刷新。客户端 close 释放，项目配置变化移除监听。共享状态观察在零会话时仍轮询目录版本，宿主合并通知刷新项目树；此版本不推断外部执行状态或控制所有权。

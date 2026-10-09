@@ -1,4 +1,9 @@
 import { showHarnessControl } from '../harness/control';
+import { RemoteSessionStatusView } from './remote-session-status';
+import { ProjectSearchPanel } from './project-search-panel';
+import { showRemoteSessionFamily } from './remote-session-family';
+import { nativeSessionMenu } from './remote-session-management';
+import { ProjectSearch, exportRemoteSession, remoteSessionSources, type ProjectSearchMatch } from '@itookit/app-core';
 import { projectTransferTargets } from './transfer-targets';
 import { ProjectSyncMenu } from './sync/menu';
 import { createMindOSVFSUI as createVFSUI } from '../browser/vfs-presentation';
@@ -122,6 +127,8 @@ interface RetainedEditor {
 
 /** vfs-ui owns the sidebar; this host owns business views and their file leases. */
 export class SessionWorkbench implements WorkspaceController {
+    private remoteStatus!: RemoteSessionStatusView;
+    private searchPanel?: ProjectSearchPanel;
     private readonly dialogs = new AbortController();
     private readonly tabs: WorkbenchTabs<RetainedEditor>;
     private readonly sidebarLayout: WorkbenchSidebar;
@@ -213,6 +220,9 @@ export class SessionWorkbench implements WorkspaceController {
     }
 
     async start(): Promise<void> {
+        this.remoteStatus = new RemoteSessionStatusView(this.projects, () => this.sidebarUI?.refreshList(),
+            (id, icon, tooltip) => this.tabs.setStatus(id, icon, tooltip), () => this.scheduleRefresh('native-files'),
+            (id, title) => this.tabs.title(id, title));
         this.browser = await createSessionBrowser({ repository: this.repository, files: this.files, kernel: this.kernel, projects: this.projects,
             filterDisplayedFiles: filterGitignoredFiles });
         this.navigationFiles = createFileSystemView({ viewId: 'session-navigation:admin', mounts: [
@@ -221,11 +231,22 @@ export class SessionWorkbench implements WorkspaceController {
         ] });
         this.lifecycle = new SessionLifecycleService({ repository: this.repository, kernel: this.kernel });
         const tree = document.createElement('div'); tree.className = 'project-workbench__tree';
+        if (this.projects) {
+            this.searchPanel = new ProjectSearchPanel(new ProjectSearch(this.projects), (row, query) => this.openSearchMatch(row, query), folder => this.openResource(remoteSessionPath(folder)));
+            this.sidebarLayout.navigation.append(this.searchPanel.element);
+        }
         this.sidebarLayout.navigation.append(tree);
         if (this.projects) this.installProjectNavigation();
+        if (this.searchPanel && this.projectNavigation) this.projectNavigation.header.after(this.searchPanel.element);
         this.sidebarUI = createVFSUI({ sessionListContainer: tree, title: this.projects ? t('project.workspace') : '会话', scopeId: SESSION_BROWSER_SCOPE,
             persistence: this.uiPersistence, onError: error => this.report(error),
-            listItems: items => this.projectNavigation?.navigationItems(items, this.sidebarUI?.getSnapshot().query) ?? items,
+            listItems: items => {
+                this.remoteStatus.project(this.projectNavigation?.currentProject()?.project.id);
+                this.searchPanel?.project(this.projectNavigation?.currentProject()?.path);
+                const selected = this.projectNavigation?.currentProject();
+                this.searchPanel?.sessionSources(selected && this.projects ? remoteSessionSources(this.projects, selected, this.projectNavigation!.registeredProjects()) : []);
+                return this.remoteStatus.items(this.projectNavigation?.navigationItems(items, this.sidebarUI?.getSnapshot().query) ?? items);
+            },
             titleHeader: this.projectNavigation?.header, toolbarContainer: this.projectNavigation?.toolbarContainer,
             toolbarOptions: this.projectNavigation?.options.navigationToolbarOptions,
             rowCreation: { visible: node => !isFlowPath(node.id) && ['project-files', 'files'].includes(resolveBrowserTarget(node.id).kind),
@@ -274,6 +295,24 @@ export class SessionWorkbench implements WorkspaceController {
                     if (isFlowPath(item.id)) return this.flows?.menu.items?.(item,
                         item.id === '/@flows' ? [] : defaults.filter(entry => 'id' in entry && entry.id === 'delete')) ?? [];
                     const target = resolveBrowserTarget(item.id);
+                    if (target.kind === 'remote') {
+                        const parent = item.metadata.custom.remoteParentSessionId;
+                        return target.nativeSessionId && this.projects ? [
+                            ...nativeSessionMenu(this.projects, target, item.metadata.title, item.metadata.custom.nativeManagement, this.dialogs.signal,
+                                async () => { await this.tabs.close(item.id, false); },
+                                async (command, title) => {
+                                    await this.sidebarUI?.refresh();
+                                    this.tabs.title(item.id, title);
+                                    const next = remoteSessionPath(target.folder, target.profileId, target.nativeSessionId, command.kind === 'rename' ? target.archived : command.kind === 'archive');
+                                    await this.openResource(next, {reload: true});
+                                }, error => this.report(error)),
+                            ...defaults.filter(entry => 'id' in entry && ['export', 'favorite'].includes(entry.id)),
+                            {id: 'native-export', label: t('harness.export'), onClick: () => { void this.exportSessionItem({path: item.id, type: 'file'})
+                                .then(result => { if (result && !this.closed) downloadArchive(result.content, result.name); }).catch(error => this.report(error)); }},
+                            {id: 'native-family', label: t('harness.family'), onClick: () => { void showRemoteSessionFamily(this.projects!, target, this.dialogs.signal, path => this.openResource(path)).catch(error => this.report(error)); }},
+                            ...(typeof parent === 'string' && parent ? [{id: 'native-parent', label: t('harness.parent'), onClick: () => { void this.openResource(remoteSessionPath(target.folder, target.profileId, parent)).catch(error => this.report(error)); }}] : []),
+                        ] : [];
+                    }
                     if (target.kind === 'favorite' || target.kind === 'favorites') return [];
                     if (target.kind === 'project-files' && target.path === WORKSPACE_PATH) return [];
                     if (this.projects && item.metadata?.custom?.projectId)
@@ -493,6 +532,8 @@ export class SessionWorkbench implements WorkspaceController {
     async setVisible(visible: boolean): Promise<void> {
         if (this.visible === visible || this.closed) return;
         this.visible = visible;
+        this.remoteStatus?.setVisible(visible);
+        if (!visible) this.searchPanel?.cancel();
         this.sidebarUI?.setVisible?.(visible);
         if (!visible) {
             ++this.openIntent;
@@ -606,7 +647,7 @@ export class SessionWorkbench implements WorkspaceController {
             if (target.kind === 'remote') {
                 const project = await this.projects!.forFolder(target.folder); load.check();
                 if (!project || project.path !== target.folder || !target.profileId) throw new Error('Remote project unavailable');
-                const controls = await this.projects!.remoteMounts!.projectConversation(project.project.id, target.profileId, target.nativeSessionId, {signal: load.signal, timeoutMs: 3000});
+                const controls = await this.projects!.remoteMounts!.projectConversation(project.project.id, target.profileId, target.nativeSessionId, {signal: load.signal, timeoutMs: 3000}, target.archived);
                 let remoteEditor: IEditor | undefined;
                 try {
                     const mount = await this.editorMount(target.folder); load.check();
@@ -628,6 +669,7 @@ export class SessionWorkbench implements WorkspaceController {
                 } catch (error) { if (remoteEditor) await remoteEditor.destroy(); else await controls.close(); throw error; }
                 await this.projectNavigation?.sync(path, {reveal: true, preserveProject: true}); load.check();
                 this.tabs.setIcon(tabId, ENTITY_ICONS.remoteSession);
+                this.remoteStatus.attach(tabId, project.project.id);
                 this.tabs.title(tabId, target.draft ? t('harness.create') : controls.snapshot().title);
                 this.active = path; this.activeBranch = undefined; this.onSelect(path);
                 this.selectionSync = path;
@@ -1034,6 +1076,8 @@ export class SessionWorkbench implements WorkspaceController {
     }
     private async exportSessionItem(item: { path: string; type: string }): Promise<{ name: string; content: string; mimeType: string } | null> {
         const target = resolveBrowserTarget(item.path);
+        if (target.kind === 'remote' && target.profileId && target.nativeSessionId && this.projects)
+            return exportRemoteSession(this.projects, target.folder, target.profileId, target.nativeSessionId, {signal: this.dialogs.signal, timeoutMs: 20_000});
         if (target.kind !== 'session') return null;
         return exportSessionBundle(this.repository, target.sessionId);
     }
@@ -1220,6 +1264,20 @@ export class SessionWorkbench implements WorkspaceController {
         await this.openResource(path);
         if (anchor) await this.editor?.navigateTo({ elementId: anchor });
     }
+    private async openSearchMatch(row: ProjectSearchMatch, query: string): Promise<void> {
+        const project = await this.projects?.forFolder(row.folder);
+        if (!project || project.project.id !== row.projectId) throw new Error(t('project.search.navigateFailed'));
+        if (row.bindingIdentity && row.bindingIdentity !== JSON.stringify(this.projects?.remoteMounts?.list(row.projectId))) throw new Error(t('project.search.navigateFailed'));
+        const route = row.kind === 'remote-session' ? remoteSessionPath(row.folder, row.profileId!, row.sessionId!, row.archived)
+            : folderBrowserPath(row.folder) + '/@files/' + row.path;
+        await this.openResource(route);
+        if (!this.editor || this.active !== route) return;
+        if (row.kind === 'remote-session' && row.itemId) { await this.editor.navigateTo({elementId: 'native-item:' + row.itemId}); return; }
+        const results = await this.editor.search(query);
+        const offset = row.line ? this.editor.getText().split('\n').slice(0, row.line - 1).reduce((size, line) => size + line.length + 1, 0) : 0;
+        const result = results.find(match => match.source === 'editor' && match.details.from >= offset) ?? results[0];
+        if (result) this.editor.gotoMatch(result);
+    }
 
     private trackProjectFileRenames(fs: IFileSystem, folder: string, path: string): void {
         const editor = this.editor, tab = this.tabs.current!;
@@ -1373,6 +1431,7 @@ export class SessionWorkbench implements WorkspaceController {
             await Promise.all([value.assets?.dispose(), value.context?.release()]);
         });
         await value.lease.dispose();
+        this.remoteStatus?.detach(tab.id);
         if (this.tabs.current === tab) this.clearEditorFields();
     }
 
@@ -1398,6 +1457,8 @@ export class SessionWorkbench implements WorkspaceController {
         ++this.openIntent;
         this.cancelViewLoad();
         this.closed = true; ++this.fileNavigationRevision; this.projectNavigation?.destroy();
+        this.remoteStatus?.destroy();
+        this.searchPanel?.destroy();
         this.sidebarUI?.cancelPendingSelection?.(); this.dialogs.abort(); this.subscriptions.dispose();
         if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = undefined; }
         await Promise.all([this.tail, this.refreshTail]); await this.fileNavigation; await Promise.all(this.readCleanup);

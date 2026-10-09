@@ -132,10 +132,10 @@ it('creates project Sessions from the selected project and edits its files in th
         expect((await repository.getManifest(sibling)).parentSessionId).toBe(session);
         expect(sidebar.querySelector('.vfs-columns')).toBeNull();
         await workbench.openResource('/');
-        expect(sidebar.querySelector('select')?.value).toBe('/');
+        expect(sidebar.querySelector('.workbench-project-navigation select')?.value).toBe('/');
         expect(navigation.textContent).toContain('Research');
         await workbench.openResource(projectPath + '/@files/renamed.txt');
-        expect(sidebar.querySelector('select')?.value).toBe('/');
+        expect(sidebar.querySelector('.workbench-project-navigation select')?.value).toBe('/');
         expect(file).toHaveBeenCalledOnce();
         const linked = await projects.openFiles(other.path);
         await linked.fs.driver.createFile({ parentPath: '/', name: 'linked.md', content: '# Intro\nLinked content' }); await linked.dispose();

@@ -27,6 +27,8 @@ import { delegate } from '../../utils/domEvents';
 
 export interface ChatInputOptions {
     attachments?: boolean;
+    attachmentAccept?: string;
+    attachmentHint?: string;
     executorLocked?: boolean;
     maxAgentExchanges?: number;
     onSend: (text: string, files: File[], executorId: string, overrides?: ChatOverrides) => Promise<void>;
@@ -231,6 +233,8 @@ export class ChatInput implements IChatInputPresenter {
         this.initExecutors();
         this.syncUIFromConfig();
         if (options.attachments === false) this.attachBtn.hidden = true;
+        if (options.attachmentAccept) this.fileInput.accept = options.attachmentAccept;
+        if (options.attachmentHint) this.attachBtn.title = options.attachmentHint;
         this.applyAvailability();
         this.loadConnections();
 
@@ -755,6 +759,12 @@ export class ChatInput implements IChatInputPresenter {
     openConnectionPicker(): void { this.connectionTier.openConnPicker(); }
 
     private remoteSending = false;
+    acceptSubmittedDraft(text: string, files: File[]): void {
+        if (this.textarea.value.trim() === text.trim()) { this.textarea.value = ''; this.config.text = ''; }
+        this.files = this.files.filter(file => !files.includes(file));
+        this.attachmentMgr.renderAttachments(); this.adjustTextareaHeight();
+    }
+
     private async triggerRemoteSend(text: string): Promise<void> {
         if (this.remoteSending) return;
         const submitted = this.textarea.value;

@@ -320,10 +320,10 @@ class BrowserBackend implements IStorageBackend {
         const offline = this.deps.projects.remoteMounts?.projectOffline(project.project.id);
         const items = await this.deps.projects.favorites.list(project.project.id);
         return items.map(item => ({ ...this.node(`${path}/${item.id}`, item.title, false),
-            icon: item.target.kind === 'session' ? ENTITY_ICONS.chat : fileTypeIcon(item.target.path, item.target.nodeType === 'directory'),
+            icon: item.target.kind === 'remote-session' ? ENTITY_ICONS.remoteSession : item.target.kind === 'session' ? ENTITY_ICONS.chat : fileTypeIcon(item.target.path, item.target.nodeType === 'directory'),
             metadata: { title: item.title, _fixedEntry: true, _readOnly: true, _favorite: true, _showAll: true, _fileDetails: false,
                 _disabled: item.target.kind === 'file' && !!offline, favoriteId: item.id, favoriteProjectId: project.project.id,
-                navigationDescription: item.target.kind === 'file' ? item.target.path : t('project.favoriteSession') } }));
+                navigationDescription: item.target.kind === 'remote-session' ? t(offline ? 'remote.projectOffline' : 'harness.remoteSessions') : item.target.kind === 'file' ? item.target.path : t('project.favoriteSession') } }));
     }
     /** The fixed `Files` entry: its own read-only state and favorite flag, not a listing. */
     private async fileEntry(path: string, folder: string | null): Promise<FSNode> {

@@ -1,7 +1,8 @@
 import { buildRenamedFilename } from '@itookit/common';
 import type { ProjectFavorite, ProjectFavoriteTarget, FavoriteMove } from './contracts';
 
-export const favoriteKey = (target: ProjectFavoriteTarget): string => target.kind === 'session' ? `session:${target.sessionId}` : `file:${target.path}`;
+export const favoriteKey = (target: ProjectFavoriteTarget): string => target.kind === 'session' ? `session:${target.sessionId}`
+    : target.kind === 'remote-session' ? 'remote:' + JSON.stringify([target.connectionId, target.serverId, target.serverProjectId, target.profileId, target.sessionId]) : `file:${target.path}`;
 const contains = (parent: string, path: string): boolean => parent === path || path.startsWith(parent + '/');
 
 export function withoutDeletedFiles(items: ProjectFavorite[], paths: readonly string[]): ProjectFavorite[] {

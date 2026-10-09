@@ -1,4 +1,5 @@
 import { RemoteConversationStore } from './remote-conversation-store';
+import { RemoteSessionStatus } from '../session/remote-session-status';
 import type { MCPServer } from '@itookit/tools/mcp-contracts';
 import type { MCPDeletedProject, MCPDeletionReference } from '../configuration/model-commands';
 import { MCPRemoteConnections, remoteMCPConnection } from './mcp-remote-connections';
@@ -27,6 +28,7 @@ export interface RemoteProcessRequest {
 export interface RemoteProcessHandle { nativeShell: NonNullable<ProjectExecutionContext['nativeShell']>; release(): Promise<void> }
 
 export interface RemoteFileSourceProvider {
+    observeHarness?(client: HarnessClient, writable?: boolean): import('@itookit/piagent-driver').HarnessStatusPort;
     conversation?(client: HarnessClient, profile: HarnessProfile, workspaceId: string, sessionId?: string, writable?: boolean, journal?: HarnessConversationJournal): HarnessConversationPort;
     resolveCredential?(reference: string): string | Promise<string>;
     discover?(connection: Omit<RemoteFileConnection, 'alias'>, options?: OperationOptions): Promise<import('@itookit/piagent-driver').PiAgentDescriptor>;
@@ -52,6 +54,14 @@ export type RemoteConnectionStatus = 'unknown' | 'checking' | 'online' | 'offlin
 
 /** Project-owned grants; credentials stay in the injected host provider. */
 export class ProjectRemoteMountService {
+    readonly sessionStatus = new RemoteSessionStatus(id => {
+        const grants = this.list(id), root = grants.find(m => m.at === '/');
+        return !this.closed && root?.connectionId && root.serverProjectId ? JSON.stringify(grants) : undefined;
+    }, async (id, options) => {
+        if (!this.provider.observeHarness) throw new FSError('ECAPABILITY', 'Harness observation unavailable');
+        const client = await this.projectHarness(id, options), root = this.list(id).find(m => m.at === '/')!;
+        return this.provider.observeHarness(this.guardHarness(client, id, JSON.stringify(this.list(id)), root.connectionId!), root.access === 'rw');
+    });
     inspectRemoteProjects?: (ids: readonly string[]) => Promise<MCPDeletedProject[]>;
     removeRemoteProjects?: (ids: readonly string[]) => Promise<void>;
     existingProjectIds?: () => Promise<readonly string[]>;
@@ -359,16 +369,36 @@ export class ProjectRemoteMountService {
         try {
             const project=mount.serverProjectId ? await client.read(mount.serverProjectId,options)
                 : await client.register({name:projectId,alias:mount.alias,path:mount.root.replace(/^\//,''),access:mount.access},options);
-            if (project.alias!==mount.alias || project.path!==mount.root.replace(/^\//,'')) throw new FSError('ECONFLICT','Project directory changed');
-            const expected=[{alias:project.alias,root:project.path ? '/'+project.path : '/',at:'/'},...project.mounts.map(m=>({alias:m.alias,root:m.path ? '/'+m.path : '/',at:m.at.slice('/workspace'.length)}))];
-            const granted=this.list(projectId);
-            if (expected.length!==granted.length || expected.some(m=>!granted.some(g=>g.alias===m.alias && g.root===m.root && g.at===m.at)) || mount.access==='rw' && project.mounts.some(m=>granted.find(g=>g.at===m.at.slice('/workspace'.length))?.access!==m.access)) throw new FSError('ECONFLICT','Server project mounts changed; refresh the project binding');
+            this.assertProjectGrant(projectId, mount, project);
             const harness=client.harness(project,{readOnly:mount.access==='ro'}), close=harness.close.bind(harness);
             harness.close=async () => {try {await close();}finally{await client.close();}};
             return harness;
         } catch(error) {await client.close();throw error;}
     }
-    async projectConversation(projectId: string, profileId: string, sessionId?: string, options?: OperationOptions): Promise<HarnessConversationPort> {
+    private assertProjectGrant(projectId: string, mount: ProjectRemoteMount, project: RemoteProject): void {
+            if (project.alias!==mount.alias || project.path!==mount.root.replace(/^\//,'')) throw new FSError('ECONFLICT','Project directory changed');
+            const expected=[{alias:project.alias,root:project.path ? '/'+project.path : '/',at:'/'},...project.mounts.map(m=>({alias:m.alias,root:m.path ? '/'+m.path : '/',at:m.at.slice('/workspace'.length)}))];
+            const granted=this.list(projectId);
+            if (expected.length!==granted.length || expected.some(m=>!granted.some(g=>g.alias===m.alias && g.root===m.root && g.at===m.at)) || mount.access==='rw' && project.mounts.some(m=>granted.find(g=>g.at===m.at.slice('/workspace'.length))?.access!==m.access)) throw new FSError('ECONFLICT','Server project mounts changed; refresh the project binding');
+    }
+    async searchFiles(projectId: string, query: import('@itookit/piagent-driver').FileSearchQuery, options?: OperationOptions) {
+        const mount = this.list(projectId).find(m => m.at === '/');
+        if (!mount?.connectionId || !mount.serverProjectId || !this.provider.projects) throw new FSError('ECAPABILITY', 'Project search unavailable');
+        const fingerprint = JSON.stringify(this.list(projectId));
+        const connection = await this.resolveConnection(mount.connectionId, options);
+        if (this.provider.discover && !(await this.provider.discover(connection, options)).fileSearch) throw new FSError('ECAPABILITY', 'Server file search unavailable');
+        const client = this.provider.projects(connection);
+        try {
+            const project = await client.read(mount.serverProjectId, options);
+            if (!client.search) throw new FSError('ECAPABILITY', 'Server file search unavailable');
+            if (project.revision !== mount.serverProjectRevision) throw new FSError('ECONFLICT', 'Project search revision changed');
+            this.assertProjectGrant(projectId, mount, project);
+            const result = await client.search(project, query, options);
+            if (this.closed || fingerprint !== JSON.stringify(this.list(projectId))) throw new FSError('ECONFLICT', 'Project authorization changed');
+            return result;
+        } finally { await client.close(); }
+    }
+    async projectConversation(projectId: string, profileId: string, sessionId?: string, options?: OperationOptions, readOnly = false): Promise<HarnessConversationPort> {
         if (!this.provider.conversation) throw new FSError('ECAPABILITY', 'Conversation adapter unavailable');
         const client = await this.projectHarness(projectId, options);
         const fingerprint = JSON.stringify(this.list(projectId));
@@ -384,7 +414,7 @@ export class ProjectRemoteMountService {
                 if (record?.sessionId === sessionId && !record.pending) await draft.save({});
             }
             const recovery = new RemoteConversationStore(this.store, JSON.stringify([projectId, root.connectionId, root.serverProjectId, profileId, sessionId ?? '@new']));
-            return this.provider.conversation(guarded, profile, profile.workspaces[0].id, sessionId, root.access === 'rw',
+            return this.provider.conversation(guarded, profile, profile.workspaces[0].id, sessionId, root.access === 'rw' && !readOnly,
                 {epoch: descriptor.epoch, load: () => recovery.load(), save: record => recovery.save(record)});
         } catch (error) { await client.close(); throw error; }
     }
@@ -521,6 +551,7 @@ export class ProjectRemoteMountService {
         } catch (error) { await base?.dispose(); throw error; }
     }
     async dispose(): Promise<void> {
+        await this.sessionStatus.dispose();
         this.closed = true; await this.tail.catch(() => {});
         await Promise.allSettled(this.probes.values());
         await Promise.all([...this.views.values()].flatMap(views => [...views].map(owner => owner.dispose())));

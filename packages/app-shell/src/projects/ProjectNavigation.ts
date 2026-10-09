@@ -197,6 +197,7 @@ export class ProjectNavigation {
         await this.apply(snapshot, path, revision, undefined, true);
     }
     currentProject(): ProjectFolder | undefined { return this.project; }
+    registeredProjects(): readonly ProjectFolder[] { return this.projectChoices; }
 }
 function findNode(items: VFSNodeUI[], id: string): VFSNodeUI | undefined {
     for (const node of items) {

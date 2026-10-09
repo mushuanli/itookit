@@ -1,9 +1,10 @@
-import { BaseSettingsEditor, type ConversationControls, type ConversationSnapshot, type EditorOptions, type EditorEvent, type EditorEventCallback, type EditorEventMap } from '@itookit/ui-common';
+import { BaseSettingsEditor, conversationStatus, type ConversationControls, type ConversationSnapshot, type EditorOptions, type EditorEvent, type EditorEventCallback, type EditorEventMap } from '@itookit/ui-common';
 import { t } from '@itookit/common';
 import { conversationRequests } from './remote-interactions';
 import { ConversationWorkspaceView } from './ConversationWorkspaceView';
 import { RemoteBranches } from './remote-branches';
 import { remoteRounds } from './remote-rounds';
+import { prepareRemoteAttachments } from './remote-attachments';
 
 /** Native histories remain remote; this editor only owns a view and input draft. */
 export class RemoteConversationEditor extends BaseSettingsEditor<ConversationControls> {
@@ -20,6 +21,9 @@ export class RemoteConversationEditor extends BaseSettingsEditor<ConversationCon
     private announced?: string;
     private savedDraft = '';
     private restoredDraft = false;
+    private draftFiles: File[] = [];
+    private savedFiles: File[] = [];
+    private submittedDraft?: {text: string; files: File[]};
     private readonly events = new Map<EditorEvent, Set<(payload: unknown) => void>>();
     private interactionKey = '';
     constructor(container: HTMLElement, controls: ConversationControls, options: EditorOptions) { super(container, controls, options); }
@@ -38,18 +42,26 @@ export class RemoteConversationEditor extends BaseSettingsEditor<ConversationCon
     }
     private layout() {
         this.view = new ConversationWorkspaceView(this.container, this.options, {
-            send: text => this.sendText(text),
+            send: (text, files) => this.sendText(text, files),
+            attachments: this.options.readOnly ? undefined : this.service.snapshot?.().attachments,
             stop: () => { void this.run(() => this.service.interrupt()).catch(() => {}); },
             refresh: () => { void this.run(() => this.service.read()).catch(() => {}); },
             reconcile: () => { void this.run(() => this.service.reconcile()).catch(() => {}); },
             earlier: () => { this.historyError = ''; void this.loadHistory(); },
-            changed: () => this.emit('interactiveChange', undefined), copy: () => this.getText(),
+            changed: files => { this.draftFiles = files ?? []; this.emit('interactiveChange', undefined); }, copy: () => this.getText(),
+            rename: title => {
+                if (title !== this.snapshot?.title && this.snapshot?.canRename && this.service.rename)
+                    void this.run(() => this.service.rename!(title)).catch(() => {});
+            },
         });
         this.branches = new RemoteBranches(this.service, this.options, action => this.run(action), error => this.showError(error));
         this.container.querySelector('#llm-branch-indicator')!.append(this.branches.element);
     }
     private async show(snapshot: ConversationSnapshot) {
         if (this.closed) return;
+        if (this.snapshot?.pending && !snapshot.pending && snapshot.draft === '' && !snapshot.draftAttachments?.length && this.submittedDraft) {
+            this.acceptSubmission(this.submittedDraft.text, this.submittedDraft.files); this.submittedDraft = undefined;
+        }
         this.snapshot = snapshot;
         this.restoreDraft(snapshot);
         await this.view.history.show(snapshot.messages);
@@ -64,18 +76,29 @@ export class RemoteConversationEditor extends BaseSettingsEditor<ConversationCon
         }
         this.view.setTitle(snapshot.title);
         this.view.setSessionTimes(snapshot.createdAt, snapshot.updatedAt);
-        this.view.setStatus(snapshot.pending ? t('harness.unknown') : snapshot.disconnected ? t('harness.disconnected') : snapshot.gap ? t('harness.eventGap') : snapshot.active || snapshot.canInterrupt ? t('harness.running') : '',
-            snapshot.pending ? 'queued' : snapshot.disconnected || snapshot.gap ? 'failed' : snapshot.active || snapshot.canInterrupt ? 'running' : 'idle');
+        const status = conversationStatus(snapshot.observation ?? {execution: snapshot.requests.some(r => r.kind === 'approval') ? 'waiting-approval'
+            : snapshot.requests.some(r => r.kind === 'input') ? 'waiting-input' : snapshot.active || snapshot.canInterrupt ? 'running' : 'unknown',
+            connection: snapshot.disconnected ? 'offline' : 'online', stale: snapshot.gap, receiptUnknown: snapshot.pending, source: 'history', observedAt: 0});
+        this.view.setStatus(status.text, status.indicator);
         this.updateControls();
         this.queueHistory();
     }
     private restoreDraft(snapshot: ConversationSnapshot) {
         if (this.restoredDraft) return;
         this.savedDraft = snapshot.draft ?? '';
-        if (!this.options.initialInputState?.text) this.view.input.setConfig({text: this.savedDraft});
+        if (!this.options.initialInputState?.text) {
+            this.draftFiles = (snapshot.draftAttachments ?? []).map(attachment => {
+                const content = attachment.kind === 'text' ? attachment.content : Uint8Array.from(atob(attachment.content.split(',')[1] ?? ''), char => char.charCodeAt(0));
+                return new File([content], attachment.name, {type: attachment.mimeType ?? 'text/plain'});
+            });
+            this.view.input.restoreDraft(this.savedDraft, this.draftFiles, 'remote:native');
+            this.savedFiles = [...this.draftFiles];
+        }
+        if (snapshot.pending) this.submittedDraft = {text: this.savedDraft, files: [...this.draftFiles]};
         this.restoredDraft = true;
     }
     private updateControls() {
+        this.view.setRenameAvailability(!this.working && !this.options.readOnly && !!this.snapshot?.canRename && !!this.service.rename);
         if (this.snapshot) this.branches?.update(this.snapshot, this.working);
         this.view.earlier.hidden = !this.snapshot?.hasEarlier || !this.service.loadEarlier;
         this.view.earlier.disabled = this.working || this.loadingHistory;
@@ -102,17 +125,23 @@ export class RemoteConversationEditor extends BaseSettingsEditor<ConversationCon
         });
         this.tail = operation.catch(() => {}); await this.tail;
     }
-    async sendText(text: string): Promise<void> {
-        if (!text.trim()) return;
+    async sendText(text: string, files: File[] = []): Promise<void> {
+        if (!text.trim() && !files.length) return;
         if (this.closed || this.working || this.options.readOnly || !this.snapshot?.canSend) throw new Error(t('harness.remoteBusy'));
         await this.run(async () => {
-            const result = await this.service.send(text);
+            const attachments = await prepareRemoteAttachments(files, this.snapshot?.attachments ?? []);
+            this.submittedDraft = {text, files: [...files]};
+            const result = attachments.length ? await this.service.send(text.trim() || t('harness.attachmentPrompt'), attachments) : await this.service.send(text);
             if (!this.closed) {
-                if (this.view.input.getConfig().text.trim() === text.trim()) this.view.input.setConfig({text: ''});
-                this.savedDraft = ''; this.emit(this.isDirty() ? 'interactiveChange' : 'saved', undefined);
+                this.acceptSubmission(text, files); this.submittedDraft = undefined;
             }
             return result;
         });
+    }
+    private acceptSubmission(text: string, files: File[]) {
+        this.view.input.acceptSubmittedDraft(text, files);
+        this.draftFiles = this.draftFiles.filter(file => !files.includes(file)); this.savedFiles = [];
+        this.savedDraft = ''; this.emit(this.isDirty() ? 'interactiveChange' : 'saved', undefined);
     }
     private async run(action: () => Promise<ConversationSnapshot>) {
         if (this.closed || this.working) return;
@@ -150,11 +179,28 @@ export class RemoteConversationEditor extends BaseSettingsEditor<ConversationCon
     }
     async destroy() { if (this.closed) return; await this.flushPendingSave(); this.closed = true; clearTimeout(this.timer); clearTimeout(this.historyTimer); await this.service.close(); await this.tail; this.branches?.destroy(); this.view?.destroy(); this.container.replaceChildren(); }
     getText() { return remoteRounds(this.snapshot?.messages ?? []).map(group => group.content ?? group.executionRoot?.data.output ?? '').join('\n\n'); }
+    async navigateTo(target: {elementId: string}): Promise<void> {
+        if (!target.elementId.startsWith('native-item:')) return;
+        const id = target.elementId.slice('native-item:'.length);
+        for (let page = 0; page < 64 && !this.closed; page++) {
+            await this.tail;
+            if (this.view.history.locate(id, this.snapshot?.messages ?? [])) return;
+            if (!this.snapshot?.hasEarlier || this.historyError) break;
+            await this.loadHistory();
+        }
+        throw new Error(t('project.search.navigateFailed'));
+    }
     focus() { this.view.input.focus(); }
-    isDirty() { return (this.view?.input.getConfig().text ?? '') !== this.savedDraft; }
+    isDirty() { return (this.view?.input.getConfig().text ?? '') !== this.savedDraft || this.draftFiles.length !== this.savedFiles.length || this.draftFiles.some((file, index) => file !== this.savedFiles[index]); }
     async flushPendingSave() {
         if (!this.isDirty() || this.closed) return;
-        try { await this.service.saveDraft?.(this.view?.input.getConfig().text ?? ''); this.savedDraft = this.view?.input.getConfig().text ?? ''; this.emit('saved', undefined); }
+        try {
+            const files = [...this.draftFiles], text = this.view?.input.getConfig().text ?? '';
+            const attachments = await prepareRemoteAttachments(files, this.snapshot?.attachments ?? []);
+            if (attachments.length || this.savedFiles.length) await this.service.saveDraft?.(text, attachments);
+            else await this.service.saveDraft?.(text);
+            this.savedDraft = text; this.savedFiles = files; this.emit('saved', undefined);
+        }
         catch (error) { this.emit('saveError', error); throw error; }
     }
     private emit<E extends EditorEvent>(event: E, payload: EditorEventMap[E]) { for (const listener of this.events.get(event) ?? []) listener(payload); }
@@ -165,7 +211,6 @@ export class RemoteConversationEditor extends BaseSettingsEditor<ConversationCon
     }
     setReadOnly(value: boolean) { this.options.readOnly = value; this.updateControls(); }
     get commands() { return {sendMessage: (message: {text: string; files?: File[]}) => {
-        if (message.files?.length) return Promise.reject(new Error(t('harness.remoteAttachments')));
-        return this.sendText(message.text);
+        return this.sendText(message.text, message.files);
     }}; }
 }

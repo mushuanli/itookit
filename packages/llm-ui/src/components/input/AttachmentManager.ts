@@ -70,6 +70,7 @@ export class AttachmentManager {
         const revision = ++this.revision;
         const files = this.opts.getFiles();
         if (files.length === 0) {
+            this.opts.attachmentContainer.replaceChildren();
             this.opts.attachmentContainer.style.display = 'none';
             return;
         }

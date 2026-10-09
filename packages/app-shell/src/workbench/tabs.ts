@@ -4,6 +4,7 @@ import type { IEditor } from '@itookit/ui-common';
 import type { WorkbenchSnapshot } from './state';
 
 export interface WorkbenchTab<T> {
+    statusIcon?: string; statusTooltip?: string;
     icon?: string;
     id: string; title: string; pinned: boolean; preview: boolean;
     dirty: boolean; failed: boolean; panel: HTMLElement; value?: T;
@@ -66,8 +67,13 @@ export class WorkbenchTabs<T> {
     }
     keep(id: string): void { const tab = this.get(id); if (tab) { tab.preview = false; this.render(); } }
     pin(id: string): void { const tab = this.get(id); if (tab) { tab.pinned = !tab.pinned; if (tab.pinned) this.selected.delete(id); tab.preview = false; this.render(); } }
-    title(id: string, title: string): void { const tab = this.get(id); if (tab) { tab.title = title; this.render(); } }
+    title(id: string, title: string): void { const tab = this.get(id); if (tab && tab.title !== title) { tab.title = title; this.render(); } }
     setIcon(id: string, icon: string): void { const tab = this.get(id); if (tab) { tab.icon = icon; this.render(); } }
+    setStatus(id: string, icon: string, tooltip: string): void {
+        const tab = this.get(id);
+        if (!tab || tab.statusIcon === icon && tab.statusTooltip === tooltip) return;
+        tab.statusIcon = icon; tab.statusTooltip = tooltip; this.render();
+    }
     rename(id: string, next: string, title: string): void {
         const tab = this.get(id); if (!tab) return;
         this.entries.delete(id); tab.id = next; tab.title = title; this.entries.set(next, tab);
@@ -125,11 +131,15 @@ export class WorkbenchTabs<T> {
         const label = this.button(tab.title, () => this.run(this.actions.activate(tab.id)), 'workbench-tabs__label');
         label.setAttribute('role', 'tab'); label.setAttribute('aria-selected', String(tab.id === this.currentId));
         decorateResourceButton(label, tab.icon ?? fileTypeIcon(tab.title), tab.title);
-        label.title = tab.id; label.ondblclick = () => this.keep(tab.id);
+        label.title = tab.statusTooltip ?? tab.id; label.ondblclick = () => this.keep(tab.id);
         const state = document.createElement('span'); state.className = 'workbench-tabs__state';
         state.title = tab.failed ? t('workbench.saveFailed') : tab.dirty ? t('workbench.pending') : tab.preview ? t('workbench.preview') : '';
         state.textContent = tab.failed ? '!' : tab.dirty ? '•' : '';
         state.setAttribute('aria-label', state.title);
+        if (tab.statusIcon) {
+            const status = document.createElement('span'); status.className = 'workbench-tabs__state';
+            status.textContent = tab.statusIcon; status.title = tab.statusTooltip ?? ''; status.setAttribute('aria-label', status.title); header.append(status);
+        }
         header.append(label, state, this.button(t(tab.pinned ? 'workbench.unpin' : 'workbench.pin'), () => this.pin(tab.id), 'workbench-tabs__pin'),
             this.button(t('workbench.close'), () => this.run(this.close(tab.id)), 'workbench-tabs__close'));
         decorateButton(header.querySelector<HTMLButtonElement>('.workbench-tabs__close')!, FILE_BROWSER_ICONS.close, t('workbench.close'), true);

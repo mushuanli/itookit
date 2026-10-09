@@ -17,6 +17,17 @@ beforeEach(() => {
     Object.defineProperties(Range.prototype,{getClientRects:{configurable:true,value:()=>[]},getBoundingClientRect:{configurable:true,value:()=>new DOMRect()}});
 });
 afterEach(() => {document.body.replaceChildren();vi.useRealTimers();vi.unstubAllGlobals();delete (Range.prototype as any).getClientRects;delete (Range.prototype as any).getBoundingClientRect;delete (HTMLElement.prototype as any).scrollIntoView;});
+it('loads an earlier native page and locates the actual message from a search hit', async () => {
+    const {editor, peer, host} = setup();
+    vi.mocked(peer.read).mockResolvedValue({...state, hasEarlier: true});
+    peer.loadEarlier = vi.fn(async () => ({...state, hasEarlier: false, messages: [{id: 'old-item', role: 'user', text: 'Earlier search hit', turnId: 'old-turn'}, ...state.messages]}));
+    await editor.init(host);
+    await editor.navigateTo({elementId: 'native-item:old-item'});
+    expect(peer.loadEarlier).toHaveBeenCalledOnce();
+    expect(host.querySelector('.llm-ui-search-hit')?.textContent).toContain('Earlier search hit');
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+    await editor.destroy();
+});
 it('renders native history safely and sends directly through the injected conversation port', async () => {
     const {editor,peer,host}=setup(); await editor.init(host);
     expect(host.querySelector('script')).toBeNull();expect(host.textContent).toContain('<script>native</script>');
@@ -338,4 +349,41 @@ it('shows all requests and responses in a turn, preserves repeated native reques
     expect(host.querySelector('.llm-branch-indicator-name')?.textContent).toBe('review');
     expect(host.querySelector('.llm-ui-session')!.textContent).toContain(new Date(at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}));
     await editor.destroy();
+});
+
+it('enables native title editing only when the injected port grants rename', async () => {
+    const {editor, peer, host} = setup();
+    peer.rename = vi.fn(async title => ({...state, title, canRename: true}));
+    vi.mocked(peer.read).mockResolvedValue({...state, canRename: true}); await editor.init(host);
+    const title = host.querySelector<HTMLInputElement>('#llm-title-input')!;
+    expect(title.readOnly).toBe(false); title.value = 'Changed native title'; title.dispatchEvent(new Event('blur'));
+    await vi.waitFor(() => expect(peer.rename).toHaveBeenCalledExactlyOnceWith('Changed native title'));
+    await editor.destroy();
+});
+it('sends bounded inline attachments through the native conversation port and rejects binary data before sending', async () => {
+    const {editor, peer, host} = setup();
+    vi.mocked(peer.read).mockResolvedValue({...state, attachments: ['text', 'image']}); await editor.init(host);
+    const bytes = new TextEncoder().encode('quoted "text"\n中文');
+    const file = {name: 'notes.md', type: 'text/markdown', size: bytes.length, arrayBuffer: async () => bytes.buffer} as File;
+    await editor.commands.sendMessage({text: 'Review', files: [file]});
+    expect(peer.send).toHaveBeenCalledWith('Review', [{kind: 'text', name: 'notes.md', content: 'quoted "text"\n中文'}]);
+    const binary = {...file, arrayBuffer: async () => new Uint8Array([0, 1, 2]).buffer};
+    await expect(editor.commands.sendMessage({text: 'Preserve draft', files: [binary]})).rejects.toThrow();
+    expect(peer.send).toHaveBeenCalledOnce(); await editor.destroy();
+});
+
+it('restores attachment drafts and preserves newer edits when an unknown turn is confirmed', async () => {
+    const {editor, peer, host} = setup();
+    peer.snapshot = vi.fn(() => ({...state, attachments: ['text']})); peer.saveDraft = vi.fn(async () => {});
+    const attachment = {kind: 'text' as const, name: 'notes.md', content: 'Unsent native notes'};
+    vi.mocked(peer.read).mockResolvedValue({...state, pending: true, canSend: false, attachments: ['text'], draft: 'Submitted input', draftAttachments: [attachment]});
+    await editor.init(host); expect(host.textContent).toContain('notes.md'); expect(editor.isDirty()).toBe(false);
+    const input = host.querySelector<HTMLTextAreaElement>('.llm-input__textarea')!;
+    input.value = 'Newer edit'; input.dispatchEvent(new Event('input'));
+    peer.reconcile = vi.fn(async () => ({...state, draft: '', draftAttachments: [], attachments: ['text']}));
+    [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === t('harness.reconcile'))!.click();
+    await vi.waitFor(() => expect(peer.reconcile).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(host.textContent).not.toContain('notes.md'));
+    expect(input.value).toBe('Newer edit'); await editor.destroy(); expect(peer.saveDraft).toHaveBeenCalledWith('Newer edit');
+    expect(peer.send).not.toHaveBeenCalled();
 });

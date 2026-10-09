@@ -174,8 +174,17 @@ pi-agent 可直接使用标准 `MCPServer.apiKey`（Bearer，无 username）。a
 
 ### 远程项目会话展示端口
 
-`ui-common` 的 `ConversationControls` 由宿主注入，提供 read/poll/send/respond/interrupt/reconcile/close，返回规范化历史、待交互卡片及操作可用状态。`piagent-driver` 的 `HarnessConversation` 按结构实现；app-core 的 `ProjectRemoteMountService.projectConversation` 注入项目授权和持久回执 journal；llm-ui 只消费该端口。`RemoteAgentControls` 提供项目范围内目标列表及发送路由，远程选择不进入本地 SessionCommand.Send。原生会话引用、输入草稿和待确认回执位于 `/etc/fs/harness-conversations.seq`，不复制原生历史。 `ConversationSnapshot` 可携带 `canFork` / `hasEarlier`，对应可选 `fork` / `branches` / `loadEarlier`；分支切换仍由宿主导航处理。`HarnessHistory.nextCursor` 与 `HarnessHistoryOptions.cursor` 描述只读历史分页；`HarnessClient.inspect` 读取元信息，`fork` 是带 epoch/requestId 的原生修改。
+`ui-common` 的 `ConversationControls` 由宿主注入，提供 read/poll/send/respond/interrupt/reconcile/close 及能力限定的 rename/archive，返回规范化历史、待交互卡片及操作可用状态。`piagent-driver` 的 `HarnessConversation` 按结构实现；app-core 的 `ProjectRemoteMountService.projectConversation` 注入项目授权和持久回执 journal；llm-ui 只消费该端口。`RemoteAgentControls` 提供项目范围内目标列表及发送路由，远程选择不进入本地 SessionCommand.Send。原生会话引用、输入草稿和待确认回执位于 `/etc/fs/harness-conversations.seq`，不复制原生历史。 `ConversationSnapshot` 可携带 `canFork` / `hasEarlier`，对应可选 `fork` / `branches` / `loadEarlier`；分支切换仍由宿主导航处理。`HarnessHistory.nextCursor` 与 `HarnessHistoryOptions.cursor` 描述只读历史分页；`HarnessClient.inspect` 读取元信息，`fork` 是带 epoch/requestId 的原生修改。
 
 `ModelConfigurationCommands.inspectMCPDeletion` 返回配置和项目挂载引用的删除预览；`deleteMCPServers` 校验预览并要求有引用时显式 force。`MCPDeletionPort` 由 ProjectRemoteMountService 实现，预览由 ProjectService 提供远程项目与本地会话信息；经 SessionLifecycleService 清理以目标 MCP 为根来源的本地远程项目及其本地会话，再批量移除引用并释放视图。普通本地项目只解除附加挂载，服务器内容和原生会话保留。普通 MCP 删除仍禁止有引用的配置。
 
 `MCPRemoteConnections.diagnostic(connectionId)` 返回不含凭据和端点的 `MCPConnectionDiagnostic`（名称、验证原因、catalog revision、当前配置身份）。`ProjectRemoteMountService.resolveConnection` 在异步访问前恢复当前引用，缺失连接抛出 `RemoteConnectionUnavailableError`，保留 ENOENT 错误码并附带诊断及引用项目 ID。宿主本地化展示；`reportRemoteFailure` 记录 `pi-agent` 模块日志和时间在前的控制台错误，按异常实例去重，只输出身份、阶段、结构化错误码。详见 [项目模型](design/pi-agent-project-model.md)。
+
+
+`HarnessClient.search`、`ProjectClient.search` 是可选的能力协商读取端口，返回有界 matches/truncated/nextCursor；项目搜索默认仅当前项目。`ProjectSearch` 统一本地文件及 PI Agent 文件/原生会话检索，完整绑定身份随结果传播，在点击导航时再次核对。`ConversationSnapshot.observation` 与 driver 的 `HarnessObservation` 结构兼容；`conversationStatus` 为正文/侧栏/标签提供统一状态文案。`RemoteSessionStatus` 是按项目引用计数的只读观察用例；其 provider 在 driver 实现，无 app-core DOM/Node 依赖。`exportRemoteSession` 输出原生只读 JSON；`remoteSessionSources` 只匹配已注册且完整授权的附加项目来源。
+
+
+`HarnessProfile.capabilities` 可声明 rename/archive/unarchive 和 attachments（text/image）；`HarnessSession.archived` 表示原生归档。管理调用沿用 epoch/requestId/receipt，不以 VFS rename/delete 替代原生操作。`ConversationSnapshot` 暴露 canRename/canArchive/canUnarchive 与附件种类；`send` 和 `saveDraft` 接受有界内联附件，`draftAttachments` 只保存未发送的输入，不复制原生历史。未知 turn 回执确认后清空已提交草稿，保留后续编辑，不自动重发。`HarnessStatusRow` 带可选 title/archived/fileVersion，宿主通过共享订阅更新标签及有限目录刷新；普通文本 delta 不推进 fileVersion。
+
+
+`HarnessClient.directoryVersion`、`HarnessStatusPort.fileVersion` 是可选的目录观察端口。发现元数据 `PiAgentDescriptor.fileWatch` 协商 project_watch/project_unwatch，使用项目 revision 和私有 watchId；响应只返回版本、gap 及覆盖不足标记。`RemoteSessionStatus.fileVersion` 合并独立目录版本与原生文件事件，零会话仍可通知，授权变更失效。Claude 与 Codex 共用公共会话契约；Claude 子进程断线的 harness/disconnected 携带 threadId，只影响该会话。Claude capability 不声明未实现的分支、重命名或归档操作。

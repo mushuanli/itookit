@@ -115,3 +115,10 @@ export type { PiAgentConfiguration, MCPConfigurationStore } from './projects/mcp
 
 export { listRemoteHarnessAgents } from './projects/remote-agent-catalog';
 export type { RemoteHarnessAgent } from './projects/remote-agent-catalog';
+export { RemoteSessionStatus } from './session/remote-session-status';
+export { ProjectSearch } from './projects/project-search';
+export type { ProjectSearchQuery, ProjectSearchMatch, ProjectSearchResult } from './projects/project-search';
+export { exportRemoteSession } from './session/remote-session-export';
+export { remoteSessionSources } from './session/remote-session-sources';
+export { manageRemoteSession } from './session/remote-session-management';
+export type { NativeSessionCommand } from './session/remote-session-management';

@@ -11,12 +11,14 @@ import { StatusIndicatorView } from '../components/indicators/StatusIndicatorVie
 import { RemoteHistory, literalHtml } from './remote-history';
 
 interface Actions {
-    send(text: string): Promise<void>;
+    attachments?: Array<'text' | 'image'>;
+    rename?(title: string): void;
+    send(text: string, files?: File[]): Promise<void>;
     stop(): void;
     refresh(): void;
     reconcile(): void;
     earlier(): void;
-    changed(): void;
+    changed(files?: File[]): void;
     copy(): string;
 }
 
@@ -76,6 +78,7 @@ export class ConversationWorkspaceView {
             onPrevUnfolded: () => this.history.navigation.navigate('prev'),
             onNextUnfolded: () => this.history.navigation.navigate('next'),
             onPrint: () => { void this.print(actions.copy()).catch(error => this.setStatus(String(error))); },
+            onTitleChange: title => actions.rename?.(title),
         });
         events.bindTitleBarEvents(); events.bindNavigationEvents();
         return events;
@@ -90,18 +93,25 @@ export class ConversationWorkspaceView {
     }
     private createInput(options: EditorOptions, actions: Actions): ChatInput {
         return new ChatInput(this.container.querySelector<HTMLElement>('#llm-ui-input')!, {
-            attachments: false, executorLocked: true,
+            attachments: !!actions.attachments?.length, executorLocked: true,
+            attachmentAccept: [...(actions.attachments?.includes('text') ? ['text/*', 'application/json', 'application/xml'] : []),
+                ...(actions.attachments?.includes('image') ? ['image/png', 'image/jpeg', 'image/webp'] : [])].join(','),
+            attachmentHint: t('harness.attachmentType') + ' ' + t('harness.attachmentCapacity'),
             initialAgents: [{id: 'remote:native', name: options.title ?? t('harness.remoteSessions'), icon: ENTITY_ICONS.remoteAgent, category: t('harness.remoteAgents')}],
             initialConfig: {text: options.initialInputState?.text ?? '', agentId: 'remote:native'},
-            onSend: (text, files) => files.length ? Promise.reject(new Error(t('harness.remoteAttachments'))) : actions.send(text),
-            onStop: actions.stop, onDraftChange: actions.changed,
+            onSend: (text, files) => actions.send(text, files),
+            onStop: actions.stop, onDraftChange: (_config, files) => actions.changed(files),
         });
     }
     private button(label: string, action: () => void, parent: HTMLElement): HTMLButtonElement {
         const button = document.createElement('button'); button.type = 'button'; button.className = 'llm-workspace-titlebar__btn llm-workspace-titlebar__btn--text';
         button.textContent = label; button.onclick = action; parent.append(button); return button;
     }
-    setTitle(title: string): void { this.container.querySelector<HTMLInputElement>('#llm-title-input')!.value = title; }
+    setTitle(title: string): void {
+        const input = this.container.querySelector<HTMLInputElement>('#llm-title-input')!;
+        if (document.activeElement !== input || input.readOnly) input.value = title;
+    }
+    setRenameAvailability(enabled: boolean): void { this.container.querySelector<HTMLInputElement>('#llm-title-input')!.readOnly = !enabled; }
     setSessionTimes(createdAt?: number | null, updatedAt?: number | null): void {
         this.container.querySelector<HTMLInputElement>('#llm-title-input')!.title = [[t('workbench.created'), createdAt], [t('workbench.modified'), updatedAt]]
             .filter(([, time]) => typeof time === 'number' && time > 0)

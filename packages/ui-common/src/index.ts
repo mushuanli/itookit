@@ -47,4 +47,5 @@ export type { SessionDraftControls } from './interfaces/SessionDraftControls';
 export { SettingsAutoSave, SettingsValidationError, requestSettingsSave } from './components/SettingsAutoSave';
 export type { SettingsSave } from './components/SettingsAutoSave';
 
-export type { ConversationControls, ConversationSnapshot, ConversationMessage, ConversationRequest, RemoteAgentControls } from './interfaces/ConversationControls';
+export type { ConversationAttachment, ConversationControls, ConversationSnapshot, ConversationMessage, ConversationRequest, RemoteAgentControls } from './interfaces/ConversationControls';
+export { conversationStatus } from './utils/conversation-status';

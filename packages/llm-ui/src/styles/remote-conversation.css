@@ -17,3 +17,5 @@
 .remote-conversation__branches[hidden] { display: none; }
 .remote-conversation__branch-create { display: flex; gap: .5rem; padding: .5rem; border-top: 1px solid var(--llm-border-color); }
 .remote-conversation__branch-create input { min-width: 8rem; max-width: 100%; }
+
+.llm-ui-search-hit { outline: 2px solid var(--llm-primary-color, #6366f1); outline-offset: 2px; }

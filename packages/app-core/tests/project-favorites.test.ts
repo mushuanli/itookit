@@ -84,3 +84,17 @@ it('rejects missing favorite identities instead of accepting their string coerci
     expect(() => decodeFavorites(JSON.stringify([{ title: 'Missing ID', target: { kind: 'session', sessionId: 's' } }]))).toThrow();
     expect(() => decodeFavorites(JSON.stringify([{ id: 'f', title: 'Missing Session', target: { kind: 'session' } }]))).toThrow();
 });
+
+it('updates only the exact native favorite and preserves its stable shortcut identity', async () => {
+    const {manager} = await createVFS({rootBackend: new MemoryBackend()});
+    try {
+        const fs = await manager.openFileSystem('/'), favorites = new ProjectFavorites(new SeqProjectFavoriteStore(fs));
+        const target = {kind: 'remote-session' as const, connectionId: 'mcp', serverId: 'server', serverProjectId: 'native', profileId: 'codex', sessionId: 's'};
+        await favorites.toggle('p', target, 'Before'); await favorites.toggle('p', {...target, serverId: 'other'}, 'Other');
+        const id = (await favorites.list('p'))[0].id;
+        await favorites.updateNativeSession('p', target, 'Renamed', true);
+        expect(await favorites.list('p')).toEqual([expect.objectContaining({id, title: 'Renamed', target: {...target, archived: true}}), expect.objectContaining({title: 'Other'})]);
+        await favorites.updateNativeSession('p', target, 'Renamed', false);
+        expect((await favorites.list('p'))[0].target).toMatchObject({archived: false});
+    } finally { await manager.dispose(); }
+});

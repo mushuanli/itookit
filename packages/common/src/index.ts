@@ -57,3 +57,4 @@ export {
 // ── EventBus: 已移入 @itookit/vfs-core；消费方从 vfs-core 导入 ──
 
 export { FILE_ICONS, FILE_BROWSER_ICONS, fileTypeIcon } from './i18n/file-icons';
+export { HARNESS_STATE_ICONS } from './i18n/icons';
